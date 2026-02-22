@@ -35,7 +35,7 @@ assert_eq!(&output[..result as usize], &input[..]);
 
 ## Migration
 
-This crate was ported from C using [AAMF](https://github.com/jafreck/AAMF) (Automated Architecture Migration Framework). Migration artifacts — decision logs, architecture guides, and per-task parity tests — are preserved in the [`migration/`](migration/) directory.
+This crate was ported from C using [AAMF](https://github.com/jafreck/AAMF) (Automated Architecture Migration Framework) with Claude Sonnet 4.6. Migration artifacts — decision logs, architecture guides, and per-task parity tests — are preserved in the [`migration/`](migration/) directory.
 
 ## License
 
