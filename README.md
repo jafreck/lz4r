@@ -1,4 +1,4 @@
-# lz4
+# lz4r
 
 Pure-Rust port of the [LZ4 compression library](https://github.com/lz4/lz4) (v1.10.0).
 
