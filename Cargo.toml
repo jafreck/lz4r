@@ -1,0 +1,12 @@
+[package]
+name = "lz4"
+version = "1.10.0"
+edition = "2021"
+description = "LZ4 lossless compression algorithm — pure Rust port"
+license = "BSD-2-Clause"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+xxhash-rust = { version = "0.8", features = ["xxh32"] }

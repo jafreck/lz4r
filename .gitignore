@@ -1,0 +1,14 @@
+# Build artifacts
+/target/
+**/*.rs.bk
+
+# Cargo lock (library crate — consumers generate their own)
+Cargo.lock
+
+# Editor & OS
+.DS_Store
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
