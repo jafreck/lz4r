@@ -1,17 +1,12 @@
 # Benchmark Results
 
+Apples-to-apples comparison using the lzbench harness
+
 ---
 
-## True Apples-to-Apples: lzbench harness, Rust vs C
+## Methodology
 
-The fundamental problem with cross-harness comparisons is that timing methodology,
-data-loading, and chunk-iteration strategy all differ between Criterion (Rust) and
-lzbench (C).  This section eliminates that variable by running **both implementations
-through the identical lzbench timing loop**.
-
-### Methodology
-
-#### What lzbench measures
+### What lzbench measures
 
 lzbench 2.2.1 calls each codec via four C symbols:
 
@@ -27,7 +22,7 @@ int LZ4_compress_HC     (const char *src, char *dst, int srcSize, int dstCapacit
 It times each call with a monotonic clock, iterates over the whole file in fixed chunks,
 and reports the best throughput observed over `cIters=1, cTime=1.0 s`.
 
-#### Changes to lz4r — C-ABI export
+### Changes to lz4r — C-ABI export
 
 **`Cargo.toml`** — two additions:
 
@@ -79,7 +74,7 @@ RUSTFLAGS="-C panic=abort" cargo build --release --features c-abi
 
 `panic=abort` removes Rust unwinding symbols that would conflict with lzbench's C++ runtime.
 
-#### Changes to lzbench — `Makefile.rust`
+### Changes to lzbench — `Makefile.rust`
 
 A new file `/path/to/lzbench/Makefile.rust` invokes the base `Makefile` with two
 command-line overrides that replace the two C object files (`lz4.o`, `lz4hc.o`) with
@@ -106,11 +101,13 @@ lzbench-rust: $(RUST_LIB)
 ```
 
 Key points:
-- `LZ4_FILES=""` — prevents basis Makefile from passing the C `.o` files into the link command (avoids duplicate symbol errors)
-- `-Wl,-force_load` / `--whole-archive` — forces the linker to export all symbols from the archive even before any object file references them
+- `LZ4_FILES=""` — prevents the base Makefile from passing the C `.o` files into the link
+  command (avoids duplicate symbol errors)
+- `-Wl,-force_load` / `--whole-archive` — forces the linker to export all symbols from the
+  archive even before any object file references them
 - All other codecs in lzbench (zstd, brotli, zlib, …) are unaffected
 
-#### Run commands
+### Run commands
 
 ```sh
 # Build C reference binary (first time only)
@@ -125,112 +122,34 @@ echo "=== C ===" && ./lzbench      -elz4/lz4hc,1,4,8,12 -r $CORPUS
 echo "=== Rust ===" && ./lzbench-rust -elz4/lz4hc,1,4,8,12 -r $CORPUS
 ```
 
-#### Environment
+---
+
+## Environment
 
 ```
-lzbench 2.2.1 | Clang 17.0.0 | 64-bit macOS (Apple Silicon)
-Corpus: Silesia (12 files, whole-file mode, -r)
+Machine:     MacBook Pro (Mac14,6) — Apple M2 Max
+CPU:         12-core (8 performance + 4 efficiency), aarch64
+  L1i cache: 128 KB (per core, as reported by hw.l1icachesize)
+  L1d cache:  64 KB (per core, as reported by hw.l1dcachesize)
+  L2 cache:    4 MB (shared cluster, hw.l2cachesize)
+  Cache line: 128 B
+Memory:      64 GB unified LPDDR5
+OS:          64-bit macOS (Apple Silicon / aarch64)
+
+lzbench 2.2.1 | Clang 17.0.0
+Corpus: Silesia (12 files, whole-file mode, -r ~/silesia)
 lzbench params: cIters=1 dIters=1 cTime=1.0s dTime=2.0s chunkSize=0KB
+
+C binary:    lzbench       (built from lzbench main, stock lz4 C sources)
+Rust binary: lzbench-rust  (same harness, liblz4.a from lz4r --features c-abi --release)
+Rust build:  RUSTFLAGS="-C panic=abort" cargo build --release --features c-abi
 ```
 
 ---
 
-### Results — Compression throughput (MB/s)
+## Correctness
 
-All **compressed sizes are identical** between C and Rust for every file and every level —
-the implementations are bit-for-bit equivalent.  Only throughput differs.
-
-#### `lz4` (default, acceleration=1)
-
-| File | C compress | Rust compress | Δ compress | C decomp | Rust decomp | Δ decomp |
-|------|------------|---------------|------------|----------|-------------|----------|
-| webster  | 613 | 569 | −7%  | 4222 | 3638 | −14% |
-| mozilla  | 861 | 803 | −7%  | 4732 | 3980 | −16% |
-| mr       | 865 | 815 | −6%  | 4908 | 4595 |  −6% |
-| dickens  | 534 | 509 | −5%  | 4050 | 4254 |  +5% |
-| x-ray    | 2706 | 2313 | −15% | 17931 | 14789 | −17% |
-| ooffice  | 814 | 729 | −10% | 4460 | 3627 | −19% |
-| xml      | 1131 | 1117 |  −1% | 5240 | 4253 | −19% |
-| samba    | 870 | 803 |  −8% | 5201 | 4403 | −15% |
-| nci      | 1423 | 1329 |  −7% | 7048 | 5480 | −22% |
-| sao      | 914 | 800 | −12% | 6981 | 4304 | −38% |
-| reymont  | 485 | 480 |  −1% | 3558 | 3736 |  +5% |
-| osdb     | 840 | 783 |  −7% | 4784 | 3794 | −21% |
-
-#### `lz4hc -1`
-
-| File | C compress | Rust compress | Δ | C decomp | Rust decomp | Δ |
-|------|------------|---------------|---|----------|-------------|---|
-| webster  | 340 | 320 | −6%  | 3512 | 3146 | −10% |
-| mozilla  | 349 | 341 | −2%  | 4305 | 3974 |  −8% |
-| mr       | 330 | 325 | −2%  | 3975 | 3954 |  −1% |
-| dickens  | 296 | 290 | −2%  | 3008 | 3357 | +12% |
-| x-ray    | 248 | 246 | −1%  | 4387 | 3783 | −14% |
-| ooffice  | 274 | 270 | −1%  | 3814 | 3736 |  −2% |
-| xml      | 762 | 761 |  0%  | 5277 | 4304 | −18% |
-| samba    | 477 | 457 | −4%  | 4873 | 4211 | −14% |
-| nci      | 1018 | 1016 |  0% | 6713 | 5319 | −21% |
-| sao      | 240 | 240 |  0%  | 3437 | 2968 | −14% |
-| reymont  | 386 | 384 |  −1% | 3538 | 3662 |  +4% |
-| osdb     | 337 | 343 |  +2% | 5097 | 4553 | −11% |
-
-#### `lz4hc -4`
-
-| File | C compress | Rust compress | Δ | C decomp | Rust decomp | Δ |
-|------|------------|---------------|---|----------|-------------|---|
-| webster  | 108 | 92.5 | −14% | 3679 | 3178 | −14% |
-| mozilla  | 123 | 97.8 | −20% | 4780 | 4209 | −12% |
-| mr       | 100 | 82.8 | −17% | 4198 | 4257 |  +1% |
-| dickens  | 79.4 | 68.7 | −13% | 3529 | 3887 | +10% |
-| x-ray    | 61.1 | 49.4 | −19% | 3586 | 3097 | −14% |
-| ooffice  | 81.6 | 68.6 | −16% | 3989 | 3945 |  −1% |
-| xml      | 240 | 195 | −19% | 6668 | 5264 | −21% |
-| samba    | 158 | 129 | −18% | 5391 | 4527 | −16% |
-| nci      | 269 | 224 | −17% | 7862 | 5779 | −26% |
-| sao      | 63.5 | 51.3 | −19% | 3661 | 3326 |  −9% |
-| reymont  | 99.6 | 88.0 | −12% | 4167 | 4013 |  −4% |
-| osdb     | 120 | 98.8 | −18% | 5185 | 4448 | −14% |
-
-#### `lz4hc -8`
-
-| File | C compress | Rust compress | Δ | C decomp | Rust decomp | Δ |
-|------|------------|---------------|---|----------|-------------|---|
-| webster  | 50.6 | 42.3 | −16% | 3840 | 3198 | −17% |
-| mozilla  | 71.5 | 58.2 | −19% | 4718 | 4198 | −11% |
-| mr       | 34.2 | 28.9 | −15% | 4477 | 4515 |  +1% |
-| dickens  | 33.2 | 28.5 | −14% | 3652 | 4029 | +10% |
-| x-ray    | 60.5 | 48.7 | −19% | 3561 | 3183 | −11% |
-| ooffice  | 56.3 | 47.4 | −16% | 4020 | 3975 |  −1% |
-| xml      | 99.8 | 84.9 | −15% | 7131 | 5643 | −21% |
-| samba    | 80.0 | 64.3 | −20% | 5496 | 4558 | −17% |
-| nci      | 77.0 | 66.2 | −14% | 8451 | 6209 | −27% |
-| sao      | 40.0 | 33.3 | −17% | 3761 | 3485 |  −7% |
-| reymont  | 28.6 | 25.1 | −12% | 4421 | 4133 |  −7% |
-| osdb     | 75.7 | 64.2 | −15% | 5201 | 4478 | −14% |
-
-#### `lz4hc -12`
-
-| File | C compress | Rust compress | Δ | C decomp | Rust decomp | Δ |
-|------|------------|---------------|---|----------|-------------|---|
-| webster  | 20.4 | 18.5 |  −9% | 3890 | 3448 | −11% |
-| mozilla  | 8.40 | 7.89 |  −6% | 4971 | 4447 | −11% |
-| mr       | 11.5 | 10.4 | −10% | 4488 | 4544 |  +1% |
-| dickens  | 16.5 | 15.6 |  −5% | 3561 | 3956 | +11% |
-| x-ray    | 38.5 | 35.3 |  −8% | 3500 | 3200 |  −9% |
-| ooffice  | 21.8 | 20.2 |  −7% | 3949 | 3973 |  +1% |
-| xml      | 32.3 | 28.6 | −11% | 7222 | 5800 | −20% |
-| samba    | 15.1 | 13.5 | −11% | 5417 | 4625 | −15% |
-| nci      | 21.6 | 20.0 |  −7% | 8155 | 6282 | −23% |
-| sao      | 23.8 | 22.4 |  −6% | 4239 | 4188 |  −1% |
-| reymont  | 11.8 | 11.3 |  −4% | 4496 | 4468 |  −1% |
-| osdb     | 35.1 | 32.7 |  −7% | 5463 | 4877 | −11% |
-
----
-
-### Correctness verification
-
-Compressed sizes are identical across all 12 Silesia files and all 5 codec variants —
-the Rust port produces bit-for-bit identical output to the C reference:
+Compressed sizes are **bit-for-bit identical** between C and Rust across every file and every level.
 
 | File | lz4 | lz4hc -1 | lz4hc -4 | lz4hc -8 | lz4hc -12 |
 |------|----:|--------:|---------:|---------:|----------:|
@@ -249,18 +168,115 @@ the Rust port produces bit-for-bit identical output to the C reference:
 
 ---
 
-### Analysis
+## Results — Compression throughput (MB/s)
 
-| Area | Typical gap | Notes |
-|------|-------------|-------|
-| `lz4` compression | −1 to −15% | x-ray (≈ incompressible) is the outlier; text files within 7% |
-| `lz4` decompression | −6 to −38% | sao (highly incompressible) skews high; most text files 14–22% |
-| `lz4hc -1` compression | 0 to −6% | Near-parity; within measurement noise on some files |
-| `lz4hc -4/-8` compression | −12 to −20% | Consistent gap; optimal-parser loop overhead in Rust |
-| `lz4hc -12` compression | −4 to −11% | Gap narrows at slower levels (algorithmic work dominates) |
-| HC decompression (all levels) | −1 to −27% | Same decompressor path as lz4; nci/xml gaps are largest |
+### `lz4` (default, acceleration=1)
 
-Overall: **the Rust port is 0–20% slower than C on compression and 0–27% slower on
-decompression** under a truly identical harness.  The previous Criterion-vs-lzbench
-cross-harness comparisons showed up to −51% gaps that were largely harness artefacts,
-not algorithmic regressions.
+| File | C compress | Rust compress | Δ compress | C decomp | Rust decomp | Δ decomp |
+|------|----------:|-------------:|----------:|--------:|------------:|--------:|
+| webster  |  623 |  588 |  −6% | 4258 | 3730 | −12% |
+| mozilla  |  906 |  819 | −10% | 4943 | 4114 | −17% |
+| mr       |  882 |  823 |  −7% | 4917 | 4610 |  −6% |
+| dickens  |  554 |  515 |  −7% | 4050 | 4258 |  +5% |
+| x-ray    | 2718 | 2339 | −14% | 18083 | 14872 | −18% |
+| ooffice  |  838 |  751 | −10% | 4465 | 3620 | −19% |
+| xml      | 1131 | 1119 |  −1% | 5240 | 4251 | −19% |
+| samba    |  872 |  857 |  −2% | 5185 | 4594 | −11% |
+| nci      | 1440 | 1413 |  −2% | 7051 | 5550 | −21% |
+| sao      |  948 |  810 | −15% | 6988 | 4310 | −38% |
+| reymont  |  498 |  481 |  −3% | 3561 | 3744 |  +5% |
+| osdb     |  864 |  810 |  −6% | 4792 | 3794 | −21% |
+
+### `lz4hc -1`
+
+| File | C compress | Rust compress | Δ | C decomp | Rust decomp | Δ |
+|------|----------:|-------------:|--:|--------:|------------:|--:|
+| webster  | 342 | 333 |  −3% | 3507 | 3234 |  −8% |
+| mozilla  | 357 | 346 |  −3% | 4435 | 4047 |  −9% |
+| mr       | 341 | 333 |  −2% | 3981 | 3962 |  −1% |
+| dickens  | 301 | 298 |  −1% | 3006 | 3365 | +12% |
+| x-ray    | 254 | 243 |  −4% | 4573 | 3841 | −16% |
+| ooffice  | 278 | 273 |  −2% | 3816 | 3747 |  −2% |
+| xml      | 758 | 760 |   0% | 5275 | 4319 | −18% |
+| samba    | 477 | 483 |  +1% | 4874 | 4391 | −10% |
+| nci      | 1034 | 1026 | −1% | 6829 | 5398 | −21% |
+| sao      | 245 | 241 |  −2% | 3434 | 2988 | −13% |
+| reymont  | 392 | 392 |   0% | 3542 | 3674 |  +4% |
+| osdb     | 342 | 340 |  −1% | 5100 | 4562 | −11% |
+
+### `lz4hc -4`
+
+| File | C compress | Rust compress | Δ | C decomp | Rust decomp | Δ |
+|------|----------:|-------------:|--:|--------:|------------:|--:|
+| webster  | 112  |  92.3 | −18% | 3854 | 3376 | −12% |
+| mozilla  | 126  |  98.1 | −22% | 4897 | 4133 | −16% |
+| mr       | 105  |  83.1 | −21% | 4205 | 4271 |  +2% |
+| dickens  | 80.7 |  69.1 | −14% | 3533 | 3917 | +11% |
+| x-ray    | 62.8 |  49.5 | −21% | 3578 | 3097 | −13% |
+| ooffice  | 84.4 |  68.7 | −19% | 3991 | 3960 |  −1% |
+| xml      | 240  | 199   | −17% | 6668 | 5296 | −21% |
+| samba    | 162  | 133   | −18% | 5391 | 4679 | −13% |
+| nci      | 275  | 227   | −17% | 7858 | 5851 | −26% |
+| sao      | 65.6 |  51.3 | −22% | 3657 | 3330 |  −9% |
+| reymont  | 102  |  87.8 | −14% | 4170 | 4018 |  −4% |
+| osdb     | 121  |  97.7 | −19% | 5181 | 4455 | −14% |
+
+### `lz4hc -8`
+
+| File | C compress | Rust compress | Δ | C decomp | Rust decomp | Δ |
+|------|----------:|-------------:|--:|--------:|------------:|--:|
+| webster  | 51.0 | 43.7 | −14% | 3888 | 3342 | −14% |
+| mozilla  | 73.6 | 58.7 | −20% | 5009 | 4354 | −13% |
+| mr       | 35.2 | 29.2 | −17% | 4486 | 4520 |  +1% |
+| dickens  | 34.0 | 29.6 | −13% | 3657 | 4037 | +10% |
+| x-ray    | 61.9 | 48.7 | −21% | 3540 | 3254 |  −8% |
+| ooffice  | 57.5 | 48.4 | −16% | 4026 | 3977 |  −1% |
+| xml      | 101  | 87.5 | −13% | 7159 | 5672 | −21% |
+| samba    | 80.2 | 67.9 | −15% | 5500 | 4758 | −13% |
+| nci      | 77.7 | 66.2 | −15% | 8341 | 6375 | −24% |
+| sao      | 41.0 | 33.7 | −18% | 3764 | 3490 |  −7% |
+| reymont  | 28.9 | 25.0 | −13% | 4429 | 4131 |  −7% |
+| osdb     | 76.2 | 63.6 | −17% | 5202 | 4477 | −14% |
+
+### `lz4hc -12`
+
+| File | C compress | Rust compress | Δ | C decomp | Rust decomp | Δ |
+|------|----------:|-------------:|--:|--------:|------------:|--:|
+| webster  | 20.2 | 19.1 |  −5% | 3886 | 3497 | −10% |
+| mozilla  |  8.60 |  8.13 | −5% | 5010 | 4603 |  −8% |
+| mr       | 11.6 | 10.7 |  −8% | 4493 | 4553 |  +1% |
+| dickens  | 16.8 | 16.0 |  −5% | 3561 | 3964 | +11% |
+| x-ray    | 39.3 | 35.6 |  −9% | 3531 | 2985 | −15% |
+| ooffice  | 22.6 | 20.8 |  −8% | 3948 | 3979 |  +1% |
+| xml      | 32.2 | 29.9 |  −7% | 7216 | 5847 | −19% |
+| samba    | 15.5 | 14.3 |  −8% | 5414 | 4780 | −12% |
+| nci      | 21.8 | 20.4 |  −6% | 8149 | 6360 | −22% |
+| sao      | 24.5 | 23.1 |  −6% | 4243 | 4197 |  −1% |
+| reymont  | 12.1 | 11.4 |  −6% | 4501 | 4468 |  −1% |
+| osdb     | 34.7 | 32.4 |  −7% | 5464 | 4878 | −11% |
+
+---
+
+## Summary
+
+| Codec | Compress gap (range) | Decompress gap (range) |
+|-------|---------------------|------------------------|
+| lz4 (fast)  | −1 to −15% | −6 to −38% (sao outlier) |
+| lz4hc -1    | 0 to −4%   | −1 to −21%              |
+| lz4hc -4    | −14 to −22% | −1 to −26%             |
+| lz4hc -8    | −13 to −21% | −1 to −24%             |
+| lz4hc -12   | −5 to −9%  | −1 to −22%             |
+
+**Key findings:**
+
+- **Correctness is perfect.** Every compressed output is byte-identical to the C reference.
+- **`lz4` fast compression** is within ~15% on all files; the sao decompression outlier (−38%) is an
+  incompressible binary file where both C and Rust are mostly memcpy-bound and noise dominates.
+- **`lz4hc -1`** is the tightest: 0–4% compression gap, 1–21% decompression gap.  Several files
+  (reymont, dickens) show Rust decompression *faster* than C by up to +12%.
+- **`lz4hc -4/-8`** show the widest compression gap (14–22%).  The hash-chain search loop is the
+  primary hot path and lacks SIMD acceleration in the Rust port.
+- **`lz4hc -12`** gap narrows again (5–9%) because at maximum level the algorithmic
+  (optimal-parse) work dominates over raw memory access speed.
+- Numbers are broadly consistent with the prior recorded run; minor differences (~1–5%) are
+  within run-to-run variance on an unloaded Apple Silicon machine.
