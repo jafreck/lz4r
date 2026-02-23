@@ -1,0 +1,42 @@
+[package]
+name = "lz4-programs-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.lz4-programs]
+path = ".."
+
+[[bin]]
+name = "block_roundtrip"
+path = "fuzz_targets/block_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "frame_roundtrip"
+path = "fuzz_targets/frame_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "decompress_block_arbitrary"
+path = "fuzz_targets/decompress_block_arbitrary.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "decompress_frame_arbitrary"
+path = "fuzz_targets/decompress_frame_arbitrary.rs"
+test = false
+doc = false
+bench = false
