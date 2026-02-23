@@ -144,8 +144,7 @@ mod tests {
     use super::*;
     use std::os::raw::c_char;
 
-    const SAMPLE: &[u8] =
-        b"Hello, LZ4 ABI! Hello, LZ4 ABI! Hello, LZ4 ABI! This is a test.";
+    const SAMPLE: &[u8] = b"Hello, LZ4 ABI! Hello, LZ4 ABI! Hello, LZ4 ABI! This is a test.";
 
     // ── ok_or_zero ───────────────────────────────────────────────────────────
 
@@ -201,12 +200,7 @@ mod tests {
     fn compress_default_null_src_returns_zero() {
         unsafe {
             let mut dst = [0u8; 64];
-            let n = LZ4_compress_default(
-                std::ptr::null(),
-                dst.as_mut_ptr() as *mut c_char,
-                10,
-                64,
-            );
+            let n = LZ4_compress_default(std::ptr::null(), dst.as_mut_ptr() as *mut c_char, 10, 64);
             assert_eq!(n, 0);
         }
     }
@@ -352,13 +346,7 @@ mod tests {
     fn compress_fast_null_src_returns_zero() {
         unsafe {
             let mut dst = [0u8; 64];
-            let n = LZ4_compress_fast(
-                std::ptr::null(),
-                dst.as_mut_ptr() as *mut c_char,
-                10,
-                64,
-                1,
-            );
+            let n = LZ4_compress_fast(std::ptr::null(), dst.as_mut_ptr() as *mut c_char, 10, 64, 1);
             assert_eq!(n, 0);
         }
     }
@@ -413,12 +401,7 @@ mod tests {
     fn decompress_safe_null_src_returns_negative() {
         unsafe {
             let mut dst = [0u8; 64];
-            let n = LZ4_decompress_safe(
-                std::ptr::null(),
-                dst.as_mut_ptr() as *mut c_char,
-                10,
-                64,
-            );
+            let n = LZ4_decompress_safe(std::ptr::null(), dst.as_mut_ptr() as *mut c_char, 10, 64);
             assert!(n < 0, "expected error for null src, got {n}");
         }
     }
@@ -540,13 +523,7 @@ mod tests {
     fn compress_hc_null_src_returns_zero() {
         unsafe {
             let mut dst = [0u8; 64];
-            let n = LZ4_compress_HC(
-                std::ptr::null(),
-                dst.as_mut_ptr() as *mut c_char,
-                10,
-                64,
-                9,
-            );
+            let n = LZ4_compress_HC(std::ptr::null(), dst.as_mut_ptr() as *mut c_char, 10, 64, 9);
             assert_eq!(n, 0);
         }
     }

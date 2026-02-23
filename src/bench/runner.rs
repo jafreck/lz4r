@@ -146,9 +146,7 @@ pub fn bench_c_level(
     }
 
     if bench_error {
-        Err(io::Error::other(
-            "benchmark reported errors",
-        ))
+        Err(io::Error::other("benchmark reported errors"))
     } else {
         Ok(())
     }

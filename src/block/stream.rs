@@ -715,7 +715,10 @@ mod tests {
 
         let n = working_stream.compress_fast_continue(&src, &mut dst, 1);
         // Must not panic; typically returns positive (compressed output).
-        assert!(n >= 0, "compress_fast_continue with large dict_ctx must not panic");
+        assert!(
+            n >= 0,
+            "compress_fast_continue with large dict_ctx must not panic"
+        );
     }
 
     // ── Source-overlaps-dict clipping ─────────────────────────────────────────

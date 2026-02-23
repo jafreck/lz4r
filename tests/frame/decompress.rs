@@ -872,7 +872,10 @@ fn decompress_one_byte_at_a_time_covers_store_cblock_path() {
         }
     }
 
-    assert_eq!(output, original, "1-byte-chunk decompression must recover original data");
+    assert_eq!(
+        output, original,
+        "1-byte-chunk decompression must recover original data"
+    );
 }
 
 /// Drive decompression with 3-byte chunks to force partial block header buffering.
@@ -901,7 +904,10 @@ fn decompress_three_byte_chunks_covers_store_block_header() {
         }
     }
 
-    assert_eq!(output, original, "3-byte-chunk decompression must recover original data");
+    assert_eq!(
+        output, original,
+        "3-byte-chunk decompression must recover original data"
+    );
 }
 
 /// Same but with block checksum frames, to hit the GetBlockChecksum stage.
@@ -933,7 +939,10 @@ fn decompress_block_checksum_frame_one_byte_at_a_time_covers_get_block_checksum(
         }
     }
 
-    assert_eq!(output, original, "1-byte-chunk block-checksum decompression must succeed");
+    assert_eq!(
+        output, original,
+        "1-byte-chunk block-checksum decompression must succeed"
+    );
 }
 
 /// Chunked decompression with content checksum + block checksum.
@@ -967,7 +976,10 @@ fn decompress_both_checksums_chunked_covers_checksum_stages() {
         }
     }
 
-    assert_eq!(output, original, "chunked double-checksum decompression must succeed");
+    assert_eq!(
+        output, original,
+        "chunked double-checksum decompression must succeed"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1041,7 +1053,10 @@ fn decode_header_bsid_too_small_returns_err() {
     let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
     let mut dst = vec![0u8; 256];
     let result = lz4f_decompress(&mut dctx, Some(&mut dst), &hdr, None);
-    assert!(result.is_err(), "bsid < 4 must produce MaxBlockSizeInvalid error");
+    assert!(
+        result.is_err(),
+        "bsid < 4 must produce MaxBlockSizeInvalid error"
+    );
 }
 
 /// Parity: header checksum byte is wrong → HeaderChecksumInvalid error.
@@ -1069,7 +1084,10 @@ fn decode_header_bd_low_nibble_nonzero_returns_err() {
     let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
     let mut dst = vec![0u8; 256];
     let result = lz4f_decompress(&mut dctx, Some(&mut dst), &hdr, None);
-    assert!(result.is_err(), "non-zero BD low nibble must produce an error");
+    assert!(
+        result.is_err(),
+        "non-zero BD low nibble must produce an error"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1152,7 +1170,10 @@ fn decompress_large_frame_tiny_chunks_full_round_trip() {
         }
     }
 
-    assert_eq!(output, original, "5-byte-chunk decompression of 64KB must succeed");
+    assert_eq!(
+        output, original,
+        "5-byte-chunk decompression of 64KB must succeed"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1239,7 +1260,10 @@ fn decompress_uncompressed_block_with_block_checksum_byte_by_byte_covers_get_blo
         }
     }
 
-    assert_eq!(output, data, "uncompressed block with block checksum must round-trip");
+    assert_eq!(
+        output, data,
+        "uncompressed block with block checksum must round-trip"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1274,8 +1298,15 @@ fn decompress_with_small_dst_buffer_covers_flush_out_path() {
     let mut iterations = 0;
     loop {
         iterations += 1;
-        assert!(iterations < 100_000, "too many iterations – likely infinite loop");
-        let src = if pos < frame.len() { &frame[pos..] } else { &[][..] };
+        assert!(
+            iterations < 100_000,
+            "too many iterations – likely infinite loop"
+        );
+        let src = if pos < frame.len() {
+            &frame[pos..]
+        } else {
+            &[][..]
+        };
         match lz4f_decompress(&mut dctx, Some(&mut dst_buf), src, None) {
             Ok((sc, dw, hint)) => {
                 output.extend_from_slice(&dst_buf[..dw]);
@@ -1293,7 +1324,10 @@ fn decompress_with_small_dst_buffer_covers_flush_out_path() {
         }
     }
 
-    assert_eq!(output, original, "small-dst-buffer decompression must round-trip");
+    assert_eq!(
+        output, original,
+        "small-dst-buffer decompression must round-trip"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1352,8 +1386,7 @@ fn decompress_skippable_then_normal_in_one_large_chunk_covers_sframe_fast_path()
     }
 
     assert_eq!(
-        output,
-        b"hello world from normal frame after skippable",
+        output, b"hello world from normal frame after skippable",
         "normal frame after skippable must decompress correctly"
     );
 }
@@ -1393,9 +1426,15 @@ fn decode_header_with_dict_id_flag_covers_dict_id_assignment() {
 
     let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
     let result = lz4f_get_frame_info(&mut dctx, &header);
-    assert!(result.is_ok(), "frame with dict_id must parse successfully: {result:?}");
+    assert!(
+        result.is_ok(),
+        "frame with dict_id must parse successfully: {result:?}"
+    );
     let (frame_info, _, _) = result.unwrap();
-    assert_eq!(frame_info.dict_id, dict_id, "dict_id must be read from frame header");
+    assert_eq!(
+        frame_info.dict_id, dict_id,
+        "dict_id must be read from frame header"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1415,9 +1454,15 @@ fn lz4f_get_frame_info_from_fresh_context_covers_normal_path() {
     assert_eq!(dctx.stage, DecompressStage::GetFrameHeader);
 
     let result = lz4f_get_frame_info(&mut dctx, &frame);
-    assert!(result.is_ok(), "lz4f_get_frame_info on fresh ctx must succeed");
+    assert!(
+        result.is_ok(),
+        "lz4f_get_frame_info on fresh ctx must succeed"
+    );
     let (fi, consumed, _hint) = result.unwrap();
-    assert!(consumed >= MIN_FH_SIZE, "must consume at least MIN_FH_SIZE bytes");
+    assert!(
+        consumed >= MIN_FH_SIZE,
+        "must consume at least MIN_FH_SIZE bytes"
+    );
     // After decoding the header, dctx.stage should have advanced past StoreFrameHeader
     assert!(
         dctx.stage > DecompressStage::StoreFrameHeader,
@@ -1517,8 +1562,8 @@ fn decompress_frame_with_wrong_content_size_returns_frame_size_wrong() {
     frame.extend_from_slice(&wrong_content_size.to_le_bytes());
     frame.push(hc);
     frame.extend_from_slice(&block_size.to_le_bytes()); // block header
-    frame.extend_from_slice(&lz4_block);                // compressed block
-    frame.extend_from_slice(&end_mark.to_le_bytes());   // end mark
+    frame.extend_from_slice(&lz4_block); // compressed block
+    frame.extend_from_slice(&end_mark.to_le_bytes()); // end mark
 
     let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
     let mut dst = vec![0u8; 65536];
@@ -1571,7 +1616,10 @@ fn decompress_content_checksum_partial_suffix_delivery_covers_store_suffix() {
     let result = lz4f_decompress(&mut dctx, Some(&mut dst), part2, None);
     assert!(result.is_ok(), "completing suffix must succeed: {result:?}");
 
-    assert_eq!(output, original, "partial suffix delivery must produce correct output");
+    assert_eq!(
+        output, original,
+        "partial suffix delivery must produce correct output"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1651,7 +1699,10 @@ fn decompress_block_checksum_frame_three_byte_chunks_covers_store_cblock_with_ch
         }
     }
 
-    assert_eq!(output, original, "3-byte-chunk block-checksum decompression must round-trip");
+    assert_eq!(
+        output, original,
+        "3-byte-chunk block-checksum decompression must round-trip"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1712,7 +1763,10 @@ fn decompress_uncompressed_block_linked_mode_covers_copy_direct_update_dict() {
         }
     }
 
-    assert_eq!(output, data, "uncompressed linked-mode block must round-trip");
+    assert_eq!(
+        output, data,
+        "uncompressed linked-mode block must round-trip"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1789,7 +1843,10 @@ fn decompress_frame_with_linked_blocks_round_trips_correctly() {
         }
     }
 
-    assert_eq!(output, original, "linked-block mode decompression must round-trip");
+    assert_eq!(
+        output, original,
+        "linked-block mode decompression must round-trip"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1816,12 +1873,12 @@ fn update_dict_with_empty_slice_early_return() {
     let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
     let mut dst = vec![0u8; 8192];
     // Feed all at once and then call with empty src → must return (0,0,0) or (0,0,hint)
-    let (sc, dw, _hint) = lz4f_decompress(&mut dctx, Some(&mut dst), &frame, None)
-        .expect("decompress must succeed");
+    let (sc, dw, _hint) =
+        lz4f_decompress(&mut dctx, Some(&mut dst), &frame, None).expect("decompress must succeed");
     let _ = (sc, dw);
     // Feed empty src — hits early return in lz4f_decompress
-    let (sc2, dw2, _) = lz4f_decompress(&mut dctx, Some(&mut dst), &[], None)
-        .expect("empty src must not error");
+    let (sc2, dw2, _) =
+        lz4f_decompress(&mut dctx, Some(&mut dst), &[], None).expect("empty src must not error");
     assert_eq!(sc2, 0);
     assert_eq!(dw2, 0);
 }
@@ -1834,7 +1891,7 @@ fn decode_header_partial_header_triggers_store_frame_header() {
     // Build a minimal valid LZ4F header (7 bytes: magic + FLG + BD + HC)
     let magic: [u8; 4] = 0x184D2204u32.to_le_bytes();
     let flg: u8 = 0x60; // version=01, independent blocks, no checksums
-    let bd: u8 = 0x70;  // block_size_id=7 (4MB)
+    let bd: u8 = 0x70; // block_size_id=7 (4MB)
     let hc: u8 = (xxh32_oneshot(&[flg, bd], 0) >> 8) as u8;
     let mut header = vec![];
     header.extend_from_slice(&magic);
@@ -1850,7 +1907,10 @@ fn decode_header_partial_header_triggers_store_frame_header() {
     // Feed only 5 bytes (incomplete header — not enough for MIN_FH_SIZE=7)
     // This should trigger the StoreFrameHeader path (lines 216-222)
     let result1 = lz4f_decompress(&mut dctx, Some(&mut dst), &header[..5], None);
-    assert!(result1.is_ok(), "partial header feed must not error immediately");
+    assert!(
+        result1.is_ok(),
+        "partial header feed must not error immediately"
+    );
     let (sc1, _dw1, _hint1) = result1.unwrap();
     assert!(sc1 <= 5, "should consume at most 5 bytes");
 
@@ -1872,7 +1932,10 @@ fn get_frame_info_after_decompression_started_covers_stage_check() {
 
     // Now stage should be past StoreFrameHeader — call get_frame_info
     let result = lz4f_get_frame_info(&mut dctx, &frame[11..]);
-    assert!(result.is_ok(), "get_frame_info after header consumed must succeed");
+    assert!(
+        result.is_ok(),
+        "get_frame_info after header consumed must succeed"
+    );
 }
 
 /// lz4f_get_frame_info when stage == StoreFrameHeader returns FrameDecodingAlreadyStarted (line 320).
@@ -1935,7 +1998,10 @@ fn get_frame_info_truncated_returns_header_incomplete() {
     // which returns the full required size. If src.len() < h_size, returns Err.
     let result = lz4f_get_frame_info(&mut dctx, truncated_header);
     // This should return FrameHeaderIncomplete since not enough bytes
-    assert!(result.is_err() || result.is_ok(), "get_frame_info with truncated header");
+    assert!(
+        result.is_err() || result.is_ok(),
+        "get_frame_info with truncated header"
+    );
     // What matters is that line 324 is hit
     let _ = result;
 }
@@ -2123,8 +2189,12 @@ fn decompress_split_at_suffix_covers_store_suffix() {
         let (sc, dw, hint) = lz4f_decompress(&mut dctx, Some(&mut dst), &frame[pos..split], None)
             .expect("continuation must not error");
         output.extend_from_slice(&dst[..dw]);
-        if sc == 0 && hint == 0 { break; }
-        if sc == 0 { break; }
+        if sc == 0 && hint == 0 {
+            break;
+        }
+        if sc == 0 {
+            break;
+        }
         pos += sc;
     }
 
@@ -2190,8 +2260,12 @@ fn skippable_frame_fast_path_all_bytes_at_once() {
         assert!(iters < 10_000, "infinite loop");
         match lz4f_decompress(&mut dctx, Some(&mut dst), &frame[pos..], None) {
             Ok((sc, _dw, hint)) => {
-                if hint == 0 && sc == 0 { break; }
-                if sc == 0 { break; }
+                if hint == 0 && sc == 0 {
+                    break;
+                }
+                if sc == 0 {
+                    break;
+                }
                 pos += sc;
             }
             Err(e) => panic!("err at pos {pos}: {e:?}"),
@@ -2211,7 +2285,7 @@ fn decode_header_invalid_bsid_over_7_returns_max_block_size_invalid() {
     // So we use bsid_raw = 3 (< 4) to trigger MaxBlockSizeInvalid:
     // BD = (3 << 4) = 0x30
     let bd: u8 = 0x30; // bsid_raw = 3 (< 4) → MaxBlockSizeInvalid
-    // But we need valid checksum for the bad BD
+                       // But we need valid checksum for the bad BD
     let hc: u8 = (xxh32_oneshot(&[flg, bd], 0) >> 8) as u8;
     let mut frame = Vec::new();
     frame.extend_from_slice(&magic);
@@ -2224,7 +2298,10 @@ fn decode_header_invalid_bsid_over_7_returns_max_block_size_invalid() {
     let mut dst = vec![0u8; 4096];
     let result = lz4f_decompress(&mut dctx, Some(&mut dst), &frame, None);
     assert!(
-        matches!(result, Err(Lz4FError::MaxBlockSizeInvalid) | Err(Lz4FError::HeaderChecksumInvalid)),
+        matches!(
+            result,
+            Err(Lz4FError::MaxBlockSizeInvalid) | Err(Lz4FError::HeaderChecksumInvalid)
+        ),
         "invalid BD bsid must return MaxBlockSizeInvalid or HeaderChecksumInvalid, got {result:?}"
     );
 }

@@ -503,7 +503,10 @@ fn decompress_filename_remove_src_file_deletes_source() {
 
     decompress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), &prefs)
         .expect("decompress with remove_src_file must succeed");
-    assert!(!src.exists(), "source file must be deleted after decompression");
+    assert!(
+        !src.exists(),
+        "source file must be deleted after decompression"
+    );
     assert!(dst.exists(), "destination file must exist");
 }
 
@@ -523,7 +526,10 @@ fn decompress_filename_lz4_frame_then_unknown_magic_stops_gracefully() {
     let prefs = Prefs::default();
     // Should succeed (unrecognized subsequent frame just stops decoding)
     let result = decompress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), &prefs);
-    assert!(result.is_ok(), "subsequent unknown magic must not error: {result:?}");
+    assert!(
+        result.is_ok(),
+        "subsequent unknown magic must not error: {result:?}"
+    );
 }
 
 /// Legacy frame followed by unrecognized magic → same break path.
@@ -541,7 +547,10 @@ fn decompress_filename_legacy_then_unknown_magic_stops_gracefully() {
 
     let prefs = Prefs::default();
     let result = decompress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), &prefs);
-    assert!(result.is_ok(), "legacy then unknown magic must not error: {result:?}");
+    assert!(
+        result.is_ok(),
+        "legacy then unknown magic must not error: {result:?}"
+    );
 }
 
 /// decompress_filename with a regular file dst propagates file metadata (line 488).
@@ -571,7 +580,10 @@ fn decompress_multiple_filenames_no_overwrite_existing_dst_returns_error() {
     prefs.overwrite = false;
 
     let result = decompress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), &prefs);
-    assert!(result.is_err(), "must fail when dst exists and overwrite=false");
+    assert!(
+        result.is_err(),
+        "must fail when dst exists and overwrite=false"
+    );
 }
 
 /// SparseWriter flush: exercise the flush method on the write path (lines 149-151).
