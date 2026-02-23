@@ -648,7 +648,8 @@ fn display_info_lz4_frame_without_content_size_returns_ok() {
     dst.truncate(n);
 
     let mut tmp = NamedTempFile::new().expect("tempfile");
-    tmp.write_all(&dst).expect("write frame without content size");
+    tmp.write_all(&dst)
+        .expect("write frame without content size");
     let path = tmp.path().to_str().expect("path");
     let result = display_compressed_files_info(&[path]);
     assert!(
@@ -686,7 +687,11 @@ fn display_info_path_without_directory_separator() {
     let path = tmp.path().to_str().expect("path");
     // The path normally has a '/' from the temp dir, but base_name should still work.
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "base_name path test must return Ok: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "base_name path test must return Ok: {:?}",
+        result
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -699,7 +704,11 @@ fn display_info_directory_path_returns_error() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().to_str().expect("path");
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_err(), "directory path must return Err: {:?}", result);
+    assert!(
+        result.is_err(),
+        "directory path must return Err: {:?}",
+        result
+    );
 }
 
 /// Non-regular path: non-existent file returns Err.
@@ -713,7 +722,9 @@ fn display_info_nonexistent_path_returns_error() {
 #[test]
 fn display_info_verbose_lz4_frame_with_content_size() {
     use lz4::frame::compress::lz4f_compress_frame;
-    use lz4::frame::types::{BlockSizeId as FrameBlockSizeId, ContentChecksum, FrameInfo, Preferences};
+    use lz4::frame::types::{
+        BlockSizeId as FrameBlockSizeId, ContentChecksum, FrameInfo, Preferences,
+    };
     use lz4::io::prefs::DISPLAY_LEVEL;
     use std::sync::atomic::Ordering;
 
@@ -750,7 +761,10 @@ fn display_info_verbose_lz4_frame_with_content_size() {
     let path = tmp.path().to_str().expect("path");
 
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "LZ4 frame with content_size must return Ok: {result:?}");
+    assert!(
+        result.is_ok(),
+        "LZ4 frame with content_size must return Ok: {result:?}"
+    );
 }
 
 /// Two concatenated LZ4 frames in verbose mode — exercises eq_block_types check (line 488).
@@ -773,7 +787,10 @@ fn display_info_verbose_two_concatenated_frames() {
     let path = tmp.path().to_str().expect("path");
 
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "two concatenated frames in verbose mode must return Ok: {result:?}");
+    assert!(
+        result.is_ok(),
+        "two concatenated frames in verbose mode must return Ok: {result:?}"
+    );
 }
 
 /// Legacy frame followed by LZ4 frame in verbose mode (exercises eq_frame_types=false at line 553).
@@ -796,7 +813,10 @@ fn display_info_verbose_legacy_then_lz4_frame() {
     let path = tmp.path().to_str().expect("path");
 
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "legacy then lz4 in verbose mode must return Ok: {result:?}");
+    assert!(
+        result.is_ok(),
+        "legacy then lz4 in verbose mode must return Ok: {result:?}"
+    );
 }
 
 /// Skippable frame alone in non-verbose mode (exercises lines 607-625).
@@ -831,7 +851,10 @@ fn display_info_verbose_lz4_frame_content_checksum_displays_xxh32() {
     let path = tmp.path().to_str().expect("path");
 
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "verbose mode with checksum must return Ok: {result:?}");
+    assert!(
+        result.is_ok(),
+        "verbose mode with checksum must return Ok: {result:?}"
+    );
 }
 
 /// LZ4 frame followed by legacy frame in verbose: exercises eq_frame_types tracking.
@@ -854,5 +877,8 @@ fn display_info_verbose_lz4_then_legacy_frame() {
     let path = tmp.path().to_str().expect("path");
 
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "lz4 then legacy in verbose mode must return Ok: {result:?}");
+    assert!(
+        result.is_ok(),
+        "lz4 then legacy in verbose mode must return Ok: {result:?}"
+    );
 }

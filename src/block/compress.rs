@@ -1043,14 +1043,7 @@ unsafe fn compress_dest_size_ext_state_internal(
     let src_size = *src_size_ptr;
     if target_dst_size >= compress_bound(src_size) {
         // Guaranteed success — use normal compression path
-        compress_fast_ext_state(
-            state,
-            src,
-            src_size,
-            dst,
-            target_dst_size,
-            acceleration,
-        )
+        compress_fast_ext_state(state, src, src_size, dst, target_dst_size, acceleration)
     } else if (src_size as usize) < LZ4_64KLIMIT {
         compress_generic(
             &mut (*state),

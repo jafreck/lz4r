@@ -1005,7 +1005,10 @@ fn ctx_type_switch_from_fast_to_hc_covers_reinit_path() {
 
     // First: compress with fast level (0 = default fast)
     let fast_prefs = Preferences {
-        frame_info: FrameInfo { block_mode: BlockMode::Independent, ..Default::default() },
+        frame_info: FrameInfo {
+            block_mode: BlockMode::Independent,
+            ..Default::default()
+        },
         compression_level: 0,
         auto_flush: true,
         ..Default::default()
@@ -1020,7 +1023,10 @@ fn ctx_type_switch_from_fast_to_hc_covers_reinit_path() {
 
     // Second: compress with HC level — triggers the ctx type switch path
     let hc_prefs = Preferences {
-        frame_info: FrameInfo { block_mode: BlockMode::Independent, ..Default::default() },
+        frame_info: FrameInfo {
+            block_mode: BlockMode::Independent,
+            ..Default::default()
+        },
         compression_level: 9, // HC
         auto_flush: true,
         ..Default::default()
@@ -1042,7 +1048,10 @@ fn ctx_type_switch_from_hc_to_fast_covers_reinit_path() {
 
     // First: HC compression
     let hc_prefs = Preferences {
-        frame_info: FrameInfo { block_mode: BlockMode::Independent, ..Default::default() },
+        frame_info: FrameInfo {
+            block_mode: BlockMode::Independent,
+            ..Default::default()
+        },
         compression_level: 9,
         auto_flush: true,
         ..Default::default()
@@ -1056,7 +1065,10 @@ fn ctx_type_switch_from_hc_to_fast_covers_reinit_path() {
 
     // Second: switch back to fast compression — triggers lz4_ctx_type != ctx_type_id path
     let fast_prefs = Preferences {
-        frame_info: FrameInfo { block_mode: BlockMode::Independent, ..Default::default() },
+        frame_info: FrameInfo {
+            block_mode: BlockMode::Independent,
+            ..Default::default()
+        },
         compression_level: 0,
         auto_flush: true,
         ..Default::default()
@@ -1074,7 +1086,10 @@ fn ctx_type_switch_from_hc_to_fast_covers_reinit_path() {
 #[test]
 fn compress_end_dst_too_small_returns_error() {
     let src = b"hello world";
-    let prefs = Preferences { auto_flush: true, ..Default::default() };
+    let prefs = Preferences {
+        auto_flush: true,
+        ..Default::default()
+    };
     let bound = lz4f_compress_frame_bound(src.len(), Some(&prefs));
     let mut full_dst = vec![0u8; bound];
     let mut cctx = Lz4FCCtx::new(LZ4F_VERSION);
@@ -1170,7 +1185,10 @@ fn flush_before_begin_returns_compression_state_uninitialized() {
     // Instead, test the normal flush path:
     let prefs = Preferences {
         auto_flush: false, // non-autoflush means data gets staged
-        frame_info: FrameInfo { block_size_id: BlockSizeId::Max64Kb, ..Default::default() },
+        frame_info: FrameInfo {
+            block_size_id: BlockSizeId::Max64Kb,
+            ..Default::default()
+        },
         ..Default::default()
     };
     let src = cycling_bytes(64); // less than block size
@@ -1181,7 +1199,8 @@ fn flush_before_begin_returns_compression_state_uninitialized() {
     let pos2 = lz4f_compress_update(&mut cctx2, &mut full_dst[pos..], &src, None).unwrap();
     // Now explicitly flush
     let flush_pos = lz4f_flush(&mut cctx2, &mut full_dst[pos + pos2..], None).unwrap();
-    let end_pos = lz4f_compress_end(&mut cctx2, &mut full_dst[pos + pos2 + flush_pos..], None).unwrap();
+    let end_pos =
+        lz4f_compress_end(&mut cctx2, &mut full_dst[pos + pos2 + flush_pos..], None).unwrap();
     let total = pos + pos2 + flush_pos + end_pos;
     let dec = lz4::frame::decompress_frame_to_vec(&full_dst[..total]).unwrap();
     assert_eq!(dec, src, "non-autoflush round-trip must succeed");
@@ -1192,7 +1211,12 @@ fn flush_before_begin_returns_compression_state_uninitialized() {
 #[test]
 fn compress_begin_using_dict_with_hc_level_round_trips() {
     let dict: Vec<u8> = b"dict prefix ".iter().cycle().take(512).copied().collect();
-    let src: Vec<u8> = b"dict prefix content".iter().cycle().take(2048).copied().collect();
+    let src: Vec<u8> = b"dict prefix content"
+        .iter()
+        .cycle()
+        .take(2048)
+        .copied()
+        .collect();
     let mut cctx = Lz4FCCtx::new(LZ4F_VERSION);
     let hc_prefs = Preferences {
         compression_level: 9,
@@ -1228,7 +1252,11 @@ fn compress_frame_with_dict_id_writes_dict_id_bytes() {
     // Verify the dict_id flag is set in FLG byte (bit 0) at offset 5
     // Magic=4 bytes, FLG=1 byte at offset 4
     let flg = dst[4];
-    assert_ne!(flg & 1, 0, "dict_id bit in FLG must be set when dict_id > 0");
+    assert_ne!(
+        flg & 1,
+        0,
+        "dict_id bit in FLG must be set when dict_id > 0"
+    );
 }
 
 /// lz4f_flush on tiny dst when staging buffer has data → DstMaxSizeTooSmall (line 959).

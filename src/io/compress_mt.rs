@@ -313,11 +313,7 @@ pub fn compress_filename_mt(
         // the header is written so the LZ4F context does not attempt to compute
         // a second, internal checksum.
         let header_size = lz4f_compress_begin(&mut ress.ctx, &mut ress.dst_buffer, Some(&prefs))
-            .map_err(|e| {
-                io::Error::other(
-                    format!("File header generation failed : {}", e),
-                )
-            })?;
+            .map_err(|e| io::Error::other(format!("File header generation failed : {}", e)))?;
         dst_writer
             .write_all(&ress.dst_buffer[..header_size])
             .map_err(|_| {

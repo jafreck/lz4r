@@ -172,13 +172,12 @@ pub fn open_dst_file(path: &str, prefs: &crate::io::prefs::Prefs) -> io::Result<
         unsafe {
             libc::_setmode(1, libc::O_BINARY);
         }
-        if prefs.sparse_file_support == 1
-            && DISPLAY_LEVEL.load(Ordering::Relaxed) >= 4 {
-                eprintln!(
-                    "Sparse File Support automatically disabled on stdout; \
+        if prefs.sparse_file_support == 1 && DISPLAY_LEVEL.load(Ordering::Relaxed) >= 4 {
+            eprintln!(
+                "Sparse File Support automatically disabled on stdout; \
                      to force-enable it, add --sparse command"
-                );
-            }
+            );
+        }
         return Ok(DstFile {
             inner: Box::new(io::stdout()),
             is_stdout: true,
@@ -195,31 +194,30 @@ pub fn open_dst_file(path: &str, prefs: &crate::io::prefs::Prefs) -> io::Result<
     }
 
     // Overwrite guard: refuse or prompt before clobbering an existing file.
-    if !prefs.overwrite
-        && Path::new(path).exists() {
-            let display_level = DISPLAY_LEVEL.load(Ordering::Relaxed);
-            if display_level <= 1 {
-                // No interaction possible — refuse silently.
-                eprintln!("{} already exists; not overwritten  ", path);
-                return Err(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    format!("{}: already exists; not overwritten", path),
-                ));
-            }
-            // Interactive prompt.
-            eprint!("{} already exists; do you want to overwrite (y/N) ? ", path);
-            let _ = io::stderr().flush();
-            let mut line = String::new();
-            io::stdin().read_line(&mut line)?;
-            let first = line.trim_start().chars().next().unwrap_or('\0');
-            if first != 'y' && first != 'Y' {
-                eprintln!("    not overwritten  ");
-                return Err(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    format!("{}: not overwritten", path),
-                ));
-            }
+    if !prefs.overwrite && Path::new(path).exists() {
+        let display_level = DISPLAY_LEVEL.load(Ordering::Relaxed);
+        if display_level <= 1 {
+            // No interaction possible — refuse silently.
+            eprintln!("{} already exists; not overwritten  ", path);
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("{}: already exists; not overwritten", path),
+            ));
         }
+        // Interactive prompt.
+        eprint!("{} already exists; do you want to overwrite (y/N) ? ", path);
+        let _ = io::stderr().flush();
+        let mut line = String::new();
+        io::stdin().read_line(&mut line)?;
+        let first = line.trim_start().chars().next().unwrap_or('\0');
+        if first != 'y' && first != 'Y' {
+            eprintln!("    not overwritten  ");
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("{}: not overwritten", path),
+            ));
+        }
+    }
 
     let f = OpenOptions::new()
         .write(true)

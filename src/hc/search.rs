@@ -318,21 +318,22 @@ pub unsafe fn insert_and_get_wider_match(
                         .sub(look_back_length as usize)
                         .add((longest - 1) as usize),
                 )
-                && bt::read32(match_ptr) == pattern {
-                    let back = if look_back_length != 0 {
-                        count_back(ip, match_ptr, i_low_limit, prefix_ptr)
-                    } else {
-                        0
-                    };
-                    match_length = MINMATCH as i32
-                        + bt::count(ip.add(MINMATCH), match_ptr.add(MINMATCH), i_high_limit) as i32;
-                    match_length -= back;
-                    if match_length > longest {
-                        longest = match_length;
-                        offset = (ip_index - match_index) as i32;
-                        s_back = back;
-                    }
+                && bt::read32(match_ptr) == pattern
+            {
+                let back = if look_back_length != 0 {
+                    count_back(ip, match_ptr, i_low_limit, prefix_ptr)
+                } else {
+                    0
+                };
+                match_length = MINMATCH as i32
+                    + bt::count(ip.add(MINMATCH), match_ptr.add(MINMATCH), i_high_limit) as i32;
+                match_length -= back;
+                if match_length > longest {
+                    longest = match_length;
+                    offset = (ip_index - match_index) as i32;
+                    s_back = back;
                 }
+            }
         } else {
             // ── Within external dict (lowestMatchIndex <= matchIndex < dictLimit) ──
             let match_ptr = dict_start.add((match_index - dict_idx) as usize);
