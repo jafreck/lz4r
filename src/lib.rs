@@ -22,6 +22,9 @@
 pub mod lorem;
 pub mod timefn;
 pub mod config;
+
+#[cfg(feature = "c-abi")]
+pub mod abi;
 pub mod util;
 pub mod threadpool;
 pub mod io;

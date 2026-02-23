@@ -12,6 +12,7 @@ path = "src/main.rs"
 [lib]
 name = "lz4"
 path = "src/lib.rs"
+crate-type = ["rlib", "staticlib"]   # rlib = existing Rust usage; staticlib = C ABI
 
 [features]
 # Enable multi-threaded compression (corresponds to LZ4IO_MULTITHREAD in lz4conf.h).
@@ -22,6 +23,10 @@ recursive = []
 # Attempt to raise process scheduling priority via setpriority() during benchmarking.
 # Corresponds to SET_REALTIME_PRIORITY in platform.h.  Requires appropriate OS privileges.
 realtime-priority = []
+# Export the four C-ABI symbols (LZ4_compress_default, LZ4_compress_fast,
+# LZ4_decompress_safe, LZ4_compress_HC) so lzbench can link the Rust staticlib
+# in place of the two C object files it normally uses.
+c-abi = []
 
 [dependencies]
 libc = "0.2"
