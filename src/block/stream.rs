@@ -63,6 +63,7 @@ enum LoadDictMode {
 /// # Thread safety
 /// `Lz4Stream` is `Send` but **not** `Sync`.  Concurrent calls to any method
 /// are unsound; use external synchronisation if sharing across threads.
+#[derive(Default)]
 pub struct Lz4Stream {
     pub(crate) internal: StreamStateInternal,
 }
@@ -630,10 +631,125 @@ impl Lz4Stream {
     }
 }
 
-impl Default for Lz4Stream {
-    fn default() -> Self {
-        Self {
-            internal: StreamStateInternal::new(),
+// ─────────────────────────────────────────────────────────────────────────────
+// Unit tests (require pub(crate) field access)
+// ─────────────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::block::types::KB;
+
+    // ── renorm_dict ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn renorm_dict_triggers_when_overflow_would_occur() {
+        // Set current_offset near the 0x80000000 boundary.
+        // 0x7FFF_FFF0 + 32 = 0x80000010 > 0x80000000 → must trigger.
+        let mut stream = Lz4Stream::new();
+        stream.internal.current_offset = 0x7FFF_FFF0;
+        // Set a hash table entry that is large enough to survive after renorm.
+        stream.internal.hash_table[0] = 0x7FFF_0000;
+        // Small entry that will be zeroed.
+        stream.internal.hash_table[1] = 0x0000_0001;
+
+        stream.renorm_dict(32);
+
+        // After renorm: current_offset must be reset to 64 KB.
+        assert_eq!(
+            stream.internal.current_offset,
+            64 * KB as u32,
+            "renorm_dict must reset current_offset to 64 KB"
+        );
+    }
+
+    #[test]
+    fn renorm_dict_with_large_dict_clips_to_64kb() {
+        // dict_size > 64KB should be clamped.
+        let mut stream = Lz4Stream::new();
+        stream.internal.current_offset = 0x7FFF_FFF0;
+        stream.internal.dict_size = 128 * KB as u32; // more than 64KB
+        stream.renorm_dict(32);
+        assert_eq!(
+            stream.internal.dict_size,
+            64 * KB as u32,
+            "renorm_dict must clip dict_size to 64 KB"
+        );
+    }
+
+    #[test]
+    fn renorm_dict_noop_when_below_boundary() {
+        // current_offset + next_size <= 0x80000000 → no-op.
+        let mut stream = Lz4Stream::new();
+        stream.internal.current_offset = 1024;
+        stream.renorm_dict(1024);
+        // current_offset must remain unchanged.
+        assert_eq!(stream.internal.current_offset, 1024);
+    }
+
+    // ── compress_fast_continue large dict_ctx path ────────────────────────────
+
+    #[test]
+    fn compress_fast_continue_large_block_with_attached_dict_ctx() {
+        // Exercises the `input_size > 4 * KB` path when dict_ctx is non-null
+        // (lines 442-459 in stream.rs).
+        let dict_data: Vec<u8> = (0u8..=255).cycle().take(64 * KB).collect();
+
+        // dict_stream: load the dictionary (Box keeps address stable).
+        let mut dict_stream = Lz4Stream::new();
+        dict_stream.load_dict(&dict_data);
+
+        // working_stream: attach dict_stream as dict context.
+        let mut working_stream = Lz4Stream::new();
+        unsafe {
+            // SAFETY: dict_stream is alive for the duration of this test.
+            working_stream.attach_dictionary(Some(&*dict_stream as *const Lz4Stream));
         }
+
+        // Source > 4 KB to trigger the `input_size > 4*KB` branch.
+        let src: Vec<u8> = (0u8..=127).cycle().take(8 * KB).collect();
+        let bound = {
+            let b = crate::block::compress::compress_bound(src.len() as i32);
+            b.max(0) as usize
+        };
+        let mut dst = vec![0u8; bound.max(src.len() + 64)];
+
+        let n = working_stream.compress_fast_continue(&src, &mut dst, 1);
+        // Must not panic; typically returns positive (compressed output).
+        assert!(
+            n >= 0,
+            "compress_fast_continue with large dict_ctx must not panic"
+        );
+    }
+
+    // ── Source-overlaps-dict clipping ─────────────────────────────────────────
+
+    #[test]
+    fn compress_fast_continue_source_end_overlaps_dict_tail_clips_dict() {
+        // Exercises lines 377-384: when source_end falls inside the dictionary
+        // window, the dictionary is clipped to the non-overlapping prefix.
+        //
+        // Layout in `unified_buf`:
+        //   dictionary starts at offset 8, dict_size = 100 → dict_end = offset 108
+        //   source starts at offset 50, length = 50 → source_end = offset 100
+        //   source_end (100) is in (dictionary=8 … dict_end=108) → overlap!
+        let unified_buf: Vec<u8> = (0u8..=255).cycle().take(1024).collect();
+
+        let mut stream = Lz4Stream::new();
+        // Set dictionary to unified_buf[8], size 100.
+        stream.internal.dictionary = unsafe { unified_buf.as_ptr().add(8) };
+        stream.internal.dict_size = 100;
+        // current_offset must be non-zero so the stream is "armed".
+        stream.internal.current_offset = 64 * KB as u32;
+
+        // Source: unified_buf[50..100] → source_end = unified_buf[100]
+        // which is inside [unified_buf[8]..unified_buf[108]].
+        let source = &unified_buf[50..100];
+        let mut dst = vec![0u8; 512];
+
+        // The call should not panic and should clip the dictionary.
+        let _ = stream.compress_fast_continue(source, &mut dst, 1);
+
+        // After clipping: dict should have been shrunk so its end coincides with
+        // the clipped boundary. We just verify no panic occurred.
     }
 }

@@ -12,6 +12,7 @@ use lz4::block::compress::{compress_bound, compress_default};
 use lz4::block::decompress_core::{
     decompress_safe, decompress_safe_partial, decompress_safe_using_dict, DecompressError,
 };
+use lz4::block::stream::Lz4Stream;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Minimal hand-crafted LZ4 blocks (all-literal sequences, no matches)
@@ -95,7 +96,7 @@ fn decompress_safe_variable_length_15_literals() {
     // extra byte 0x00 (adds 0, terminates), then 15 literal 'A' bytes.
     // Verifies read_variable_length initial_check=true path.
     let mut block = vec![0xF0u8, 0x00];
-    block.extend(std::iter::repeat(b'A').take(15));
+    block.extend(std::iter::repeat_n(b'A', 15));
     let mut dst = [0u8; 15];
     let n = decompress_safe(&block, &mut dst).expect("decompression failed");
     assert_eq!(n, 15);
@@ -106,7 +107,7 @@ fn decompress_safe_variable_length_15_literals() {
 fn decompress_safe_variable_length_16_literals() {
     // token 0xF0, extra byte 0x01 (total = 15 + 1 = 16), then 16 'B' bytes.
     let mut block = vec![0xF0u8, 0x01];
-    block.extend(std::iter::repeat(b'B').take(16));
+    block.extend(std::iter::repeat_n(b'B', 16));
     let mut dst = [0u8; 16];
     let n = decompress_safe(&block, &mut dst).expect("decompression failed");
     assert_eq!(n, 16);
@@ -118,7 +119,7 @@ fn decompress_safe_variable_length_270_literals() {
     // token 0xF0, extra bytes [0xFF, 0x00] (total = 15 + 255 + 0 = 270).
     // Exercises the loop continuation inside read_variable_length.
     let mut block = vec![0xF0u8, 0xFF, 0x00];
-    block.extend(std::iter::repeat(b'C').take(270));
+    block.extend(std::iter::repeat_n(b'C', 270));
     let mut dst = vec![0u8; 270];
     let n = decompress_safe(&block, &mut dst).expect("decompression failed");
     assert_eq!(n, 270);

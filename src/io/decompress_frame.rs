@@ -38,8 +38,7 @@ use std::io::{self, Read, Write};
 
 use crate::frame::types::LZ4F_VERSION;
 use crate::frame::{
-    lz4f_create_decompression_context, lz4f_decompress, lz4f_decompress_using_dict,
-    DecompressOptions, Lz4FDCtx,
+    lz4f_create_decompression_context, lz4f_decompress, lz4f_decompress_using_dict, Lz4FDCtx,
 };
 use crate::io::decompress_resources::DecompressResources;
 use crate::io::prefs::{display_level, Prefs, DISPLAY_LEVEL, LZ4IO_MAGICNUMBER};

@@ -316,7 +316,7 @@ impl Prefs {
         const BLOCK_SIZE_TABLE: [usize; 4] = [64 * KB, 256 * KB, MB, 4 * MB];
         const MIN_BSID: u32 = 4;
         const MAX_BSID: u32 = 7;
-        if bsid < MIN_BSID || bsid > MAX_BSID {
+        if !(MIN_BSID..=MAX_BSID).contains(&bsid) {
             return 0;
         }
         self.block_size_id = bsid;

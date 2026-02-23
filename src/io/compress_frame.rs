@@ -261,12 +261,8 @@ fn create_cdict(io_prefs: &Prefs) -> io::Result<Option<Box<Lz4FCDict>>> {
         )
     })?;
     let dict_buf = load_dict_file(dict_filename)?;
-    let cdict = Lz4FCDict::create(&dict_buf).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            "Dictionary error: could not create CDict",
-        )
-    })?;
+    let cdict = Lz4FCDict::create(&dict_buf)
+        .ok_or_else(|| io::Error::other("Dictionary error: could not create CDict"))?;
     Ok(Some(cdict))
 }
 
@@ -283,10 +279,10 @@ impl CompressResources {
 
         // Allocate the LZ4F compression context (lz4io.c:1092-1095).
         let ctx = lz4f_create_compression_context(LZ4F_VERSION).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("Allocation error: can't create LZ4F context: {}", e),
-            )
+            io::Error::other(format!(
+                "Allocation error: can't create LZ4F context: {}",
+                e
+            ))
         })?;
 
         // Allocate source and destination buffers (lz4io.c:1099-1104).
@@ -381,10 +377,10 @@ pub fn compress_frame_chunk(
 ) -> io::Result<usize> {
     // Create a fresh per-chunk context (lz4io.c:1126-1129).
     let mut cctx = lz4f_create_compression_context(LZ4F_VERSION).map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            format!("unable to create a LZ4F compression context: {}", e),
-        )
+        io::Error::other(format!(
+            "unable to create a LZ4F compression context: {}",
+            e
+        ))
     })?;
 
     // Write frame header to dst (lz4io.c:1132-1141).
@@ -393,13 +389,10 @@ pub fn compress_frame_chunk(
         // LZ4F_compressBegin_usingDict (lz4io.c:1133)
         lz4f_compress_begin_using_dict(&mut cctx, dst, prefix, Some(params.prefs)).map_err(
             |e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!(
-                        "error initializing LZ4F compression context with prefix: {}",
-                        e
-                    ),
-                )
+                io::Error::other(format!(
+                    "error initializing LZ4F compression context with prefix: {}",
+                    e
+                ))
             },
         )?;
     } else {
@@ -409,19 +402,16 @@ pub fn compress_frame_chunk(
             lz4f_compress_begin_using_cdict(&mut cctx, dst, params.cdict, Some(params.prefs))
         }
         .map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("error initializing LZ4F compression context: {}", e),
-            )
+            io::Error::other(format!(
+                "error initializing LZ4F compression context: {}",
+                e
+            ))
         })?;
     }
 
     // Compress data, overwriting the header (lz4io.c:1143-1149).
     let c_size = lz4f_compress_update(&mut cctx, dst, src, None).map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            format!("error compressing with LZ4F_compressUpdate: {}", e),
-        )
+        io::Error::other(format!("error compressing with LZ4F_compressUpdate: {}", e))
     })?;
 
     // cctx is dropped here (equivalent to LZ4F_freeCompressionContext).
@@ -488,7 +478,7 @@ fn compress_filename_st(
             cdict_ptr,
             Some(&prefs),
         )
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Compression failed: {}", e)))?;
+        .map_err(|e| io::Error::other(format!("Compression failed: {}", e)))?;
         compressedfilesize = c_size as u64;
 
         display_level(
@@ -521,12 +511,7 @@ fn compress_filename_st(
                 Some(&prefs),
             )
         }
-        .map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("File header generation failed: {}", e),
-            )
-        })?;
+        .map_err(|e| io::Error::other(format!("File header generation failed: {}", e)))?;
 
         dst_writer
             .write_all(&ress.dst_buffer[..header_size])
@@ -543,9 +528,7 @@ fn compress_filename_st(
                 &ress.src_buffer[..read_size],
                 None,
             )
-            .map_err(|e| {
-                io::Error::new(io::ErrorKind::Other, format!("Compression failed: {}", e))
-            })?;
+            .map_err(|e| io::Error::other(format!("Compression failed: {}", e)))?;
             compressedfilesize += out_size as u64;
 
             display_level(
@@ -572,10 +555,8 @@ fn compress_filename_st(
         }
 
         // End-of-frame mark (lz4io.c:1452-1459).
-        let end_size =
-            lz4f_compress_end(&mut ress.ctx, &mut ress.dst_buffer, None).map_err(|e| {
-                io::Error::new(io::ErrorKind::Other, format!("End of frame error: {}", e))
-            })?;
+        let end_size = lz4f_compress_end(&mut ress.ctx, &mut ress.dst_buffer, None)
+            .map_err(|e| io::Error::other(format!("End of frame error: {}", e)))?;
         dst_writer
             .write_all(&ress.dst_buffer[..end_size])
             .map_err(|_| {

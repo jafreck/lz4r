@@ -132,8 +132,7 @@ pub unsafe fn hc_search_ext_dict(
             .add(l_dict_match_index as usize);
 
         if bt::read32(match_ptr) == bt::read32(ip) {
-            let v_limit_raw =
-                ip.add((l_dict_end_index as usize).wrapping_sub(l_dict_match_index as usize));
+            let v_limit_raw = ip.add(l_dict_end_index.wrapping_sub(l_dict_match_index as usize));
             let v_limit = if v_limit_raw > i_high_limit {
                 i_high_limit
             } else {
@@ -234,8 +233,7 @@ unsafe fn mid_search_ext_dict(
                 .prefix_start
                 .sub(ctx.dict_limit as usize)
                 .add(l8_dict_match_index as usize);
-            let dict_remaining =
-                (l_dict_end_index as usize).wrapping_sub(l8_dict_match_index as usize);
+            let dict_remaining = l_dict_end_index.wrapping_sub(l8_dict_match_index as usize);
             let ip_remaining = (i_high_limit as usize).wrapping_sub(ip as usize);
             let safe_len = dict_remaining.min(ip_remaining);
             let mlt = bt::count(ip, match_ptr, ip.add(safe_len)) as i32;
@@ -261,8 +259,7 @@ unsafe fn mid_search_ext_dict(
                 .prefix_start
                 .sub(ctx.dict_limit as usize)
                 .add(l4_dict_match_index as usize);
-            let dict_remaining =
-                (l_dict_end_index as usize).wrapping_sub(l4_dict_match_index as usize);
+            let dict_remaining = l_dict_end_index.wrapping_sub(l4_dict_match_index as usize);
             let ip_remaining = (i_high_limit as usize).wrapping_sub(ip as usize);
             let safe_len = dict_remaining.min(ip_remaining);
             let mlt = bt::count(ip, match_ptr, ip.add(safe_len)) as i32;

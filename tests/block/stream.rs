@@ -713,7 +713,7 @@ fn compress_force_ext_dict_updates_dict_via_save_dict() {
     let dict = vec![0xAAu8; 256];
     stream.load_dict(&dict);
 
-    let src = vec![0xBBu8; 128];
+    let src = [0xBBu8; 128];
     let mut dst = make_dst(src.len());
 
     unsafe {

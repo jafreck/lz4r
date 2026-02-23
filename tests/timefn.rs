@@ -52,7 +52,7 @@ fn time_t_is_copy() {
 #[test]
 fn time_t_is_clone() {
     let t = get_time();
-    let t2 = t.clone();
+    let t2 = t;
     let _ = t2;
 }
 

@@ -428,7 +428,7 @@ pub unsafe fn compress_hash_chain(
                 return 0;
             }
             // FillOutput: truncate the final literal run to exactly fill remaining space.
-            let remaining = oend.offset_from(op) as isize;
+            let remaining = oend.offset_from(op);
             if remaining < 2 {
                 // Not enough room even for the token byte + 1 literal
                 return op.offset_from(dest) as i32;

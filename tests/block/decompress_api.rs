@@ -158,7 +158,7 @@ fn decompress_safe_api_empty_block_zero_capacity_dst() {
 fn decompress_safe_api_variable_length_270_literals() {
     // token 0xF0 + [0xFF, 0x00] → 15 + 255 + 0 = 270 literals.
     let mut block = vec![0xF0u8, 0xFF, 0x00];
-    block.extend(std::iter::repeat(b'C').take(270));
+    block.extend(std::iter::repeat_n(b'C', 270));
     let mut dst = vec![0u8; 270];
     let n = decompress_safe(&block, &mut dst).expect("decompression failed");
     assert_eq!(n, 270);
@@ -735,4 +735,239 @@ fn decompress_safe_continue_first_call_malformed_is_error() {
         )
     };
     assert_eq!(result, Err(BlockDecompressError::MalformedInput));
+}
+// ─────────────────────────────────────────────────────────────────────────────
+// Large-prefix path (prefix64k) — exercises decompress_safe_with_prefix64k
+// and decompress_safe_partial_with_prefix64k via decompress_safe_using_dict.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Minimum dict size that triggers the prefix64k path (KB64_MINUS1 = 65535).
+const KB64_MINUS1: usize = 65535;
+
+#[test]
+fn decompress_safe_using_dict_large_adjacent_prefix_prefix64k_path() {
+    // dict_size = 65535 (== KB64_MINUS1) and dict+dict_size is adjacent to dst
+    // → exercises the decompress_safe_with_prefix64k branch.
+    //
+    // Strategy: allocate a buffer of KB64_MINUS1 + output_capacity bytes;
+    // use the first KB64_MINUS1 bytes as dict (filled with zeros) and decode
+    // an all-literal block into the remainder. The block carries no back-refs
+    // to the dict so the actual dict content doesn't matter.
+    let payload = b"hello from prefix64k path!";
+    let compressed = compress_input(payload);
+
+    let dict_size = KB64_MINUS1;
+    let out_cap = payload.len() + 8;
+    let mut buf = vec![0u8; dict_size + out_cap];
+
+    // dict = buf[0..dict_size], dst = buf[dict_size..].
+    let n = unsafe {
+        decompress_safe_using_dict(
+            compressed.as_ptr(),
+            buf.as_mut_ptr().add(dict_size),
+            compressed.len(),
+            out_cap,
+            buf.as_ptr(),
+            dict_size,
+        )
+    }
+    .expect("prefix64k path failed");
+    assert_eq!(&buf[dict_size..dict_size + n], payload.as_ref());
+}
+
+#[test]
+fn decompress_safe_using_dict_larger_than_64k_adjacent_prefix64k_path() {
+    // dict_size = 65536 (> KB64_MINUS1) → also exercises prefix64k branch.
+    let payload = b"hello from large prefix64k path!";
+    let compressed = compress_input(payload);
+
+    let dict_size = 65536;
+    let out_cap = payload.len() + 8;
+    let mut buf = vec![0u8; dict_size + out_cap];
+
+    let n = unsafe {
+        decompress_safe_using_dict(
+            compressed.as_ptr(),
+            buf.as_mut_ptr().add(dict_size),
+            compressed.len(),
+            out_cap,
+            buf.as_ptr(),
+            dict_size,
+        )
+    }
+    .expect("prefix64k (>64K) path failed");
+    assert_eq!(&buf[dict_size..dict_size + n], payload.as_ref());
+}
+
+#[test]
+fn decompress_safe_partial_using_dict_large_adjacent_prefix64k_path() {
+    // Exercises decompress_safe_partial_with_prefix64k via
+    // decompress_safe_partial_using_dict with a large adjacent dict.
+    let payload = b"partial decode from prefix64k path hello world!";
+    let compressed = compress_input(payload);
+
+    let dict_size = KB64_MINUS1;
+    let out_cap = payload.len() + 8;
+    let mut buf = vec![0u8; dict_size + out_cap];
+
+    // Request only half the payload length → partial decode.
+    let target = payload.len() / 2;
+    let n = unsafe {
+        decompress_safe_partial_using_dict(
+            compressed.as_ptr(),
+            buf.as_mut_ptr().add(dict_size),
+            compressed.len(),
+            target,
+            out_cap,
+            buf.as_ptr(),
+            dict_size,
+        )
+    }
+    .expect("partial prefix64k path failed");
+    assert!(n <= payload.len(), "partial decoded too many bytes: {n}");
+    assert_eq!(&buf[dict_size..dict_size + n], &payload[..n]);
+}
+
+#[test]
+fn decompress_safe_partial_using_dict_small_adjacent_prefix_path() {
+    // dict_size < KB64_MINUS1 and adjacent → exercises
+    // decompress_safe_partial_with_small_prefix path.
+    let payload = b"partial decode small prefix here!";
+    let compressed = compress_input(payload);
+
+    let dict_size = 32usize; // small prefix
+    let out_cap = payload.len() + 8;
+    let mut buf = vec![0u8; dict_size + out_cap];
+
+    let target = payload.len(); // full decode
+    let n = unsafe {
+        decompress_safe_partial_using_dict(
+            compressed.as_ptr(),
+            buf.as_mut_ptr().add(dict_size),
+            compressed.len(),
+            target,
+            out_cap,
+            buf.as_ptr(),
+            dict_size,
+        )
+    }
+    .expect("partial small prefix path failed");
+    assert_eq!(&buf[dict_size..dict_size + n], payload.as_ref());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Double-dict streaming path — exercises decompress_safe_double_dict via
+// decompress_safe_continue (three-segment scenario).
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn decompress_safe_continue_double_dict_path() {
+    // Triggers the double-dict branch in decompress_safe_continue:
+    //   segment 1: decode into buf1 (first call, prefix_size = n1)
+    //   segment 2: decode into buf2 (non-contiguous → ext_dict = buf1 content)
+    //   segment 3: decode into buf2 contiguous with segment 2:
+    //               prefix_size = n2 < 65535, ext_dict_size = n1 > 0
+    //               → decompress_safe_double_dict is called
+    let d1 = b"alpha ";
+    let d2 = b"beta ";
+    let d3 = b"gamma end";
+    let c1 = compress_input(d1);
+    let c2 = compress_input(d2);
+    let c3 = compress_input(d3);
+
+    let mut buf1 = vec![0u8; 256];
+    let mut buf2 = vec![0u8; 512];
+    let mut ctx = Lz4StreamDecode::new();
+
+    // Segment 1 — first call into buf1.
+    let n1 = unsafe {
+        decompress_safe_continue(
+            &mut ctx,
+            c1.as_ptr(),
+            buf1.as_mut_ptr(),
+            c1.len(),
+            buf1.len(),
+        )
+    }
+    .expect("segment 1 failed");
+    assert_eq!(&buf1[..n1], d1.as_ref());
+
+    // Segment 2 — non-contiguous (buf2 ≠ ctx.prefix_end) → wraps, sets ext_dict.
+    let n2 = unsafe {
+        decompress_safe_continue(
+            &mut ctx,
+            c2.as_ptr(),
+            buf2.as_mut_ptr(),
+            c2.len(),
+            buf2.len(),
+        )
+    }
+    .expect("segment 2 failed");
+    assert_eq!(&buf2[..n2], d2.as_ref());
+
+    // Segment 3 — contiguous with segment 2, small prefix, has ext_dict
+    //             → decompress_safe_double_dict branch.
+    let n3 = unsafe {
+        decompress_safe_continue(
+            &mut ctx,
+            c3.as_ptr(),
+            buf2.as_mut_ptr().add(n2), // immediately after segment 2
+            c3.len(),
+            buf2.len() - n2,
+        )
+    }
+    .expect("segment 3 (double-dict) failed");
+    assert_eq!(&buf2[n2..n2 + n3], d3.as_ref());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Large rolling-prefix path — exercises decompress_safe_with_prefix64k via
+// decompress_safe_continue (accumulate >= 65535 bytes of prefix first).
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn decompress_safe_continue_large_prefix_triggers_prefix64k() {
+    // Accumulate >= 65535 bytes into a linear buf, then decode one more block
+    // contiguously → ctx.prefix_size >= KB64_MINUS1 → decompress_safe_with_prefix64k.
+    //
+    // We build KB64_MINUS1 bytes of prefix by compressing and decompressing
+    // a single large block first (no continuation needed since the first block
+    // sets prefix_size directly).
+    let large_payload: Vec<u8> = (0u8..=255).cycle().take(KB64_MINUS1).collect();
+    let c_large = compress_input(&large_payload);
+
+    let extra_payload = b"extra block after 64k prefix!";
+    let c_extra = compress_input(extra_payload);
+
+    // Ring buffer: must hold KB64_MINUS1 + extra bytes with no overlap issues.
+    let total = KB64_MINUS1 + extra_payload.len() + 64;
+    let mut buf = vec![0u8; total];
+    let mut ctx = Lz4StreamDecode::new();
+
+    // First call: fills buf[0..KB64_MINUS1], sets prefix_size = KB64_MINUS1.
+    let n_large = unsafe {
+        decompress_safe_continue(
+            &mut ctx,
+            c_large.as_ptr(),
+            buf.as_mut_ptr(),
+            c_large.len(),
+            KB64_MINUS1 + 32,
+        )
+    }
+    .expect("large first block failed");
+    assert_eq!(n_large, KB64_MINUS1);
+
+    // Second call: contiguous, prefix_size = 65535 >= KB64_MINUS1
+    //              → decompress_safe_with_prefix64k is called.
+    let n_extra = unsafe {
+        decompress_safe_continue(
+            &mut ctx,
+            c_extra.as_ptr(),
+            buf.as_mut_ptr().add(n_large), // immediately after first block
+            c_extra.len(),
+            buf.len() - n_large,
+        )
+    }
+    .expect("extra block via prefix64k failed");
+    assert_eq!(&buf[n_large..n_large + n_extra], extra_payload.as_ref());
 }

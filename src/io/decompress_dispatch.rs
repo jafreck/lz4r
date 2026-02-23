@@ -607,13 +607,10 @@ pub fn decompress_multiple_filenames(srcs: &[&str], suffix: &str, prefs: &Prefs)
 
     let total_failures = missing_files + skipped_files;
     if total_failures > 0 {
-        Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!(
-                "{} file(s) could not be decompressed; {} file(s) skipped",
-                missing_files, skipped_files
-            ),
-        ))
+        Err(io::Error::other(format!(
+            "{} file(s) could not be decompressed; {} file(s) skipped",
+            missing_files, skipped_files
+        )))
     } else {
         Ok(())
     }

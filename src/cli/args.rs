@@ -279,8 +279,7 @@ pub fn parse_args_from(
                 nb_workers = val as usize;
             } else if let Some(rest) = long_command_w_arg(argument, "--fast") {
                 // --fast[=N]: negative acceleration level (higher = faster, lower quality).
-                if rest.starts_with('=') {
-                    let value_str = &rest[1..];
+                if let Some(value_str) = rest.strip_prefix('=') {
                     if let Some((fast_level, remainder)) = read_u32_from_str(value_str) {
                         if !remainder.is_empty() {
                             return Err(anyhow!("bad usage: --fast: invalid argument"));
@@ -671,9 +670,8 @@ fn parse_next_uint32<'a>(
     arg_idx: &mut usize,
     exe_name: &str,
 ) -> anyhow::Result<(u32, &'a str)> {
-    if rest.starts_with('=') {
+    if let Some(value_str) = rest.strip_prefix('=') {
         // `--option=VALUE` syntax.
-        let value_str = &rest[1..];
         let (val, suffix) = read_u32_from_str(value_str)
             .ok_or_else(|| anyhow!("bad usage: {} expected numeric argument", exe_name))?;
         Ok((val, suffix))

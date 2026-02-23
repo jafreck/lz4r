@@ -137,7 +137,7 @@ pub fn bench_mem(
     } else {
         file_sizes.len()
     };
-    let max_nb_blocks = (src_size + block_size - 1) / block_size + nb_files;
+    let max_nb_blocks = src_size.div_ceil(block_size) + nb_files;
 
     // ── multipliers for decode-only mode ──────────────────────────────────────
     let dec_multiplier: usize = if config.decode_only { 255 } else { 1 };
@@ -170,7 +170,7 @@ pub fn bench_mem(
         let mut src_offset = 0usize;
         for &file_size_item in effective_sizes {
             let mut remaining = file_size_item;
-            let nb_blocks_for_this_file = (remaining + block_size - 1) / block_size;
+            let nb_blocks_for_this_file = remaining.div_ceil(block_size);
             for _ in 0..nb_blocks_for_this_file {
                 let this_block_size = remaining.min(block_size);
 
@@ -575,8 +575,7 @@ pub fn bench_mem(
     }
 
     if bench_error {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(io::Error::other(
             "benchmark reported errors (compression or checksum failure)",
         ));
     }

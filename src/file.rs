@@ -269,16 +269,15 @@ impl<W: Write> Write for Lz4WriteFile<W> {
                 lz4f_compress_update(&mut self.cctx, &mut self.dst_buf, &buf[p..p + chunk], None)
                     .map_err(|e| {
                     self.errored = true;
-                    io::Error::new(io::ErrorKind::Other, e.to_string())
+                    io::Error::other(e.to_string())
                 })?;
 
             self.inner
                 .as_mut()
                 .expect("inner writer already taken")
                 .write_all(&self.dst_buf[..compressed])
-                .map_err(|e| {
+                .inspect_err(|e| {
                     self.errored = true;
-                    e
                 })?;
 
             p += chunk;

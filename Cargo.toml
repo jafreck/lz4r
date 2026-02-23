@@ -1,12 +1,12 @@
 [package]
-name = "lz4-programs"
+name = "lz4r"
 version = "1.10.0"
 edition = "2021"
 description = "LZ4 CLI programs — Rust port of lz4-1.10.0/programs"
 license = "GPL-2.0-only"
 repository = "https://github.com/jafreck/Lz4r"
 homepage = "https://github.com/jafreck/Lz4r"
-documentation = "https://docs.rs/lz4-programs"
+documentation = "https://docs.rs/lz4r"
 readme = "README.md"
 keywords = ["lz4", "compression", "decompression", "codec"]
 categories = ["compression", "encoding"]

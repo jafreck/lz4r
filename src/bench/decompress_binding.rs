@@ -86,7 +86,7 @@ pub fn decompress_frame_block(
     skip_checksums: bool,
 ) -> io::Result<usize> {
     let mut dctx: Box<Lz4FDCtx> = lz4f_create_decompression_context(LZ4F_VERSION)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        .map_err(|e| io::Error::other(e.to_string()))?;
 
     let opts = DecompressOptions {
         stable_dst: true,

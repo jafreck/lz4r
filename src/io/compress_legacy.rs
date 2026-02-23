@@ -67,13 +67,8 @@ fn compress_block_fast(src: &[u8], dst: &mut Vec<u8>, clevel: i32) -> io::Result
     let bound = compress_bound(src.len() as i32) as usize;
     dst.resize(bound + LEGACY_BLOCK_HEADER_SIZE, 0);
 
-    let c_size =
-        compress_fast(src, &mut dst[LEGACY_BLOCK_HEADER_SIZE..], acceleration).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("fast compression failed: {:?}", e),
-            )
-        })?;
+    let c_size = compress_fast(src, &mut dst[LEGACY_BLOCK_HEADER_SIZE..], acceleration)
+        .map_err(|e| io::Error::other(format!("fast compression failed: {:?}", e)))?;
 
     // Write the compressed-block size as a 4-byte little-endian prefix.
     dst[..4].copy_from_slice(&(c_size as u32).to_le_bytes());
@@ -101,10 +96,7 @@ fn compress_block_hc(src: &[u8], dst: &mut Vec<u8>, clevel: i32) -> io::Result<u
     };
 
     if c_size < 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            "HC compression failed",
-        ));
+        return Err(io::Error::other("HC compression failed"));
     }
 
     let c_size = c_size as usize;
@@ -278,10 +270,10 @@ pub fn compress_multiple_filenames_legacy(
     final_time_display(time_start, cpu_start, total_processed);
 
     if missed_files > 0 {
-        Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("{} file(s) could not be compressed", missed_files),
-        ))
+        Err(io::Error::other(format!(
+            "{} file(s) could not be compressed",
+            missed_files
+        )))
     } else {
         Ok(())
     }

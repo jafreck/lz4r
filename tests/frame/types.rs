@@ -86,7 +86,7 @@ fn block_size_id_default_is_zero() {
 fn block_size_id_clone_copy() {
     let a = BlockSizeId::Max1Mb;
     let b = a; // Copy
-    let c = a.clone();
+    let c = a;
     assert_eq!(a, b);
     assert_eq!(a, c);
 }

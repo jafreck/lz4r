@@ -453,11 +453,11 @@ pub unsafe fn decompress_safe_continue(
         debug_assert!(ctx.ext_dict_size == 0);
         let mut tmp_dst = core::slice::from_raw_parts_mut(dst_ptr, max_output);
         let tmp_src = core::slice::from_raw_parts(src_ptr, src_size);
-        result = decompress_safe(tmp_src, &mut tmp_dst)?;
+        result = decompress_safe(tmp_src, tmp_dst)?;
         ctx.prefix_size = result;
         // SAFETY: dst_ptr + result stays within the caller's buffer.
         ctx.prefix_end = dst_ptr.add(result) as *const u8;
-    } else if ctx.prefix_end == dst_ptr as *const u8 {
+    } else if std::ptr::eq(ctx.prefix_end, dst_ptr) {
         // Rolling the current segment: new block is contiguous with previous.
         if ctx.prefix_size >= KB64_MINUS1 {
             result = decompress_safe_with_prefix64k(src_ptr, dst_ptr, src_size, max_output)?;
@@ -533,7 +533,7 @@ pub unsafe fn decompress_safe_using_dict(
     }
     // Check if dictionary is immediately before the output buffer.
     // SAFETY: dict_start + dict_size is within the dict allocation.
-    if dict_start.add(dict_size) == dst_ptr as *const u8 {
+    if std::ptr::eq(dict_start.add(dict_size), dst_ptr) {
         if dict_size >= KB64_MINUS1 {
             return decompress_safe_with_prefix64k(src_ptr, dst_ptr, src_size, max_output);
         }
@@ -570,7 +570,7 @@ pub unsafe fn decompress_safe_partial_using_dict(
     }
     // Check if dictionary is immediately before the output buffer.
     // SAFETY: dict_start + dict_size is within the dict allocation.
-    if dict_start.add(dict_size) == dst_ptr as *const u8 {
+    if std::ptr::eq(dict_start.add(dict_size), dst_ptr) {
         if dict_size >= KB64_MINUS1 {
             return decompress_safe_partial_with_prefix64k(
                 src_ptr,
