@@ -82,6 +82,7 @@ pub fn compress_bound(input_size: i32) -> i32 {
 /// All pointers must be valid for their respective access sizes.  `cctx` must
 /// be exclusively accessed for the duration of the call.
 #[inline(always)]
+#[allow(unused_assignments)] // dead-store inits mirror C variable declarations; vars are set before first read
 pub unsafe fn compress_generic_validated(
     cctx: *mut StreamStateInternal,
     source: *const u8,
@@ -212,6 +213,7 @@ pub unsafe fn compress_generic_validated(
         forward_h = hash_position(ip, table_type);
 
         // ── Main find-match / encode loop ────────────────────────────────────
+        #[allow(unused_labels)]
         'main: loop {
             // Declare per-iteration working variables.
             // These are always overwritten before being read.

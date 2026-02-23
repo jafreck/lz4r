@@ -12,7 +12,7 @@ pub mod types;
 
 // Re-export key public API items at the module level.
 pub use api::{
-    compress_hc, compress_hc_continue, compress_hc_dest_size, compress_hc_ext_state,
+    attach_hc_dictionary, compress_hc, compress_hc_continue, compress_hc_dest_size, compress_hc_ext_state,
     favor_decompression_speed, init_stream_hc, load_dict_hc, reset_stream_hc,
     reset_stream_hc_fast, save_dict_hc, set_compression_level, sizeof_state_hc, Lz4StreamHc,
 };

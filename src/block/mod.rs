@@ -13,6 +13,6 @@ pub use compress::{
     compress_bound, compress_default, compress_dest_size, compress_fast, Lz4Error,
     LZ4_ACCELERATION_DEFAULT, LZ4_ACCELERATION_MAX, LZ4_MAX_INPUT_SIZE,
 };
-pub use decompress_api::{decoder_ring_buffer_size, decompress_safe, decompress_safe_partial, Lz4StreamDecode};
+pub use decompress_api::{decoder_ring_buffer_size, decompress_safe, decompress_safe_partial, decompress_safe_using_dict, Lz4StreamDecode};
 pub use stream::Lz4Stream;
 pub use types::{StreamStateInternal, LZ4_DISTANCE_MAX};

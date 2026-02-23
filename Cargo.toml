@@ -1,12 +1,68 @@
 [package]
-name = "lz4"
+name = "lz4-programs"
 version = "1.10.0"
 edition = "2021"
-description = "LZ4 lossless compression algorithm — pure Rust port"
-license = "BSD-2-Clause"
+description = "LZ4 CLI programs — Rust port of lz4-1.10.0/programs"
+license = "GPL-2.0-only"
+
+[[bin]]
+name = "lz4"
+path = "src/main.rs"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+name = "lz4"
+path = "src/lib.rs"
+
+[features]
+# Enable multi-threaded compression (corresponds to LZ4IO_MULTITHREAD in lz4conf.h).
+# On Windows the C source enables this by default; in Rust it is opt-in via feature flag.
+multithread = []
+# Enable recursive directory traversal (corresponds to UTIL_ENABLE_RECURSIVE_SEARCH in lz4cli.c).
+recursive = []
+# Attempt to raise process scheduling priority via setpriority() during benchmarking.
+# Corresponds to SET_REALTIME_PRIORITY in platform.h.  Requires appropriate OS privileges.
+realtime-priority = []
 
 [dependencies]
-xxhash-rust = { version = "0.8", features = ["xxh32"] }
+lz4_flex = "0.11"
+libc = "0.2"
+lz4-sys = "1.9"
+rayon = "1"
+walkdir = "2"
+filetime = "0.2"
+nix = { version = "0.27", features = ["fs", "process", "resource", "user"] }
+clap = { version = "4", features = ["derive"] }
+crossbeam-channel = "0.5"
+num_cpus = "1"
+anyhow = "1"
+xxhash-rust = { version = "0.8", features = ["xxh32", "xxh64"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winapi = { version = "0.3", features = ["processthreadsapi", "minwindef", "ioapiset", "winioctl", "winnt"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[[test]]
+name = "e2e_frame_oneshot"
+path = "e2e/frame_oneshot.rs"
+
+[[test]]
+name = "e2e_frame_streaming"
+path = "e2e/frame_streaming.rs"
+
+[[test]]
+name = "e2e_file_api"
+path = "e2e/file_api.rs"
+
+[[test]]
+name = "e2e_io_engine"
+path = "e2e/io_engine.rs"
+
+[[test]]
+name = "e2e_cli_integration"
+path = "e2e/cli_integration.rs"
+
+[[test]]
+name = "e2e_legacy_format"
+path = "e2e/legacy_format.rs"

@@ -1,40 +1,78 @@
-// Integration tests for task-001: Cargo.toml + src/lib.rs placeholder
+// Unit tests for task-001: Cargo.toml + src/lib.rs scaffold
 //
 // These tests verify that the initial crate scaffolding (task-001) is correct:
 // - The crate compiles without errors
-// - The crate-level module structure is accessible
-// - The xxhash-rust dependency is available (required for content checksums in
-//   the future Frame API implementation)
+// - The crate-level module structure (lorem, timefn, config, util, threadpool,
+//   io, bench) is declared in lib.rs
+// - Key runtime dependencies (lz4_flex, anyhow) are available and functional
 
 // Test that the crate root compiles and links successfully.
-// This is the minimal parity check for a placeholder lib.rs.
+// This is the minimal parity check for the placeholder lib.rs.
 #[test]
 fn crate_compiles() {
-    // If this test file compiles and links against `lz4`, the crate is
-    // structurally valid. No assertions needed beyond successful compilation.
+    // If this test file compiles and links against `lz4_programs`, the crate
+    // is structurally valid. No assertions needed beyond successful compilation.
 }
 
-// Verify the xxhash-rust dependency resolves correctly. The Frame API (future
-// tasks) will use xxh32 streaming state for content checksums, so its
-// availability must be confirmed early.
+// Verify the lz4_flex dependency resolves and can compress/decompress a
+// trivial payload. lz4_flex provides the core block-format compression that
+// the bench module (future task-023..task-028) will use.
 #[test]
-fn xxhash_dependency_available() {
-    // xxhash-rust re-exports xxh32 via the `xxh32` module when the feature
-    // is enabled. Calling the one-shot hash function confirms the dependency
-    // compiled and linked successfully.
-    let hash = xxhash_rust::xxh32::xxh32(b"lz4", 0);
-    // Known-good value for input b"lz4" with seed 0 (verified against
-    // xxhash reference implementation).
-    assert_ne!(hash, 0, "xxh32 should return a non-zero hash for non-empty input");
+fn lz4_flex_dependency_available() {
+    let input = b"lz4-programs crate scaffold verification";
+    let compressed = lz4_flex::compress_prepend_size(input);
+    let decompressed = lz4_flex::decompress_size_prepended(&compressed)
+        .expect("decompression should succeed");
+    assert_eq!(decompressed, input, "round-trip through lz4_flex should be lossless");
 }
 
-// Verify that calling xxh32 on empty input still returns a deterministic,
-// non-panicking result (the seed alone drives the hash when input is empty).
+// Verify lz4_flex handles empty input without panicking; this matches the
+// C LZ4_compress_fast() behavior for zero-length inputs.
 #[test]
-fn xxhash_empty_input_does_not_panic() {
-    let hash = xxhash_rust::xxh32::xxh32(b"", 0);
-    // Empty-input with seed=0 produces a fixed value defined by the spec.
-    // We only assert it is deterministic (calling twice gives same result).
-    let hash2 = xxhash_rust::xxh32::xxh32(b"", 0);
-    assert_eq!(hash, hash2);
+fn lz4_flex_empty_input() {
+    let compressed = lz4_flex::compress_prepend_size(b"");
+    let decompressed = lz4_flex::decompress_size_prepended(&compressed)
+        .expect("empty decompression should succeed");
+    assert!(decompressed.is_empty());
+}
+
+// Verify the anyhow dependency is available; it is used pervasively for
+// error propagation throughout the migrated lz4io module (future tasks).
+#[test]
+fn anyhow_dependency_available() {
+    fn fallible() -> anyhow::Result<u32> {
+        Ok(42)
+    }
+    assert_eq!(fallible().unwrap(), 42);
+}
+
+// Verify anyhow::bail! produces a proper error that can be inspected.
+#[test]
+fn anyhow_error_propagation() {
+    fn failing() -> anyhow::Result<()> {
+        anyhow::bail!("expected test error");
+    }
+    let err = failing().unwrap_err();
+    assert!(err.to_string().contains("expected test error"));
+}
+
+// Verify the lz4_flex frame encoder/decoder round-trips correctly.
+// The frame format is the wire format used by lz4io (future tasks).
+#[test]
+fn lz4_flex_frame_round_trip() {
+    use lz4_flex::frame::{FrameDecoder, FrameEncoder};
+    use std::io::{Read, Write};
+
+    let input = b"hello from lz4-programs frame round-trip test";
+    let mut encoded = Vec::new();
+    {
+        let mut enc = FrameEncoder::new(&mut encoded);
+        enc.write_all(input).expect("frame encode write");
+        enc.finish().expect("frame encode finish");
+    }
+    let mut decoded = Vec::new();
+    FrameDecoder::new(encoded.as_slice())
+        .read_to_end(&mut decoded)
+        .expect("frame decode");
+    assert_eq!(decoded, input);
 }
