@@ -144,22 +144,22 @@ C-ABI symbols (`LZ4_compress_default`, `LZ4_compress_fast`, `LZ4_decompress_safe
 `LZ4_compress_HC`) are exported as `#[no_mangle] pub unsafe extern "C"` shims that
 forward to the native Rust block and HC APIs.
 
-Environment: lzbench 2.2.1 | Clang 17 | 64-bit macOS (Apple Silicon) | Silesia corpus
+Environment: lzbench 2.2.1 | Clang 17 | Apple M2 Max (12-core, 64 GB) | Silesia corpus
 
 #### Compression throughput summary (MB/s) — `lz4` default
 
 | File | C | Rust | Δ |
 |------|--:|-----:|--:|
-| webster | 613 | 569 | −7% |
-| mozilla | 861 | 803 | −7% |
-| mr | 865 | 815 | −6% |
-| dickens | 534 | 509 | −5% |
-| x-ray | 2706 | 2313 | −15% |
-| ooffice | 814 | 729 | −10% |
-| xml | 1131 | 1117 | −1% |
+| webster | 623 | 588 | −6% |
+| mozilla | 906 | 819 | −10% |
+| mr | 882 | 823 | −7% |
+| dickens | 554 | 515 | −7% |
+| x-ray | 2718 | 2339 | −14% |
+| ooffice | 838 | 751 | −10% |
+| xml | 1131 | 1119 | −1% |
 
-Typical gap: **0–15% slower on compression, 0–27% slower on decompression**.
-At `lz4hc -1` many files are within measurement noise (0–2%).
+**Averaged across all 120 data points (5 codecs × 12 files × compress + decompress):
+Rust is ~10% slower than C.** Compress-only mean: -9.9%; decompress-only mean: -9.7%.
 
 > Full per-file tables for all five codec variants (`lz4`, `lz4hc -1/-4/-8/-12`),
 > correctness verification (byte-for-byte size identity across all 12 Silesia files),
