@@ -55,7 +55,9 @@ pub fn read_u32_from_str(s: &str) -> Option<(u32, &str)> {
 
     let mut result: u32 = 0;
     while i < bytes.len() && bytes[i].is_ascii_digit() {
-        result = result.wrapping_mul(10).wrapping_add((bytes[i] - b'0') as u32);
+        result = result
+            .wrapping_mul(10)
+            .wrapping_add((bytes[i] - b'0') as u32);
         i += 1;
     }
 
@@ -239,7 +241,10 @@ mod tests {
 
     #[test]
     fn test_long_command_w_arg_match() {
-        assert_eq!(long_command_w_arg("--block-size=64K", "--block-size="), Some("64K"));
+        assert_eq!(
+            long_command_w_arg("--block-size=64K", "--block-size="),
+            Some("64K")
+        );
     }
 
     #[test]

@@ -4,11 +4,11 @@
 //! functions using real temp files.  Corresponds to `LZ4IO_compressFilename`
 //! / `LZ4IO_decompressFilename` in the original C lz4 codebase.
 
+use lz4::io::prefs::{set_notification_level, Prefs};
 use lz4::io::{
-    compress_filename, compress_multiple_filenames, decompress_filename,
-    LZ4IO_MAGICNUMBER, LEGACY_MAGICNUMBER,
+    compress_filename, compress_multiple_filenames, decompress_filename, LEGACY_MAGICNUMBER,
+    LZ4IO_MAGICNUMBER,
 };
-use lz4::io::prefs::{Prefs, set_notification_level};
 use std::fs;
 use tempfile::TempDir;
 
@@ -126,7 +126,11 @@ fn test_compress_high_level() {
     decompress_filename(lz4.to_str().unwrap(), out.to_str().unwrap(), &prefs)
         .expect("decompress of level-12 output should succeed");
 
-    assert_eq!(fs::read(&out).unwrap(), original, "level-12 roundtrip must be lossless");
+    assert_eq!(
+        fs::read(&out).unwrap(),
+        original,
+        "level-12 roundtrip must be lossless"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -182,8 +186,7 @@ fn test_decompress_truncated_frame_returns_error() {
     let half = compressed.len() / 2;
     fs::write(&truncated, &compressed[..half]).unwrap();
 
-    let result =
-        decompress_filename(truncated.to_str().unwrap(), out.to_str().unwrap(), &prefs);
+    let result = decompress_filename(truncated.to_str().unwrap(), out.to_str().unwrap(), &prefs);
     assert!(
         result.is_err(),
         "decompress of truncated frame should return Err, got Ok"
@@ -202,8 +205,14 @@ fn test_compress_multiple_files() {
 
     let files: Vec<(&[u8], &str)> = vec![
         (b"content of file one", "file1.txt"),
-        (b"content of file two -- slightly longer text here", "file2.txt"),
-        (b"content of file three --- even more text for variety", "file3.txt"),
+        (
+            b"content of file two -- slightly longer text here",
+            "file2.txt",
+        ),
+        (
+            b"content of file three --- even more text for variety",
+            "file3.txt",
+        ),
     ];
 
     let mut paths: Vec<String> = Vec::new();
@@ -226,8 +235,12 @@ fn test_compress_multiple_files() {
         assert!(lz4_path.exists(), "{}.lz4 must exist", name);
 
         let out_path = dir.path().join(format!("{}.out", name));
-        decompress_filename(lz4_path.to_str().unwrap(), out_path.to_str().unwrap(), &prefs)
-            .unwrap_or_else(|e| panic!("decompress of {} failed: {}", name, e));
+        decompress_filename(
+            lz4_path.to_str().unwrap(),
+            out_path.to_str().unwrap(),
+            &prefs,
+        )
+        .unwrap_or_else(|e| panic!("decompress of {} failed: {}", name, e));
 
         assert_eq!(
             fs::read(&out_path).unwrap(),
@@ -256,15 +269,16 @@ fn test_output_magic_number() {
         .expect("compress should succeed");
 
     let bytes = fs::read(&lz4).unwrap();
-    assert!(bytes.len() >= 4, "compressed output must have at least 4 bytes");
+    assert!(
+        bytes.len() >= 4,
+        "compressed output must have at least 4 bytes"
+    );
 
     let magic = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
     assert_eq!(
-        magic,
-        LZ4IO_MAGICNUMBER,
+        magic, LZ4IO_MAGICNUMBER,
         "first 4 bytes must equal LZ4IO_MAGICNUMBER (0x{:08X}), got 0x{:08X}",
-        LZ4IO_MAGICNUMBER,
-        magic
+        LZ4IO_MAGICNUMBER, magic
     );
 }
 
@@ -302,7 +316,10 @@ fn test_compress_multiple_files_one_missing() {
 
     // The good file's .lz4 should still exist.
     let good_lz4 = dir.path().join("good.txt.lz4");
-    assert!(good_lz4.exists(), "good.txt.lz4 must exist despite the missing peer");
+    assert!(
+        good_lz4.exists(),
+        "good.txt.lz4 must exist despite the missing peer"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

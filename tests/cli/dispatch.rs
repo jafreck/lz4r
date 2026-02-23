@@ -112,7 +112,10 @@ fn compress_single_file_explicit_output() {
         .expect("spawn lz4");
     assert!(status.success());
     assert!(output.exists(), ".lz4 output file must exist");
-    assert!(output.metadata().unwrap().len() > 0, ".lz4 file must be non-empty");
+    assert!(
+        output.metadata().unwrap().len() > 0,
+        ".lz4 file must be non-empty"
+    );
 }
 
 #[test]
@@ -140,14 +143,18 @@ fn decompress_single_file_explicit_output() {
     let recovered = compressed.with_file_name("recovered.txt");
     let status = Command::new(lz4_bin())
         .args([
-            "-d", "-f",
+            "-d",
+            "-f",
             compressed.to_str().unwrap(),
             recovered.to_str().unwrap(),
         ])
         .status()
         .expect("spawn lz4 -d");
     assert!(status.success());
-    assert_eq!(fs::read(&recovered).expect("read recovered"), b"decompress test content");
+    assert_eq!(
+        fs::read(&recovered).expect("read recovered"),
+        b"decompress test content"
+    );
 }
 
 #[test]
@@ -156,7 +163,12 @@ fn decompress_exit_code_zero_on_success() {
     let compressed = compress_file(&input);
     let recovered = compressed.with_file_name("recovered2.txt");
     let status = Command::new(lz4_bin())
-        .args(["-d", "-f", compressed.to_str().unwrap(), recovered.to_str().unwrap()])
+        .args([
+            "-d",
+            "-f",
+            compressed.to_str().unwrap(),
+            recovered.to_str().unwrap(),
+        ])
         .status()
         .expect("spawn");
     assert_eq!(status.code(), Some(0));
@@ -174,7 +186,12 @@ fn compress_decompress_round_trip_small() {
     let compressed = compress_file(&input);
     let recovered = compressed.with_file_name("round_trip.txt");
     Command::new(lz4_bin())
-        .args(["-d", "-f", compressed.to_str().unwrap(), recovered.to_str().unwrap()])
+        .args([
+            "-d",
+            "-f",
+            compressed.to_str().unwrap(),
+            recovered.to_str().unwrap(),
+        ])
         .status()
         .expect("decompress")
         .success()
@@ -191,7 +208,12 @@ fn compress_decompress_round_trip_binary_data() {
     let compressed = compress_file(&input);
     let recovered = compressed.with_file_name("round_trip_bin.txt");
     Command::new(lz4_bin())
-        .args(["-d", "-f", compressed.to_str().unwrap(), recovered.to_str().unwrap()])
+        .args([
+            "-d",
+            "-f",
+            compressed.to_str().unwrap(),
+            recovered.to_str().unwrap(),
+        ])
         .status()
         .expect("decompress");
     assert_eq!(fs::read(&recovered).expect("read recovered"), original);
@@ -204,7 +226,12 @@ fn compress_decompress_round_trip_empty_file() {
     let compressed = compress_file(&input);
     let recovered = compressed.with_file_name("round_trip_empty.txt");
     Command::new(lz4_bin())
-        .args(["-d", "-f", compressed.to_str().unwrap(), recovered.to_str().unwrap()])
+        .args([
+            "-d",
+            "-f",
+            compressed.to_str().unwrap(),
+            recovered.to_str().unwrap(),
+        ])
         .status()
         .expect("decompress");
     assert_eq!(fs::read(&recovered).expect("read recovered"), b"");
@@ -226,7 +253,11 @@ fn test_mode_valid_archive_exits_zero() {
         .stderr(Stdio::null())
         .status()
         .expect("spawn lz4 -t");
-    assert_eq!(status.code(), Some(0), "lz4 -t on valid archive must exit 0");
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "lz4 -t on valid archive must exit 0"
+    );
 }
 
 #[test]
@@ -293,7 +324,7 @@ fn test_mode_corrupt_archive_exits_nonzero() {
 fn pipe_compress_stdin_to_stdout() {
     // echo data | lz4 -c - → compressed bytes on stdout (non-empty)
     let mut child = Command::new(lz4_bin())
-        .args(["-c", "-"])   // -c forces stdout; "-" is stdin
+        .args(["-c", "-"]) // -c forces stdout; "-" is stdin
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -307,7 +338,10 @@ fn pipe_compress_stdin_to_stdout() {
         .unwrap();
     let output = child.wait_with_output().expect("wait");
     assert!(output.status.success(), "pipe compress must succeed");
-    assert!(!output.stdout.is_empty(), "compressed output must not be empty");
+    assert!(
+        !output.stdout.is_empty(),
+        "compressed output must not be empty"
+    );
 }
 
 #[test]
@@ -348,7 +382,9 @@ fn pipe_compress_then_decompress_roundtrip() {
         .write_all(&compress_out.stdout)
         .unwrap();
     drop(decompress_child.stdin.take());
-    let decompress_out = decompress_child.wait_with_output().expect("wait decompress");
+    let decompress_out = decompress_child
+        .wait_with_output()
+        .expect("wait decompress");
     assert!(decompress_out.status.success());
     assert_eq!(decompress_out.stdout, original);
 }
@@ -367,18 +403,20 @@ fn compress_multiple_files() {
     fs::write(&file1, b"file one").unwrap();
     fs::write(&file2, b"file two").unwrap();
     let status = Command::new(lz4_bin())
-        .args([
-            "-m", "-f",
-            file1.to_str().unwrap(),
-            file2.to_str().unwrap(),
-        ])
+        .args(["-m", "-f", file1.to_str().unwrap(), file2.to_str().unwrap()])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
         .expect("spawn multiple inputs");
     assert!(status.success());
-    assert!(dir.path().join("a.txt.lz4").exists(), "a.txt.lz4 must be created");
-    assert!(dir.path().join("b.txt.lz4").exists(), "b.txt.lz4 must be created");
+    assert!(
+        dir.path().join("a.txt.lz4").exists(),
+        "a.txt.lz4 must be created"
+    );
+    assert!(
+        dir.path().join("b.txt.lz4").exists(),
+        "b.txt.lz4 must be created"
+    );
 }
 
 #[test]
@@ -393,12 +431,16 @@ fn decompress_multiple_files() {
     // Compress each first
     Command::new(lz4_bin())
         .args(["-f", file1.to_str().unwrap()])
-        .stdout(Stdio::null()).stderr(Stdio::null())
-        .status().expect("compress 1");
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("compress 1");
     Command::new(lz4_bin())
         .args(["-f", file2.to_str().unwrap()])
-        .stdout(Stdio::null()).stderr(Stdio::null())
-        .status().expect("compress 2");
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("compress 2");
     // Now decompress both using -m flag
     let lz4_1 = dir.path().join("c.txt.lz4");
     let lz4_2 = dir.path().join("d.txt.lz4");
@@ -407,7 +449,9 @@ fn decompress_multiple_files() {
     fs::remove_file(&file2).unwrap();
     let status = Command::new(lz4_bin())
         .args([
-            "-d", "-m", "-f",
+            "-d",
+            "-m",
+            "-f",
             lz4_1.to_str().unwrap(),
             lz4_2.to_str().unwrap(),
         ])
@@ -446,7 +490,12 @@ fn legacy_format_flag_produces_valid_compressed_file() {
     let (_dir, input) = setup_input(original);
     let output = input.with_extension("txt.lz4");
     let status = Command::new(lz4_bin())
-        .args(["-l", "-f", input.to_str().unwrap(), output.to_str().unwrap()])
+        .args([
+            "-l",
+            "-f",
+            input.to_str().unwrap(),
+            output.to_str().unwrap(),
+        ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
@@ -515,15 +564,22 @@ fn force_overwrite_replaces_existing_output() {
     // First compress (creates output)
     Command::new(lz4_bin())
         .args(["-f", input.to_str().unwrap(), output.to_str().unwrap()])
-        .stdout(Stdio::null()).stderr(Stdio::null())
-        .status().expect("first compress");
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("first compress");
     assert!(output.exists());
     // Second compress with -f → should succeed and overwrite
     let status = Command::new(lz4_bin())
         .args(["-f", input.to_str().unwrap(), output.to_str().unwrap()])
-        .stdout(Stdio::null()).stderr(Stdio::null())
-        .status().expect("second compress");
-    assert!(status.success(), "-f must allow overwriting existing output");
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("second compress");
+    assert!(
+        status.success(),
+        "-f must allow overwriting existing output"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -537,14 +593,28 @@ fn high_compression_level_produces_valid_output() {
     let (_dir, input) = setup_input(original);
     let output = input.with_extension("txt.lz4");
     Command::new(lz4_bin())
-        .args(["-9", "-f", input.to_str().unwrap(), output.to_str().unwrap()])
-        .stdout(Stdio::null()).stderr(Stdio::null())
-        .status().expect("compress -9");
+        .args([
+            "-9",
+            "-f",
+            input.to_str().unwrap(),
+            output.to_str().unwrap(),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("compress -9");
     let recovered = input.with_extension("txt.recovered");
     Command::new(lz4_bin())
-        .args(["-d", "-f", output.to_str().unwrap(), recovered.to_str().unwrap()])
-        .stdout(Stdio::null()).stderr(Stdio::null())
-        .status().expect("decompress");
+        .args([
+            "-d",
+            "-f",
+            output.to_str().unwrap(),
+            recovered.to_str().unwrap(),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("decompress");
     assert_eq!(fs::read(&recovered).unwrap(), original);
 }
 
@@ -555,16 +625,30 @@ fn fast_mode_flag_produces_valid_output() {
     let (_dir, input) = setup_input(original);
     let output = input.with_extension("txt.lz4");
     Command::new(lz4_bin())
-        .args(["-1", "-f", input.to_str().unwrap(), output.to_str().unwrap()])
-        .stdout(Stdio::null()).stderr(Stdio::null())
-        .status().expect("compress -1");
+        .args([
+            "-1",
+            "-f",
+            input.to_str().unwrap(),
+            output.to_str().unwrap(),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("compress -1");
     assert!(output.exists());
     // Verify round-trip
     let recovered = input.with_extension("txt.fast");
     Command::new(lz4_bin())
-        .args(["-d", "-f", output.to_str().unwrap(), recovered.to_str().unwrap()])
-        .stdout(Stdio::null()).stderr(Stdio::null())
-        .status().expect("decompress");
+        .args([
+            "-d",
+            "-f",
+            output.to_str().unwrap(),
+            recovered.to_str().unwrap(),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("decompress");
     assert_eq!(fs::read(&recovered).unwrap(), original);
 }
 
@@ -602,8 +686,10 @@ fn auto_decompress_output_filename_strips_lz4_extension() {
     // Compress to get the .lz4 file
     Command::new(lz4_bin())
         .args(["-f", input.to_str().unwrap(), compressed.to_str().unwrap()])
-        .stdout(Stdio::null()).stderr(Stdio::null())
-        .status().expect("compress");
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("compress");
     // Remove original to test auto output filename
     fs::remove_file(&input).unwrap();
     let status = Command::new(lz4_bin())
@@ -636,7 +722,10 @@ fn remove_source_flag_deletes_input_after_compress() {
         .expect("spawn --rm");
     assert!(status.success());
     assert!(expected_output.exists(), "output .lz4 must exist");
-    assert!(!input.exists(), "--rm must delete the source file after compress");
+    assert!(
+        !input.exists(),
+        "--rm must delete the source file after compress"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -651,12 +740,20 @@ fn nb_workers_greater_than_one_does_not_crash() {
     let (_dir, input) = setup_input(b"multithread test");
     let output = input.with_extension("txt.lz4");
     let status = Command::new(lz4_bin())
-        .args(["--workers=2", "-f", input.to_str().unwrap(), output.to_str().unwrap()])
+        .args([
+            "--workers=2",
+            "-f",
+            input.to_str().unwrap(),
+            output.to_str().unwrap(),
+        ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
         .expect("spawn --workers=2");
     // Regardless of MT support, the binary must not crash (exit 0 or fail gracefully)
     // We only assert it did not segfault (signal termination).
-    assert!(status.code().is_some(), "process must exit normally, not via signal");
+    assert!(
+        status.code().is_some(),
+        "process must exit normally, not via signal"
+    );
 }

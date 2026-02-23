@@ -96,7 +96,9 @@ pub fn open_src_file(path: &str) -> io::Result<Box<dyn Read>> {
         }
         #[cfg(windows)]
         // SAFETY: calling _setmode on stdin (fd=0) is always valid.
-        unsafe { libc::_setmode(0, libc::O_BINARY); }
+        unsafe {
+            libc::_setmode(0, libc::O_BINARY);
+        }
         return Ok(Box::new(io::stdin()));
     }
 
@@ -160,17 +162,16 @@ impl Write for DstFile {
 ///
 /// `sparse_mode` on the returned [`DstFile`] is `true` when
 /// `prefs.sparse_file_support > 0` and the destination is a regular file.
-pub fn open_dst_file(
-    path: &str,
-    prefs: &crate::io::prefs::Prefs,
-) -> io::Result<DstFile> {
+pub fn open_dst_file(path: &str, prefs: &crate::io::prefs::Prefs) -> io::Result<DstFile> {
     if is_stdout(path) {
         if DISPLAY_LEVEL.load(Ordering::Relaxed) >= 4 {
             eprintln!("Using stdout for output");
         }
         #[cfg(windows)]
         // SAFETY: calling _setmode on stdout (fd=1) is always valid.
-        unsafe { libc::_setmode(1, libc::O_BINARY); }
+        unsafe {
+            libc::_setmode(1, libc::O_BINARY);
+        }
         if prefs.sparse_file_support == 1 {
             if DISPLAY_LEVEL.load(Ordering::Relaxed) >= 4 {
                 eprintln!(
@@ -279,7 +280,11 @@ mod tests {
     fn is_skippable_magic_number_range() {
         // All values 0x184D2A50..=0x184D2A5F should be skippable.
         for v in 0x184D2A50u32..=0x184D2A5Fu32 {
-            assert!(is_skippable_magic_number(v), "expected skippable: {:#010x}", v);
+            assert!(
+                is_skippable_magic_number(v),
+                "expected skippable: {:#010x}",
+                v
+            );
         }
         // Values just outside the range should not be.
         assert!(!is_skippable_magic_number(0x184D2A4F));

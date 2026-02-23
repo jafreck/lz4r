@@ -116,11 +116,11 @@ pub fn lz4f_get_block_size(block_size_id: BlockSizeId) -> Option<usize> {
     };
 
     let idx = match id {
-        BlockSizeId::Max64Kb  => 0,
+        BlockSizeId::Max64Kb => 0,
         BlockSizeId::Max256Kb => 1,
-        BlockSizeId::Max1Mb   => 2,
-        BlockSizeId::Max4Mb   => 3,
-        BlockSizeId::Default  => return None, // unreachable after normalization above
+        BlockSizeId::Max1Mb => 2,
+        BlockSizeId::Max4Mb => 3,
+        BlockSizeId::Default => return None, // unreachable after normalization above
     };
 
     Some(BLOCK_SIZES[idx])
@@ -141,9 +141,9 @@ pub fn lz4f_optimal_bsid(requested_bsid: BlockSizeId, src_size: usize) -> BlockS
         }
         // Step up to the next larger block-size tier.
         proposed = match proposed {
-            BlockSizeId::Max64Kb  => BlockSizeId::Max256Kb,
+            BlockSizeId::Max64Kb => BlockSizeId::Max256Kb,
             BlockSizeId::Max256Kb => BlockSizeId::Max1Mb,
-            BlockSizeId::Max1Mb   => BlockSizeId::Max4Mb,
+            BlockSizeId::Max1Mb => BlockSizeId::Max4Mb,
             _ => break, // safety guard; not reachable under normal inputs
         };
         max_block_size <<= 2; // Each step quadruples the block size: 64 K → 256 K → 1 M → 4 M.
@@ -290,11 +290,11 @@ mod tests {
 
     #[test]
     fn get_block_size_all_ids() {
-        assert_eq!(lz4f_get_block_size(BlockSizeId::Default),  Some(65_536));
-        assert_eq!(lz4f_get_block_size(BlockSizeId::Max64Kb),  Some(65_536));
+        assert_eq!(lz4f_get_block_size(BlockSizeId::Default), Some(65_536));
+        assert_eq!(lz4f_get_block_size(BlockSizeId::Max64Kb), Some(65_536));
         assert_eq!(lz4f_get_block_size(BlockSizeId::Max256Kb), Some(262_144));
-        assert_eq!(lz4f_get_block_size(BlockSizeId::Max1Mb),   Some(1_048_576));
-        assert_eq!(lz4f_get_block_size(BlockSizeId::Max4Mb),   Some(4_194_304));
+        assert_eq!(lz4f_get_block_size(BlockSizeId::Max1Mb), Some(1_048_576));
+        assert_eq!(lz4f_get_block_size(BlockSizeId::Max4Mb), Some(4_194_304));
     }
 
     // ── lz4f_optimal_bsid ───────────────────────────────────────────────────
@@ -423,7 +423,10 @@ mod tests {
         let prefs = Preferences::default();
         let internal = lz4f_compress_bound_internal(1024, &prefs, 0);
         // frame_bound forces auto_flush=true so internal is recomputed with that
-        let prefs_flushed = Preferences { auto_flush: true, ..prefs };
+        let prefs_flushed = Preferences {
+            auto_flush: true,
+            ..prefs
+        };
         let expected = MAX_FH_SIZE + lz4f_compress_bound_internal(1024, &prefs_flushed, 0);
         assert_eq!(lz4f_compress_frame_bound(1024, Some(&prefs)), expected);
         // Internal bound without flush differs

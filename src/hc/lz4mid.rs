@@ -34,12 +34,15 @@
 //! [`DictSearchMode`], a plain enum whose two variants correspond to the two
 //! concrete functions that may be selected at runtime.
 
-use crate::block::types::{self as bt, LimitedOutputDirective, LZ4_DISTANCE_MAX, LASTLITERALS, MFLIMIT, MINMATCH, ML_BITS, ML_MASK, RUN_MASK};
-use super::types::{
-    DictCtxDirective, HcCCtxInternal, HcStrategy, LZ4MID_HASHSIZE, LZ4MID_HASHTABLESIZE,
-    count_back, get_clevel_params, mid_hash4_ptr, mid_hash8_ptr,
-};
 use super::encode::{encode_sequence, Lz4HcError};
+use super::types::{
+    count_back, get_clevel_params, mid_hash4_ptr, mid_hash8_ptr, DictCtxDirective, HcCCtxInternal,
+    HcStrategy, LZ4MID_HASHSIZE, LZ4MID_HASHTABLESIZE,
+};
+use crate::block::types::{
+    self as bt, LimitedOutputDirective, LASTLITERALS, LZ4_DISTANCE_MAX, MFLIMIT, MINMATCH, ML_BITS,
+    ML_MASK, RUN_MASK,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Match descriptor  (lz4hc.c:357–361)
@@ -108,8 +111,7 @@ pub unsafe fn hc_search_ext_dict(
         (ctx.end as usize).wrapping_sub(ctx.prefix_start as usize) + ctx.dict_limit as usize;
 
     // Translate the HC hash into a match index inside the dict window.
-    let l_dict_match_index_init =
-        ctx.hash_table[super::types::hash_ptr(ip) as usize];
+    let l_dict_match_index_init = ctx.hash_table[super::types::hash_ptr(ip) as usize];
     let mut l_dict_match_index = l_dict_match_index_init;
     let mut match_index = l_dict_match_index
         .wrapping_add(g_dict_end_index)
@@ -124,13 +126,19 @@ pub unsafe fn hc_search_ext_dict(
     while ip_index.wrapping_sub(match_index) <= LZ4_DISTANCE_MAX && nb_attempts > 0 {
         nb_attempts -= 1;
 
-        let match_ptr = ctx.prefix_start.sub(ctx.dict_limit as usize)
+        let match_ptr = ctx
+            .prefix_start
+            .sub(ctx.dict_limit as usize)
             .add(l_dict_match_index as usize);
 
         if bt::read32(match_ptr) == bt::read32(ip) {
             let v_limit_raw =
                 ip.add((l_dict_end_index as usize).wrapping_sub(l_dict_match_index as usize));
-            let v_limit = if v_limit_raw > i_high_limit { i_high_limit } else { v_limit_raw };
+            let v_limit = if v_limit_raw > i_high_limit {
+                i_high_limit
+            } else {
+                v_limit_raw
+            };
 
             let mlt = bt::count(ip.add(MINMATCH), match_ptr.add(MINMATCH), v_limit) as i32
                 + MINMATCH as i32;
@@ -154,7 +162,11 @@ pub unsafe fn hc_search_ext_dict(
         match_index = match_index.wrapping_sub(next_offset);
     }
 
-    Match { len: best_ml, off: offset, back: s_back }
+    Match {
+        len: best_ml,
+        off: offset,
+        back: s_back,
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -178,12 +190,12 @@ unsafe fn mid_search_hc_dict(
     hc_search_ext_dict(
         ip,
         ip_index,
-        ip,              // iLowLimit = ip (no backward extension)
+        ip, // iLowLimit = ip (no backward extension)
         i_high_limit,
         dict_ctx,
         g_dict_end_index,
         MINMATCH as i32 - 1, // currentBestML = MINMATCH - 1
-        2,               // nbAttempts
+        2,                   // nbAttempts
     )
 }
 
@@ -218,10 +230,12 @@ unsafe fn mid_search_ext_dict(
             .wrapping_sub(l_dict_end_index as u32);
 
         if ip_index.wrapping_sub(m8_index) <= LZ4_DISTANCE_MAX {
-            let match_ptr = ctx.prefix_start.sub(ctx.dict_limit as usize)
+            let match_ptr = ctx
+                .prefix_start
+                .sub(ctx.dict_limit as usize)
                 .add(l8_dict_match_index as usize);
-            let dict_remaining = (l_dict_end_index as usize)
-                .wrapping_sub(l8_dict_match_index as usize);
+            let dict_remaining =
+                (l_dict_end_index as usize).wrapping_sub(l8_dict_match_index as usize);
             let ip_remaining = (i_high_limit as usize).wrapping_sub(ip as usize);
             let safe_len = dict_remaining.min(ip_remaining);
             let mlt = bt::count(ip, match_ptr, ip.add(safe_len)) as i32;
@@ -243,10 +257,12 @@ unsafe fn mid_search_ext_dict(
             .wrapping_sub(l_dict_end_index as u32);
 
         if ip_index.wrapping_sub(m4_index) <= LZ4_DISTANCE_MAX {
-            let match_ptr = ctx.prefix_start.sub(ctx.dict_limit as usize)
+            let match_ptr = ctx
+                .prefix_start
+                .sub(ctx.dict_limit as usize)
                 .add(l4_dict_match_index as usize);
-            let dict_remaining = (l_dict_end_index as usize)
-                .wrapping_sub(l4_dict_match_index as usize);
+            let dict_remaining =
+                (l_dict_end_index as usize).wrapping_sub(l4_dict_match_index as usize);
             let ip_remaining = (i_high_limit as usize).wrapping_sub(ip as usize);
             let safe_len = dict_remaining.min(ip_remaining);
             let mlt = bt::count(ip, match_ptr, ip.add(safe_len)) as i32;
@@ -261,7 +277,11 @@ unsafe fn mid_search_ext_dict(
     }
 
     // Nothing found.
-    Match { off: 0, len: 0, back: 0 }
+    Match {
+        off: 0,
+        len: 0,
+        back: 0,
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -309,9 +329,17 @@ pub unsafe fn fill_htable(cctx: &mut HcCCtxInternal, dict: *const u8, size: usiz
     // Coarse pass: every 3rd position, record hash4 for idx, hash8 for idx+1.
     while idx < target {
         // ADDPOS4(prefixPtr + idx - prefixIdx, idx)
-        add_position(hash4_table, mid_hash4_ptr(prefix_ptr.add((idx - prefix_idx) as usize)), idx);
+        add_position(
+            hash4_table,
+            mid_hash4_ptr(prefix_ptr.add((idx - prefix_idx) as usize)),
+            idx,
+        );
         // ADDPOS8(prefixPtr + idx + 1 - prefixIdx, idx + 1)
-        add_position(hash8_table, mid_hash8_ptr(prefix_ptr.add((idx + 1 - prefix_idx) as usize)), idx + 1);
+        add_position(
+            hash8_table,
+            mid_hash8_ptr(prefix_ptr.add((idx + 1 - prefix_idx) as usize)),
+            idx + 1,
+        );
         idx = idx.wrapping_add(3);
     }
 
@@ -323,7 +351,11 @@ pub unsafe fn fill_htable(cctx: &mut HcCCtxInternal, dict: *const u8, size: usiz
     };
 
     while idx < target {
-        add_position(hash8_table, mid_hash8_ptr(prefix_ptr.add((idx - prefix_idx) as usize)), idx);
+        add_position(
+            hash8_table,
+            mid_hash8_ptr(prefix_ptr.add((idx - prefix_idx) as usize)),
+            idx,
+        );
         idx = idx.wrapping_add(1);
     }
 
@@ -442,8 +474,7 @@ pub unsafe fn lz4mid_compress(
     let prefix_idx: u32 = ctx.dict_limit;
     // ilimitIdx: index of the last safely hashable position.
     let ilimit_idx: u32 =
-        ((ilimit as usize).wrapping_sub(prefix_ptr as usize) as u32)
-            .wrapping_add(prefix_idx);
+        ((ilimit as usize).wrapping_sub(prefix_ptr as usize) as u32).wrapping_add(prefix_idx);
     let dict_start: *const u8 = ctx.dict_start;
     let dict_idx: u32 = ctx.low_limit;
     let g_dict_end_index: u32 = ctx.low_limit;
@@ -492,6 +523,10 @@ pub unsafe fn lz4mid_compress(
     // Uses a `loop { while ip <= mflimit { … } break; }` structure so that
     // `break 'compress` exits to the overflow handler before last_literals.
     if do_compress {
+        // The outer `loop` is intentional: it acts as a structured goto,
+        // allowing `break 'compress` to jump past the while body to the
+        // overflow handler / last-literals block.  It never iterates twice.
+        #[allow(clippy::never_loop)]
         'compress: loop {
             while ip <= mflimit {
                 // Compute the u32 index of the current input position in the
@@ -499,8 +534,7 @@ pub unsafe fn lz4mid_compress(
                 // difference from `prefix_ptr` gives the offset within the
                 // current block.  Wrapping arithmetic is intentional: the LZ4
                 // block format uses a 32-bit modular position space throughout.
-                let ip_index_start: u32 = ((ip as usize)
-                    .wrapping_sub(prefix_ptr as usize) as u32)
+                let ip_index_start: u32 = ((ip as usize).wrapping_sub(prefix_ptr as usize) as u32)
                     .wrapping_add(prefix_idx);
 
                 // ── 'find: find a match (all 5 encode-sequence gotos) ─────
@@ -639,8 +673,8 @@ pub unsafe fn lz4mid_compress(
                     // Wrapping subtraction handles the u32 index space correctly
                     // near the prefix_ptr boundary.
                     while ((ip > anchor) as u8)
-                        & (((ip as usize).wrapping_sub(prefix_ptr as usize) as u32
-                            > match_distance) as u8)
+                        & (((ip as usize).wrapping_sub(prefix_ptr as usize) as u32 > match_distance)
+                            as u8)
                         != 0
                         && *ip.sub(1) == *ip.sub(match_distance as usize + 1)
                     {
@@ -680,18 +714,14 @@ pub unsafe fn lz4mid_compress(
 
                     // ── Fill hash tables at end of match ───────────────────
                     // ip has now advanced past the match by encode_sequence.
-                    let end_match_idx: u32 = ((ip as usize)
-                        .wrapping_sub(prefix_ptr as usize) as u32)
+                    let end_match_idx: u32 = ((ip as usize).wrapping_sub(prefix_ptr as usize)
+                        as u32)
                         .wrapping_add(prefix_idx);
                     let pos_m2 = end_match_idx.wrapping_sub(2);
 
                     if pos_m2 < ilimit_idx {
                         if (ip as usize).wrapping_sub(prefix_ptr as usize) > 5 {
-                            add_position(
-                                hash8_table,
-                                mid_hash8_ptr(ip.sub(5)),
-                                end_match_idx - 5,
-                            );
+                            add_position(hash8_table, mid_hash8_ptr(ip.sub(5)), end_match_idx - 5);
                         }
                         add_position(hash8_table, mid_hash8_ptr(ip.sub(3)), end_match_idx - 3);
                         add_position(hash8_table, mid_hash8_ptr(ip.sub(2)), end_match_idx - 2);
@@ -726,17 +756,19 @@ pub unsafe fn lz4mid_compress(
         if op.add(ll_total_cost) <= max_lit_pos {
             let bytes_left_for_ml =
                 (max_lit_pos as usize).wrapping_sub(op.add(ll_total_cost) as usize);
-            let max_ml_size =
-                MINMATCH + (ML_MASK as usize - 1) + bytes_left_for_ml * 255;
+            let max_ml_size = MINMATCH + (ML_MASK as usize - 1) + bytes_left_for_ml * 255;
             debug_assert!(max_ml_size < i32::MAX as usize);
 
-            let adj_ml = if ml as usize > max_ml_size { max_ml_size as u32 } else { ml };
+            let adj_ml = if ml as usize > max_ml_size {
+                max_ml_size as u32
+            } else {
+                ml
+            };
 
             // Check whether we have room for the final match sequence.
-            let check_val = (oend.add(LASTLITERALS) as isize)
-                - (op.add(ll_total_cost + 2) as isize)
-                - 1
-                + adj_ml as isize;
+            let check_val =
+                (oend.add(LASTLITERALS) as isize) - (op.add(ll_total_cost + 2) as isize) - 1
+                    + adj_ml as isize;
             if check_val >= MFLIMIT as isize {
                 // Encode the partial last sequence (best-effort, ignore errors).
                 let _ = encode_sequence(

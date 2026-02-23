@@ -130,14 +130,26 @@ pub fn bench_c_level(
     for l in c_level..=c_level_last {
         let mut strategy = build_compression_parameters(l, src.len(), src.len());
         let mut decompressor = FrameDecompressor::new();
-        if let Err(e) = bench_mem(src, display_name, config, l, &mut *strategy, &mut decompressor, dict, file_sizes) {
+        if let Err(e) = bench_mem(
+            src,
+            display_name,
+            config,
+            l,
+            &mut *strategy,
+            &mut decompressor,
+            dict,
+            file_sizes,
+        ) {
             eprintln!("bench error at level {}: {}", l, e);
             bench_error = true;
         }
     }
 
     if bench_error {
-        Err(io::Error::new(io::ErrorKind::Other, "benchmark reported errors"))
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            "benchmark reported errors",
+        ))
     } else {
         Ok(())
     }
@@ -201,8 +213,9 @@ pub fn load_files(
             file_size_on_disk
         };
 
-        let mut f = fs::File::open(path)
-            .map_err(|e| io::Error::new(e.kind(), format!("impossible to open file {}: {}", path, e)))?;
+        let mut f = fs::File::open(path).map_err(|e| {
+            io::Error::new(e.kind(), format!("impossible to open file {}: {}", path, e))
+        })?;
 
         // read_exact guarantees all requested bytes are read or returns an error,
         // avoiding silent short reads on slow or network-backed filesystems.
@@ -216,7 +229,10 @@ pub fn load_files(
 
     // Refuse to benchmark an empty corpus — measurements would be meaningless.
     if total_size == 0 {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "no data to bench"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "no data to bench",
+        ));
     }
 
     buffer.truncate(pos);
@@ -279,7 +295,15 @@ pub fn bench_file_table(
         file_names[0].to_string()
     };
 
-    bench_c_level(&src_buffer, &display_name, c_level, c_level_last, config, dict, &file_sizes)
+    bench_c_level(
+        &src_buffer,
+        &display_name,
+        c_level,
+        c_level_last,
+        config,
+        dict,
+        &file_sizes,
+    )
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -321,7 +345,11 @@ mod tests {
         config.set_nb_seconds(0); // single pass — keeps the test fast
         config.set_notification_level(0); // suppress output
         let result = bench_c_level(&src, "test_input", 1, 3, &config, b"", &[]);
-        assert!(result.is_ok(), "bench_c_level should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "bench_c_level should succeed: {:?}",
+            result.err()
+        );
     }
 
     #[test]
@@ -370,7 +398,8 @@ mod tests {
 
         let config = BenchConfig::default();
         // Buffer of 10 bytes: only first 10 bytes should be loaded.
-        let (buf, sizes) = load_files(&[&path], 10, &config).expect("truncated load should succeed");
+        let (buf, sizes) =
+            load_files(&[&path], 10, &config).expect("truncated load should succeed");
         assert_eq!(buf.len(), 10);
         assert_eq!(sizes[0], 10);
         assert_eq!(&buf[..], &content[..10]);

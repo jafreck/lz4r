@@ -20,7 +20,10 @@ fn block_compression_available() {
     let input = b"lz4-programs crate scaffold verification";
     let compressed = lz4::block::compress_block_to_vec(input);
     let decompressed = lz4::block::decompress_block_to_vec(&compressed, input.len());
-    assert_eq!(decompressed, input, "round-trip through native block API should be lossless");
+    assert_eq!(
+        decompressed, input,
+        "round-trip through native block API should be lossless"
+    );
 }
 
 // Verify the native block API handles empty input without panicking.
@@ -57,7 +60,6 @@ fn anyhow_error_propagation() {
 fn frame_round_trip() {
     let input = b"hello from lz4-programs frame round-trip test";
     let compressed = lz4::frame::compress_frame_to_vec(input);
-    let decoded = lz4::frame::decompress_frame_to_vec(&compressed)
-        .expect("frame decode");
+    let decoded = lz4::frame::decompress_frame_to_vec(&compressed).expect("frame decode");
     assert_eq!(decoded, input);
 }

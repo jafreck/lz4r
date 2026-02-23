@@ -26,9 +26,7 @@
 //! no explicit free function is exposed.
 
 use crate::block::stream::Lz4Stream;
-use crate::hc::api::{
-    init_stream_hc, load_dict_hc, set_compression_level, Lz4StreamHc,
-};
+use crate::hc::api::{init_stream_hc, load_dict_hc, set_compression_level, Lz4StreamHc};
 use crate::hc::types::LZ4HC_CLEVEL_DEFAULT;
 
 // Maximum dictionary size the frame format retains (64 KB).
@@ -175,7 +173,8 @@ mod tests {
     /// stream state (tables populated), mirroring C `LZ4F_createCDict`.
     #[test]
     fn hc_stream_populated_after_create() {
-        let dict: Vec<u8> = b"The quick brown fox jumps over the lazy dog".iter()
+        let dict: Vec<u8> = b"The quick brown fox jumps over the lazy dog"
+            .iter()
             .cycle()
             .take(4096)
             .copied()

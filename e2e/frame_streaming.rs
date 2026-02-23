@@ -16,12 +16,12 @@
 
 extern crate lz4;
 
+use lz4::frame::header::lz4f_compress_frame_bound;
 use lz4::frame::{
     lz4f_compress_begin, lz4f_compress_bound, lz4f_compress_end, lz4f_compress_frame,
     lz4f_compress_update, lz4f_create_compression_context, lz4f_create_decompression_context,
     lz4f_decompress, lz4f_free_compression_context, lz4f_get_frame_info, Preferences,
 };
-use lz4::frame::header::lz4f_compress_frame_bound;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Test 1: Streaming compress → decompress roundtrip (single update)
@@ -65,7 +65,10 @@ fn test_streaming_single_update_roundtrip() {
     // Free compression context
     lz4f_free_compression_context(cctx);
 
-    assert!(total_compressed > 0, "compressed output should be non-empty");
+    assert!(
+        total_compressed > 0,
+        "compressed output should be non-empty"
+    );
     compressed.truncate(total_compressed);
 
     // Decompress
@@ -124,13 +127,9 @@ fn test_streaming_multi_chunk_roundtrip() {
 
     // Feed 4 chunks
     for chunk in &chunks {
-        let update_size = lz4f_compress_update(
-            &mut cctx,
-            &mut compressed[total_compressed..],
-            chunk,
-            None,
-        )
-        .expect("compress update should succeed");
+        let update_size =
+            lz4f_compress_update(&mut cctx, &mut compressed[total_compressed..], chunk, None)
+                .expect("compress update should succeed");
         total_compressed += update_size;
     }
 
@@ -195,7 +194,7 @@ fn test_compress_bound_adequate() {
     let original = &original[..input_size]; // truncate to exactly input_size
 
     let mut cctx = lz4f_create_compression_context(100).expect("create cctx");
-    
+
     // Use compress_frame_bound to get total size including header
     let total_bound = lz4f_compress_frame_bound(input_size, None);
     let mut compressed = vec![0u8; total_bound];
@@ -204,8 +203,8 @@ fn test_compress_bound_adequate() {
     let header = lz4f_compress_begin(&mut cctx, &mut compressed, None).expect("begin");
     total += header;
 
-    let update = lz4f_compress_update(&mut cctx, &mut compressed[total..], original, None)
-        .expect("update");
+    let update =
+        lz4f_compress_update(&mut cctx, &mut compressed[total..], original, None).expect("update");
     total += update;
 
     let end = lz4f_compress_end(&mut cctx, &mut compressed[total..], None).expect("end");
@@ -218,7 +217,7 @@ fn test_compress_bound_adequate() {
         total <= total_bound,
         "compressed size {total} should fit within total bound {total_bound}"
     );
-    
+
     // And the update portion should respect the bound for updates
     assert!(
         update <= bound,
@@ -250,8 +249,8 @@ fn test_streaming_compress_with_flush() {
     let header = lz4f_compress_begin(&mut cctx, &mut compressed, Some(&prefs)).expect("begin");
     total += header;
 
-    let update = lz4f_compress_update(&mut cctx, &mut compressed[total..], &original, None)
-        .expect("update");
+    let update =
+        lz4f_compress_update(&mut cctx, &mut compressed[total..], &original, None).expect("update");
     total += update;
 
     let end = lz4f_compress_end(&mut cctx, &mut compressed[total..], None).expect("end");

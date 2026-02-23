@@ -124,10 +124,7 @@ pub fn decode_legacy_stream<R: Read, W: Write>(
 /// against the compress bound, reads the compressed payload, decompresses it,
 /// and writes the result to `dst`.  Repeats until clean EOF or a chained-frame
 /// magic number is encountered.
-fn decode_legacy_st<R: Read, W: Write>(
-    src: &mut R,
-    dst: &mut W,
-) -> io::Result<(u64, Option<u32>)> {
+fn decode_legacy_st<R: Read, W: Write>(src: &mut R, dst: &mut W) -> io::Result<(u64, Option<u32>)> {
     let compress_bound = lz4_compress_bound();
     let mut header = [0u8; LEGACY_BLOCK_HEADER_SIZE];
     let mut in_buf = vec![0u8; compress_bound];
@@ -161,7 +158,7 @@ fn decode_legacy_st<R: Read, W: Write>(
                 io::ErrorKind::InvalidData,
                 format!("Decoding Failed! Corrupted input detected!: {e:?}"),
             )
-        })?;;
+        })?;
 
         stream_size += dec_n as u64;
         dst.write_all(&dec_buf[..dec_n])?;
@@ -308,13 +305,9 @@ mod tests {
         let prefs = Prefs::default(); // nb_workers == 0 → ST
         let res = make_resources();
         let mut out = Vec::new();
-        let (size, magic) = decode_legacy_stream(
-            &mut std::io::Cursor::new(payload),
-            &mut out,
-            &prefs,
-            &res,
-        )
-        .expect("decode should succeed");
+        let (size, magic) =
+            decode_legacy_stream(&mut std::io::Cursor::new(payload), &mut out, &prefs, &res)
+                .expect("decode should succeed");
 
         assert_eq!(out, original);
         assert_eq!(size, original.len() as u64);
@@ -337,13 +330,9 @@ mod tests {
         let prefs = Prefs::default();
         let res = make_resources();
         let mut out = Vec::new();
-        let (size, magic) = decode_legacy_stream(
-            &mut std::io::Cursor::new(&payload),
-            &mut out,
-            &prefs,
-            &res,
-        )
-        .expect("decode should succeed");
+        let (size, magic) =
+            decode_legacy_stream(&mut std::io::Cursor::new(&payload), &mut out, &prefs, &res)
+                .expect("decode should succeed");
 
         let mut expected = block1.clone();
         expected.extend_from_slice(&block2);
@@ -358,13 +347,9 @@ mod tests {
         let prefs = Prefs::default();
         let res = make_resources();
         let mut out = Vec::new();
-        let (size, magic) = decode_legacy_stream(
-            &mut std::io::Cursor::new(b""),
-            &mut out,
-            &prefs,
-            &res,
-        )
-        .expect("empty stream should succeed");
+        let (size, magic) =
+            decode_legacy_stream(&mut std::io::Cursor::new(b""), &mut out, &prefs, &res)
+                .expect("empty stream should succeed");
         assert_eq!(size, 0);
         assert!(magic.is_none());
     }
@@ -386,13 +371,9 @@ mod tests {
         let prefs = Prefs::default();
         let res = make_resources();
         let mut out = Vec::new();
-        let (size, magic) = decode_legacy_stream(
-            &mut std::io::Cursor::new(&payload),
-            &mut out,
-            &prefs,
-            &res,
-        )
-        .expect("decode should succeed");
+        let (size, magic) =
+            decode_legacy_stream(&mut std::io::Cursor::new(&payload), &mut out, &prefs, &res)
+                .expect("decode should succeed");
 
         assert_eq!(out, data.as_ref());
         assert_eq!(size, data.len() as u64);
@@ -409,13 +390,9 @@ mod tests {
         prefs.nb_workers = 2; // MT path
         let res = make_resources();
         let mut out = Vec::new();
-        let (size, magic) = decode_legacy_stream(
-            &mut std::io::Cursor::new(payload),
-            &mut out,
-            &prefs,
-            &res,
-        )
-        .expect("MT decode should succeed");
+        let (size, magic) =
+            decode_legacy_stream(&mut std::io::Cursor::new(payload), &mut out, &prefs, &res)
+                .expect("MT decode should succeed");
 
         assert_eq!(out, original);
         assert_eq!(size, original.len() as u64);
@@ -467,12 +444,8 @@ mod tests {
         let prefs = Prefs::default();
         let res = make_resources();
         let mut out = Vec::new();
-        let result = decode_legacy_stream(
-            &mut std::io::Cursor::new(&payload),
-            &mut out,
-            &prefs,
-            &res,
-        );
+        let result =
+            decode_legacy_stream(&mut std::io::Cursor::new(&payload), &mut out, &prefs, &res);
         assert!(result.is_err(), "corrupted input should return an error");
     }
 }

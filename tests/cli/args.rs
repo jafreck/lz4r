@@ -158,13 +158,19 @@ fn fast_equals_10() {
 fn fast_zero_is_error() {
     // --fast=0 is explicitly rejected (lz4cli.c line 499: assert(fastLevel != 0))
     let e = parse_err(&["--fast=0"]);
-    assert!(e.contains("bad usage"), "expected bad usage error, got: {e}");
+    assert!(
+        e.contains("bad usage"),
+        "expected bad usage error, got: {e}"
+    );
 }
 
 #[test]
 fn fast_with_extra_chars_is_error() {
     let e = parse_err(&["--fast=3x"]);
-    assert!(e.contains("bad usage"), "expected bad usage error, got: {e}");
+    assert!(
+        e.contains("bad usage"),
+        "expected bad usage error, got: {e}"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -727,8 +733,10 @@ fn null_output_name_translated_to_nul_mark() {
 fn third_positional_without_force_is_error() {
     // Three non-option args without -f is a fatal error (lz4cli.c line 700)
     let e = parse_err(&["in.lz4", "out.txt", "extra.txt"]);
-    assert!(e.contains("bad usage") || e.contains("won't be used"),
-        "expected error message, got: {e}");
+    assert!(
+        e.contains("bad usage") || e.contains("won't be used"),
+        "expected error message, got: {e}"
+    );
 }
 
 #[test]

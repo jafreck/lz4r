@@ -11,10 +11,10 @@
 
 use std::io;
 
+use crate::frame::types::LZ4F_VERSION;
 use crate::frame::{
     lz4f_create_decompression_context, lz4f_decompress, DecompressOptions, Lz4FDCtx,
 };
-use crate::frame::types::LZ4F_VERSION;
 
 // ── DecFunctionF ─────────────────────────────────────────────────────────────
 
@@ -32,14 +32,13 @@ use crate::frame::types::LZ4F_VERSION;
 ///
 /// Returns the number of bytes written into `dst` on success, or an
 /// [`io::Error`] on failure.
-pub type DecFunctionF =
-    fn(
-        decompressor: &mut FrameDecompressor,
-        src: &[u8],
-        dst: &mut Vec<u8>,
-        dst_capacity: usize,
-        skip_checksums: bool,
-    ) -> io::Result<usize>;
+pub type DecFunctionF = fn(
+    decompressor: &mut FrameDecompressor,
+    src: &[u8],
+    dst: &mut Vec<u8>,
+    dst_capacity: usize,
+    skip_checksums: bool,
+) -> io::Result<usize>;
 
 // ── FrameDecompressor ────────────────────────────────────────────────────────
 
@@ -177,7 +176,8 @@ mod tests {
 
         let mut decompressor = FrameDecompressor::new();
         let mut dst = Vec::new();
-        let n = decompress_frame_block(&mut decompressor, &frame, &mut dst, original.len(), false).unwrap();
+        let n = decompress_frame_block(&mut decompressor, &frame, &mut dst, original.len(), false)
+            .unwrap();
 
         assert_eq!(n, original.len());
         assert_eq!(dst, original);
@@ -191,7 +191,8 @@ mod tests {
 
         let mut decompressor = FrameDecompressor::new();
         let mut dst = Vec::new();
-        let n = decompress_frame_block(&mut decompressor, &frame, &mut dst, original.len(), false).unwrap();
+        let n = decompress_frame_block(&mut decompressor, &frame, &mut dst, original.len(), false)
+            .unwrap();
 
         assert_eq!(n, original.len());
         assert_eq!(dst, original);

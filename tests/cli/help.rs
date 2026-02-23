@@ -12,7 +12,7 @@
 // called directly in integration tests. They are tested via subprocess spawning
 // using test helper functions. wait_enter blocks on stdin and is tested similarly.
 
-use lz4::cli::constants::{set_lz4c_legacy_commands};
+use lz4::cli::constants::set_lz4c_legacy_commands;
 use lz4::cli::help::{print_long_help, print_usage, print_usage_advanced};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -158,11 +158,19 @@ fn error_out_exits_with_code_1() {
     // Mirrors `errorOut` which always calls exit(1).
     let exe = std::env::current_exe().expect("could not find test executable");
     let output = std::process::Command::new(&exe)
-        .args(["help::subprocess_helper_error_out", "--exact", "--nocapture"])
+        .args([
+            "help::subprocess_helper_error_out",
+            "--exact",
+            "--nocapture",
+        ])
         .env("LZ4_TEST_ERROR_OUT", "1")
         .output()
         .expect("failed to spawn subprocess");
-    assert_eq!(output.status.code(), Some(1), "error_out must exit with code 1");
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "error_out must exit with code 1"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -176,11 +184,19 @@ fn print_bad_usage_exits_with_code_1() {
     // Mirrors `badusage` which always calls exit(1).
     let exe = std::env::current_exe().expect("could not find test executable");
     let output = std::process::Command::new(&exe)
-        .args(["help::subprocess_helper_bad_usage", "--exact", "--nocapture"])
+        .args([
+            "help::subprocess_helper_bad_usage",
+            "--exact",
+            "--nocapture",
+        ])
         .env("LZ4_TEST_BAD_USAGE", "1")
         .output()
         .expect("failed to spawn subprocess");
-    assert_eq!(output.status.code(), Some(1), "print_bad_usage must exit with code 1");
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "print_bad_usage must exit with code 1"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -194,7 +210,11 @@ fn wait_enter_returns_gracefully_on_eof_stdin() {
     // gracefully on EOF, then exit(0). Mirrors waitEnter's EOF handling.
     let exe = std::env::current_exe().expect("could not find test executable");
     let output = std::process::Command::new(&exe)
-        .args(["help::subprocess_helper_wait_enter", "--exact", "--nocapture"])
+        .args([
+            "help::subprocess_helper_wait_enter",
+            "--exact",
+            "--nocapture",
+        ])
         .env("LZ4_TEST_WAIT_ENTER", "1")
         .stdin(std::process::Stdio::null())
         .output()

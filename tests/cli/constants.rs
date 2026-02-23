@@ -9,9 +9,9 @@
 //   - LZ4C_LEGACY_COMMANDS global (default=false, get/set round-trip)
 
 use lz4::cli::constants::{
-    AUTHOR, COMPRESSOR_NAME, GB, IO_MT, KB, LZ4CAT, LZ4_EXTENSION, LZ4_LEGACY, MB, UNLZ4,
-    WELCOME_MESSAGE_FMT, display_level, lz4c_legacy_commands, set_display_level,
-    set_lz4c_legacy_commands,
+    display_level, lz4c_legacy_commands, set_display_level, set_lz4c_legacy_commands, AUTHOR,
+    COMPRESSOR_NAME, GB, IO_MT, KB, LZ4CAT, LZ4_EXTENSION, LZ4_LEGACY, MB, UNLZ4,
+    WELCOME_MESSAGE_FMT,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -63,7 +63,10 @@ fn welcome_message_fmt_contains_placeholders() {
     // The format string must contain exactly 5 `{}` placeholders, matching
     // the 5 arguments to WELCOME_MESSAGE in lz4cli.c: name, version, bits, MT-mode, author.
     let count = WELCOME_MESSAGE_FMT.matches("{}").count();
-    assert_eq!(count, 5, "WELCOME_MESSAGE_FMT must have 5 {{}} placeholders");
+    assert_eq!(
+        count, 5,
+        "WELCOME_MESSAGE_FMT must have 5 {{}} placeholders"
+    );
 }
 
 #[test]

@@ -8,8 +8,10 @@
 //   - display_compressed_files_info() rejects missing files
 //   - display_compressed_files_info() succeeds on valid LZ4 frames
 
-use lz4::io::file_info::{block_type_id, display_compressed_files_info, CompressedFileInfo, FrameType};
 use lz4::frame::types::{BlockMode, BlockSizeId};
+use lz4::io::file_info::{
+    block_type_id, display_compressed_files_info, CompressedFileInfo, FrameType,
+};
 use std::io::Write;
 use tempfile::NamedTempFile;
 
@@ -154,7 +156,11 @@ fn block_type_id_always_three_chars() {
         (&BlockSizeId::Max4Mb, &BlockMode::Independent),
     ] {
         let s = block_type_id(size, mode);
-        assert_eq!(s.len(), 3, "block_type_id result must be exactly 3 chars, got '{s}'");
+        assert_eq!(
+            s.len(),
+            3,
+            "block_type_id result must be exactly 3 chars, got '{s}'"
+        );
     }
 }
 
@@ -223,7 +229,11 @@ fn display_info_valid_lz4_frame_returns_ok() {
     let tmp = write_lz4_frame(b"Hello, LZ4 info test!");
     let path = tmp.path().to_str().expect("path");
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "valid LZ4 frame must return Ok, got: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "valid LZ4 frame must return Ok, got: {:?}",
+        result
+    );
 }
 
 #[test]
@@ -233,7 +243,11 @@ fn display_info_valid_lz4_frame_large_payload() {
     let tmp = write_lz4_frame(&payload);
     let path = tmp.path().to_str().expect("path");
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "large valid LZ4 frame must return Ok: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "large valid LZ4 frame must return Ok: {:?}",
+        result
+    );
 }
 
 #[test]
@@ -241,7 +255,8 @@ fn display_info_corrupt_file_returns_err() {
     // A file with garbage bytes (not a valid LZ4 magic number) → Err.
     let mut tmp = NamedTempFile::new().expect("tempfile");
     // Write bytes that are not a valid LZ4 magic number.
-    tmp.write_all(&[0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x00, 0x00, 0x00]).expect("write");
+    tmp.write_all(&[0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x00, 0x00, 0x00])
+        .expect("write");
     let path = tmp.path().to_str().expect("path");
     let result = display_compressed_files_info(&[path]);
     assert!(result.is_err(), "corrupt file must return Err");
@@ -255,7 +270,11 @@ fn display_info_multiple_valid_files_returns_ok() {
     let path1 = tmp1.path().to_str().expect("path1");
     let path2 = tmp2.path().to_str().expect("path2");
     let result = display_compressed_files_info(&[path1, path2]);
-    assert!(result.is_ok(), "multiple valid LZ4 frames must return Ok: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "multiple valid LZ4 frames must return Ok: {:?}",
+        result
+    );
 }
 
 #[test]
@@ -264,10 +283,7 @@ fn display_info_stops_on_first_error() {
     let tmp_valid = write_lz4_frame(b"valid");
     let path_valid = tmp_valid.path().to_str().expect("path");
 
-    let result = display_compressed_files_info(&[
-        "/nonexistent/garbage.lz4",
-        path_valid,
-    ]);
+    let result = display_compressed_files_info(&["/nonexistent/garbage.lz4", path_valid]);
     assert!(result.is_err(), "must return Err when first path fails");
 }
 
@@ -277,5 +293,9 @@ fn display_info_empty_payload_lz4_frame() {
     let tmp = write_lz4_frame(b"");
     let path = tmp.path().to_str().expect("path");
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "empty-payload LZ4 frame must return Ok: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "empty-payload LZ4 frame must return Ok: {:?}",
+        result
+    );
 }

@@ -19,9 +19,10 @@ use std::time::{Duration, Instant};
 
 use xxhash_rust::xxh64::xxh64 as xxh64_oneshot;
 
-use super::config::{BenchConfig, ACTIVEPERIOD_NANOSEC, COOLPERIOD_SEC, DECOMP_MULT, MB,
-                    TIMELOOP_NANOSEC};
 use super::compress_strategy::CompressionStrategy;
+use super::config::{
+    BenchConfig, ACTIVEPERIOD_NANOSEC, COOLPERIOD_SEC, DECOMP_MULT, MB, TIMELOOP_NANOSEC,
+};
 use super::decompress_binding::{decompress_frame_block, FrameDecompressor};
 
 use crate::block::{compress_bound, decompress_safe_using_dict};
@@ -30,8 +31,6 @@ use crate::block::{compress_bound, decompress_safe_using_dict};
 
 /// Maximum input size accepted by the LZ4 block API (`0x7E000000`).
 const LZ4_MAX_INPUT_SIZE: usize = 0x7E00_0000;
-
-
 
 // ── Internal block descriptor ─────────────────────────────────────────────────
 
@@ -133,7 +132,11 @@ pub fn bench_mem(
     // Upper bound on the number of blocks across all files.  Each file may
     // contribute a partial final block, so we add `nb_files` to account for
     // those remainders.  When file_sizes is empty, treat src as a single file.
-    let nb_files = if file_sizes.is_empty() { 1 } else { file_sizes.len() };
+    let nb_files = if file_sizes.is_empty() {
+        1
+    } else {
+        file_sizes.len()
+    };
     let max_nb_blocks = (src_size + block_size - 1) / block_size + nb_files;
 
     // ── multipliers for decode-only mode ──────────────────────────────────────
@@ -344,8 +347,7 @@ pub fn bench_mem(
                     fastest_c_ns = per_loop;
                 }
                 // aim for ~1 second per pass
-                nb_compression_loops =
-                    (TIMELOOP_NANOSEC / fastest_c_ns) as u32 + 1;
+                nb_compression_loops = (TIMELOOP_NANOSEC / fastest_c_ns) as u32 + 1;
             } else {
                 // duration was 0; multiply to avoid an infinite spin
                 assert!(nb_compression_loops < 40_000_000);
@@ -530,9 +532,7 @@ pub fn bench_mem(
                 );
                 bench_error = true;
                 // Scan for the first differing byte to aid debugging.
-                for (u, (&src_b, &res_b)) in
-                    src.iter().zip(result_bytes.iter()).enumerate()
-                {
+                for (u, (&src_b, &res_b)) in src.iter().zip(result_bytes.iter()).enumerate() {
                     if src_b != res_b {
                         eprintln!("Decoding error at pos {} ", u);
                         break;
@@ -617,7 +617,16 @@ mod tests {
         };
         let mut strategy = build_compression_parameters(1, src.len(), src.len());
         let mut decompressor = FrameDecompressor::new();
-        let result = bench_mem(&src, "test", &config, 1, &mut *strategy, &mut decompressor, b"", &[]);
+        let result = bench_mem(
+            &src,
+            "test",
+            &config,
+            1,
+            &mut *strategy,
+            &mut decompressor,
+            b"",
+            &[],
+        );
         let r = result.expect("bench_mem should succeed on a 1 MB buffer at level 1");
         assert!(r.compressed_size > 0, "compressed_size must be non-zero");
         assert!(
@@ -633,7 +642,12 @@ mod tests {
     #[test]
     fn bench_mem_crc_passes() {
         // Checksum must match after round-trip.
-        let src: Vec<u8> = b"hello world! ".iter().cycle().take(64 * 1024).cloned().collect();
+        let src: Vec<u8> = b"hello world! "
+            .iter()
+            .cycle()
+            .take(64 * 1024)
+            .cloned()
+            .collect();
         let config = {
             let mut c = BenchConfig::default();
             c.set_nb_seconds(1);
@@ -641,7 +655,16 @@ mod tests {
         };
         let mut strategy = build_compression_parameters(1, src.len(), src.len());
         let mut decompressor = FrameDecompressor::new();
-        let result = bench_mem(&src, "crctest", &config, 1, &mut *strategy, &mut decompressor, b"", &[]);
+        let result = bench_mem(
+            &src,
+            "crctest",
+            &config,
+            1,
+            &mut *strategy,
+            &mut decompressor,
+            b"",
+            &[],
+        );
         assert!(result.is_ok(), "CRC check must pass: {:?}", result.err());
     }
 
@@ -656,7 +679,16 @@ mod tests {
         };
         let mut strategy = build_compression_parameters(1, src.len(), src.len());
         let mut decompressor = FrameDecompressor::new();
-        let result = bench_mem(&src, "zerotest", &config, 1, &mut *strategy, &mut decompressor, b"", &[]);
+        let result = bench_mem(
+            &src,
+            "zerotest",
+            &config,
+            1,
+            &mut *strategy,
+            &mut decompressor,
+            b"",
+            &[],
+        );
         assert!(result.is_ok(), "single-pass bench_mem must succeed");
     }
 
@@ -671,8 +703,21 @@ mod tests {
         };
         let mut strategy = build_compression_parameters(9, src.len(), src.len());
         let mut decompressor = FrameDecompressor::new();
-        let result = bench_mem(&src, "hctest", &config, 9, &mut *strategy, &mut decompressor, b"", &[]);
-        assert!(result.is_ok(), "HC bench_mem must succeed: {:?}", result.err());
+        let result = bench_mem(
+            &src,
+            "hctest",
+            &config,
+            9,
+            &mut *strategy,
+            &mut decompressor,
+            b"",
+            &[],
+        );
+        assert!(
+            result.is_ok(),
+            "HC bench_mem must succeed: {:?}",
+            result.err()
+        );
     }
 
     #[test]
@@ -685,11 +730,23 @@ mod tests {
         };
         let mut strategy = build_compression_parameters(1, src.len(), src.len());
         let mut decompressor = FrameDecompressor::new();
-        let r = bench_mem(&src, "fields", &config, 1, &mut *strategy, &mut decompressor, b"", &[])
-            .unwrap();
+        let r = bench_mem(
+            &src,
+            "fields",
+            &config,
+            1,
+            &mut *strategy,
+            &mut decompressor,
+            b"",
+            &[],
+        )
+        .unwrap();
         assert_eq!(r.src_size, 1024 * 1024);
         assert_eq!(r.c_level, 1);
         assert!(r.ratio > 0.0);
-        assert!(r.compressed_size < src.len(), "compressible input should shrink");
+        assert!(
+            r.compressed_size < src.len(),
+            "compressible input should shrink"
+        );
     }
 }

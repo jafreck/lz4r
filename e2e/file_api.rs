@@ -26,16 +26,13 @@ fn test_write_read_4kb_roundtrip() {
 
     // Compress: write to in-memory buffer
     let mut compressed = Vec::new();
-    let mut writer = Lz4WriteFile::open(Cursor::new(&mut compressed), None)
-        .expect("failed to open writer");
-    writer
-        .write_all(&original)
-        .expect("failed to write data");
+    let mut writer =
+        Lz4WriteFile::open(Cursor::new(&mut compressed), None).expect("failed to open writer");
+    writer.write_all(&original).expect("failed to write data");
     writer.finish().expect("failed to finish write");
 
     // Decompress: read from in-memory buffer
-    let mut reader = Lz4ReadFile::open(Cursor::new(&compressed))
-        .expect("failed to open reader");
+    let mut reader = Lz4ReadFile::open(Cursor::new(&compressed)).expect("failed to open reader");
     let mut recovered = Vec::new();
     reader
         .read_to_end(&mut recovered)
@@ -66,8 +63,8 @@ fn test_write_read_empty_data() {
         .expect("failed to finish write for empty data");
 
     // Decompress: read back
-    let mut reader = Lz4ReadFile::open(Cursor::new(&compressed))
-        .expect("failed to open reader for empty data");
+    let mut reader =
+        Lz4ReadFile::open(Cursor::new(&compressed)).expect("failed to open reader for empty data");
     let mut recovered = Vec::new();
     reader
         .read_to_end(&mut recovered)
@@ -90,10 +87,7 @@ fn test_write_read_empty_data() {
 fn test_write_multiple_chunks_read_back() {
     const CHUNK_SIZE: usize = 10 * 1024;
     const NUM_CHUNKS: usize = 10;
-    let original: Vec<u8> = (0u8..=255)
-        .cycle()
-        .take(CHUNK_SIZE * NUM_CHUNKS)
-        .collect();
+    let original: Vec<u8> = (0u8..=255).cycle().take(CHUNK_SIZE * NUM_CHUNKS).collect();
 
     // Compress: write in 10 KB chunks
     let mut compressed = Vec::new();
@@ -101,17 +95,13 @@ fn test_write_multiple_chunks_read_back() {
         .expect("failed to open writer for multi-chunk");
 
     for chunk in original.chunks(CHUNK_SIZE) {
-        writer
-            .write_all(chunk)
-            .expect("failed to write chunk");
+        writer.write_all(chunk).expect("failed to write chunk");
     }
-    writer
-        .finish()
-        .expect("failed to finish multi-chunk write");
+    writer.finish().expect("failed to finish multi-chunk write");
 
     // Decompress: read all back at once
-    let mut reader = Lz4ReadFile::open(Cursor::new(&compressed))
-        .expect("failed to open reader for multi-chunk");
+    let mut reader =
+        Lz4ReadFile::open(Cursor::new(&compressed)).expect("failed to open reader for multi-chunk");
     let mut recovered = Vec::new();
     reader
         .read_to_end(&mut recovered)
@@ -132,8 +122,7 @@ fn test_read_from_precompressed_frame() {
     let original = b"Pre-compressed test data using lz4_write_frame!".repeat(50);
 
     // Use convenience function to produce a complete frame
-    let compressed = lz4_write_frame(&original, Vec::new())
-        .expect("failed to compress frame");
+    let compressed = lz4_write_frame(&original, Vec::new()).expect("failed to compress frame");
 
     // Read back using streaming reader
     let mut reader = Lz4ReadFile::open(Cursor::new(&compressed))
@@ -166,8 +155,8 @@ fn test_read_with_small_buffer_loop() {
         .collect();
 
     // Compress
-    let compressed = lz4_write_frame(&original, Vec::new())
-        .expect("failed to compress for multi-read test");
+    let compressed =
+        lz4_write_frame(&original, Vec::new()).expect("failed to compress for multi-read test");
 
     // Decompress with 4 KB reads in a loop
     let mut reader = Lz4ReadFile::open(Cursor::new(&compressed))
@@ -210,7 +199,7 @@ impl Write for FailingWriter {
             self.first_write = false;
             return Ok(buf.len());
         }
-        
+
         // Fail all subsequent writes
         Err(std::io::Error::new(
             std::io::ErrorKind::Other,
@@ -258,13 +247,14 @@ fn test_convenience_functions_roundtrip() {
     let original = b"One-shot convenience API test.".repeat(200);
 
     // Compress
-    let compressed = lz4_write_frame(&original, Vec::new())
-        .expect("lz4_write_frame failed");
+    let compressed = lz4_write_frame(&original, Vec::new()).expect("lz4_write_frame failed");
 
     // Decompress
     let mut recovered = Vec::new();
-    lz4_read_frame(Cursor::new(&compressed), &mut recovered)
-        .expect("lz4_read_frame failed");
+    lz4_read_frame(Cursor::new(&compressed), &mut recovered).expect("lz4_read_frame failed");
 
-    assert_eq!(recovered, original, "convenience functions roundtrip mismatch");
+    assert_eq!(
+        recovered, original,
+        "convenience functions roundtrip mismatch"
+    );
 }

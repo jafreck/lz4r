@@ -34,19 +34,19 @@ use std::path::Path;
 use std::ptr;
 use std::time::SystemTime;
 
-use crate::frame::{
-    lz4f_compress_end, lz4f_compress_frame_using_cdict, lz4f_compress_update,
-    lz4f_create_compression_context, Lz4FCDict, Lz4FCCtx,
+use crate::frame::compress::{
+    lz4f_compress_begin_using_cdict, lz4f_compress_begin_using_dict, LZ4F_VERSION,
 };
-use crate::frame::compress::{lz4f_compress_begin_using_cdict, lz4f_compress_begin_using_dict, LZ4F_VERSION};
 use crate::frame::header::lz4f_compress_frame_bound;
 use crate::frame::types::{
     BlockChecksum, BlockMode, BlockSizeId, ContentChecksum, FrameInfo, FrameType, Preferences,
 };
-use crate::io::file_io::{open_dst_file, open_src_file, NUL_MARK, STDIN_MARK, STDOUT_MARK};
-use crate::io::prefs::{
-    display_level, final_time_display, Prefs, KB, LZ4_MAX_DICT_SIZE, MB,
+use crate::frame::{
+    lz4f_compress_end, lz4f_compress_frame_using_cdict, lz4f_compress_update,
+    lz4f_create_compression_context, Lz4FCCtx, Lz4FCDict,
 };
+use crate::io::file_io::{open_dst_file, open_src_file, NUL_MARK, STDIN_MARK, STDOUT_MARK};
+use crate::io::prefs::{display_level, final_time_display, Prefs, KB, LZ4_MAX_DICT_SIZE, MB};
 use crate::timefn::get_time;
 use crate::util::set_file_stat;
 
@@ -197,7 +197,10 @@ fn load_dict_file(dict_filename: &str) -> io::Result<Vec<u8>> {
         Box::new(io::stdin())
     } else {
         let mut f = fs::File::open(dict_filename).map_err(|e| {
-            io::Error::new(e.kind(), format!("Dictionary error: could not open {}: {}", dict_filename, e))
+            io::Error::new(
+                e.kind(),
+                format!("Dictionary error: could not open {}: {}", dict_filename, e),
+            )
         })?;
         // Opportunistically seek to the last 64 KB (lz4io.c:1027-1029).
         // If this fails (e.g. pipes), we just read from the current position.
@@ -252,11 +255,17 @@ fn create_cdict(io_prefs: &Prefs) -> io::Result<Option<Box<Lz4FCDict>>> {
         return Ok(None);
     }
     let dict_filename = io_prefs.dictionary_filename.as_deref().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "Dictionary error: no filename provided")
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Dictionary error: no filename provided",
+        )
     })?;
     let dict_buf = load_dict_file(dict_filename)?;
     let cdict = Lz4FCDict::create(&dict_buf).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::Other, "Dictionary error: could not create CDict")
+        io::Error::new(
+            io::ErrorKind::Other,
+            "Dictionary error: could not create CDict",
+        )
     })?;
     Ok(Some(cdict))
 }
@@ -274,7 +283,10 @@ impl CompressResources {
 
         // Allocate the LZ4F compression context (lz4io.c:1092-1095).
         let ctx = lz4f_create_compression_context(LZ4F_VERSION).map_err(|e| {
-            io::Error::new(io::ErrorKind::Other, format!("Allocation error: can't create LZ4F context: {}", e))
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("Allocation error: can't create LZ4F context: {}", e),
+            )
         })?;
 
         // Allocate source and destination buffers (lz4io.c:1099-1104).
@@ -298,7 +310,9 @@ impl CompressResources {
     ///
     /// SAFETY: The returned pointer is valid for the lifetime of `self`.
     pub fn cdict_ptr(&self) -> *const Lz4FCDict {
-        self.cdict.as_deref().map_or(ptr::null(), |c| c as *const Lz4FCDict)
+        self.cdict
+            .as_deref()
+            .map_or(ptr::null(), |c| c as *const Lz4FCDict)
     }
 }
 
@@ -367,32 +381,48 @@ pub fn compress_frame_chunk(
 ) -> io::Result<usize> {
     // Create a fresh per-chunk context (lz4io.c:1126-1129).
     let mut cctx = lz4f_create_compression_context(LZ4F_VERSION).map_err(|e| {
-        io::Error::new(io::ErrorKind::Other, format!("unable to create a LZ4F compression context: {}", e))
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!("unable to create a LZ4F compression context: {}", e),
+        )
     })?;
 
     // Write frame header to dst (lz4io.c:1132-1141).
     // The header is overwritten by compressUpdate in the next step.
     if let Some(prefix) = prefix_data {
         // LZ4F_compressBegin_usingDict (lz4io.c:1133)
-        lz4f_compress_begin_using_dict(
-            &mut cctx,
-            dst,
-            prefix,
-            Some(params.prefs),
-        )
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("error initializing LZ4F compression context with prefix: {}", e)))?;
+        lz4f_compress_begin_using_dict(&mut cctx, dst, prefix, Some(params.prefs)).map_err(
+            |e| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!(
+                        "error initializing LZ4F compression context with prefix: {}",
+                        e
+                    ),
+                )
+            },
+        )?;
     } else {
         // LZ4F_compressBegin_usingCDict (lz4io.c:1138)
         // SAFETY: params.cdict is valid for the duration of this call.
         unsafe {
             lz4f_compress_begin_using_cdict(&mut cctx, dst, params.cdict, Some(params.prefs))
         }
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("error initializing LZ4F compression context: {}", e)))?;
+        .map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("error initializing LZ4F compression context: {}", e),
+            )
+        })?;
     }
 
     // Compress data, overwriting the header (lz4io.c:1143-1149).
-    let c_size = lz4f_compress_update(&mut cctx, dst, src, None)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("error compressing with LZ4F_compressUpdate: {}", e)))?;
+    let c_size = lz4f_compress_update(&mut cctx, dst, src, None).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!("error compressing with LZ4F_compressUpdate: {}", e),
+        )
+    })?;
 
     // cctx is dropped here (equivalent to LZ4F_freeCompressionContext).
     Ok(c_size)
@@ -458,9 +488,7 @@ fn compress_filename_st(
             cdict_ptr,
             Some(&prefs),
         )
-        .map_err(|e| {
-            io::Error::new(io::ErrorKind::Other, format!("Compression failed: {}", e))
-        })?;
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Compression failed: {}", e)))?;
         compressedfilesize = c_size as u64;
 
         display_level(
@@ -472,19 +500,26 @@ fn compress_filename_st(
             ),
         );
 
-        dst_writer.write_all(&ress.dst_buffer[..c_size]).map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::WriteZero,
-                "Write error: failed writing single-block compressed frame",
-            )
-        })?;
+        dst_writer
+            .write_all(&ress.dst_buffer[..c_size])
+            .map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::WriteZero,
+                    "Write error: failed writing single-block compressed frame",
+                )
+            })?;
     } else {
         // Multi-block file: streaming frame compression (lz4io.c:1423-1460).
 
         // Write frame header (lz4io.c:1425-1430).
         // SAFETY: cdict_ptr is valid for the lifetime of ress.
         let header_size = unsafe {
-            lz4f_compress_begin_using_cdict(&mut ress.ctx, &mut ress.dst_buffer, cdict_ptr, Some(&prefs))
+            lz4f_compress_begin_using_cdict(
+                &mut ress.ctx,
+                &mut ress.dst_buffer,
+                cdict_ptr,
+                Some(&prefs),
+            )
         }
         .map_err(|e| {
             io::Error::new(
@@ -493,9 +528,11 @@ fn compress_filename_st(
             )
         })?;
 
-        dst_writer.write_all(&ress.dst_buffer[..header_size]).map_err(|_| {
-            io::Error::new(io::ErrorKind::WriteZero, "Write error: cannot write header")
-        })?;
+        dst_writer
+            .write_all(&ress.dst_buffer[..header_size])
+            .map_err(|_| {
+                io::Error::new(io::ErrorKind::WriteZero, "Write error: cannot write header")
+            })?;
         compressedfilesize += header_size as u64;
 
         // Main loop — one block at a time (lz4io.c:1433-1449).
@@ -520,12 +557,14 @@ fn compress_filename_st(
                 ),
             );
 
-            dst_writer.write_all(&ress.dst_buffer[..out_size]).map_err(|_| {
-                io::Error::new(
-                    io::ErrorKind::WriteZero,
-                    "Write error: cannot write compressed block",
-                )
-            })?;
+            dst_writer
+                .write_all(&ress.dst_buffer[..out_size])
+                .map_err(|_| {
+                    io::Error::new(
+                        io::ErrorKind::WriteZero,
+                        "Write error: cannot write compressed block",
+                    )
+                })?;
 
             // Read next block (lz4io.c:1447-1448).
             read_size = read_to_capacity(&mut *src_reader, &mut ress.src_buffer[..block_size])?;
@@ -533,16 +572,18 @@ fn compress_filename_st(
         }
 
         // End-of-frame mark (lz4io.c:1452-1459).
-        let end_size = lz4f_compress_end(&mut ress.ctx, &mut ress.dst_buffer, None)
-            .map_err(|e| {
+        let end_size =
+            lz4f_compress_end(&mut ress.ctx, &mut ress.dst_buffer, None).map_err(|e| {
                 io::Error::new(io::ErrorKind::Other, format!("End of frame error: {}", e))
             })?;
-        dst_writer.write_all(&ress.dst_buffer[..end_size]).map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::WriteZero,
-                "Write error: cannot write end of frame",
-            )
-        })?;
+        dst_writer
+            .write_all(&ress.dst_buffer[..end_size])
+            .map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::WriteZero,
+                    "Write error: cannot write end of frame",
+                )
+            })?;
         compressedfilesize += end_size as u64;
     }
 
@@ -598,7 +639,14 @@ pub fn compress_filename_ext(
 ) -> io::Result<()> {
     // The multi-threaded path lives in io::compress_mt; this function always
     // delegates to the single-threaded path.
-    compress_filename_st(in_stream_size, ress, src_filename, dst_filename, compression_level, io_prefs)
+    compress_filename_st(
+        in_stream_size,
+        ress,
+        src_filename,
+        dst_filename,
+        compression_level,
+        io_prefs,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -622,13 +670,23 @@ pub fn compress_filename(
     let mut ress = CompressResources::new(prefs)?;
     let mut processed: u64 = 0;
 
-    let result = compress_filename_ext(&mut processed, &mut ress, src, dst, compression_level, prefs);
+    let result = compress_filename_ext(
+        &mut processed,
+        &mut ress,
+        src,
+        dst,
+        compression_level,
+        prefs,
+    );
 
     // Free resources (ress drops automatically at end of scope).
     final_time_display(time_start, cpu_start, processed);
 
     result?;
-    Ok(CompressStats { bytes_in: processed, bytes_out: 0 })
+    Ok(CompressStats {
+        bytes_in: processed,
+        bytes_out: 0,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -790,10 +848,15 @@ mod tests {
         let compressed = std::fs::read(&dst_path).unwrap();
         // LZ4 frame magic: 0x184D2204
         assert!(compressed.len() >= 7, "must be at least header size");
-        assert_eq!(&compressed[..4], &[0x04, 0x22, 0x4D, 0x18], "must start with LZ4 magic");
+        assert_eq!(
+            &compressed[..4],
+            &[0x04, 0x22, 0x4D, 0x18],
+            "must start with LZ4 magic"
+        );
 
         // Decompress to verify round-trip.
-        let decompressed = crate::frame::decompress_frame_to_vec(&compressed).expect("decompression must succeed");
+        let decompressed =
+            crate::frame::decompress_frame_to_vec(&compressed).expect("decompression must succeed");
         assert_eq!(decompressed.as_slice(), original.as_slice());
     }
 
@@ -821,7 +884,8 @@ mod tests {
         .expect("compress_filename large should succeed");
 
         let compressed = std::fs::read(&dst_path).unwrap();
-        let decompressed = crate::frame::decompress_frame_to_vec(&compressed).expect("decompression must succeed");
+        let decompressed =
+            crate::frame::decompress_frame_to_vec(&compressed).expect("decompression must succeed");
         assert_eq!(decompressed, original);
     }
 
@@ -865,7 +929,10 @@ mod tests {
     #[test]
     fn compress_frame_chunk_returns_nonzero_for_compressible_input() {
         let prefs_val = build_preferences(&Prefs::default());
-        let params = CfcParameters { prefs: &prefs_val, cdict: ptr::null() };
+        let params = CfcParameters {
+            prefs: &prefs_val,
+            cdict: ptr::null(),
+        };
 
         let src: Vec<u8> = b"abcdefghij".iter().cycle().take(4096).copied().collect();
         // Destination must be large enough: at minimum src.len() + BH_SIZE.
@@ -879,12 +946,20 @@ mod tests {
 
     #[test]
     fn compress_frame_chunk_with_dict_returns_output() {
-        let dict_data: Vec<u8> = b"dictionary content".iter().cycle().take(1024).copied().collect();
+        let dict_data: Vec<u8> = b"dictionary content"
+            .iter()
+            .cycle()
+            .take(1024)
+            .copied()
+            .collect();
         let cdict = Lz4FCDict::create(&dict_data).expect("CDict creation failed");
         let cdict_ptr: *const Lz4FCDict = &*cdict;
 
         let prefs_val = build_preferences(&Prefs::default());
-        let params = CfcParameters { prefs: &prefs_val, cdict: cdict_ptr };
+        let params = CfcParameters {
+            prefs: &prefs_val,
+            cdict: cdict_ptr,
+        };
 
         let src: Vec<u8> = b"hello world".iter().cycle().take(512).copied().collect();
         let mut dst = vec![0u8; lz4f_compress_frame_bound(src.len(), Some(&prefs_val))];

@@ -25,15 +25,15 @@
 //   `lz4::io::decompress_multiple_filenames`
 //   `lz4::io::display_compressed_files_info`
 
-use lz4::io::{
-    CompressedFileInfo, LZ4IO_MAGICNUMBER, LZ4IO_SKIPPABLE0, LZ4IO_SKIPPABLEMASK,
-    LEGACY_MAGICNUMBER, NULL_OUTPUT, NUL_MARK, STDIN_MARK, STDOUT_MARK,
-};
+use lz4::io::Prefs;
 use lz4::io::{compress_filename, decompress_filename};
 use lz4::io::{compress_filename_legacy, compress_multiple_filenames_legacy};
 use lz4::io::{compress_multiple_filenames, decompress_multiple_filenames};
 use lz4::io::{default_nb_workers, set_notification_level};
-use lz4::io::Prefs;
+use lz4::io::{
+    CompressedFileInfo, LEGACY_MAGICNUMBER, LZ4IO_MAGICNUMBER, LZ4IO_SKIPPABLE0,
+    LZ4IO_SKIPPABLEMASK, NULL_OUTPUT, NUL_MARK, STDIN_MARK, STDOUT_MARK,
+};
 
 use std::fs;
 use std::io::Write;
@@ -160,7 +160,11 @@ fn set_notification_level_idempotent() {
 fn default_nb_workers_returns_positive() {
     // LZ4IO_defaultNbWorkers() must return ≥ 1.
     let n = default_nb_workers();
-    assert!(n >= 1, "default_nb_workers must return at least 1, got {}", n);
+    assert!(
+        n >= 1,
+        "default_nb_workers must return at least 1, got {}",
+        n
+    );
 }
 
 #[test]
@@ -183,7 +187,10 @@ fn prefs_default_accessible_via_io_module() {
     assert!(!p.pass_through, "pass_through defaults to false");
     assert!(!p.test_mode, "test_mode defaults to false");
     assert!(p.stream_checksum, "stream_checksum defaults to true");
-    assert_eq!(p.sparse_file_support, 1, "sparse_file_support defaults to 1 (auto)");
+    assert_eq!(
+        p.sparse_file_support, 1,
+        "sparse_file_support defaults to 1 (auto)"
+    );
     assert!(!p.remove_src_file, "remove_src_file defaults to false");
     assert!(p.nb_workers >= 1, "nb_workers must be at least 1");
 }
@@ -240,8 +247,13 @@ fn compress_and_decompress_filename_round_trip() {
     fs::write(&src, original).unwrap();
 
     let prefs = Prefs::default();
-    compress_filename(src.to_str().unwrap(), compressed.to_str().unwrap(), 1, &prefs)
-        .expect("compress_filename should succeed");
+    compress_filename(
+        src.to_str().unwrap(),
+        compressed.to_str().unwrap(),
+        1,
+        &prefs,
+    )
+    .expect("compress_filename should succeed");
 
     let stats = decompress_filename(
         compressed.to_str().unwrap(),
@@ -301,7 +313,10 @@ fn compress_and_decompress_multiple_filenames_round_trip() {
 
     // Decompress: strip the .lz4 suffix to produce new outputs.
     let compressed_srcs: Vec<_> = srcs.iter().map(|p| p.with_extension("txt.lz4")).collect();
-    let comp_strs: Vec<&str> = compressed_srcs.iter().map(|p| p.to_str().unwrap()).collect();
+    let comp_strs: Vec<&str> = compressed_srcs
+        .iter()
+        .map(|p| p.to_str().unwrap())
+        .collect();
 
     // Remove original files so decompression produces fresh copies.
     for src in &srcs {
@@ -320,16 +335,14 @@ fn compress_and_decompress_multiple_filenames_round_trip() {
 fn compress_multiple_filenames_empty_list_succeeds() {
     // An empty input list should succeed without error.
     let prefs = Prefs::default();
-    compress_multiple_filenames(&[], ".lz4", 1, &prefs)
-        .expect("empty list must succeed");
+    compress_multiple_filenames(&[], ".lz4", 1, &prefs).expect("empty list must succeed");
 }
 
 #[test]
 fn decompress_multiple_filenames_empty_list_succeeds() {
     // An empty input list should succeed without error.
     let prefs = Prefs::default();
-    decompress_multiple_filenames(&[], ".lz4", &prefs)
-        .expect("empty list must succeed");
+    decompress_multiple_filenames(&[], ".lz4", &prefs).expect("empty list must succeed");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -349,8 +362,13 @@ fn compress_filename_legacy_round_trip() {
     fs::write(&src, original).unwrap();
 
     let prefs = Prefs::default();
-    compress_filename_legacy(src.to_str().unwrap(), compressed.to_str().unwrap(), 1, &prefs)
-        .expect("compress_filename_legacy should succeed");
+    compress_filename_legacy(
+        src.to_str().unwrap(),
+        compressed.to_str().unwrap(),
+        1,
+        &prefs,
+    )
+    .expect("compress_filename_legacy should succeed");
 
     // Decompress using the unified dispatch (detects legacy magic).
     let stats = decompress_filename(
@@ -373,8 +391,13 @@ fn compress_filename_legacy_produces_legacy_magic() {
     fs::write(&src, b"magic check data").unwrap();
 
     let prefs = Prefs::default();
-    compress_filename_legacy(src.to_str().unwrap(), compressed.to_str().unwrap(), 1, &prefs)
-        .expect("compress_filename_legacy should succeed");
+    compress_filename_legacy(
+        src.to_str().unwrap(),
+        compressed.to_str().unwrap(),
+        1,
+        &prefs,
+    )
+    .expect("compress_filename_legacy should succeed");
 
     let bytes = fs::read(&compressed).unwrap();
     assert!(bytes.len() >= 4, "output too short");
@@ -385,8 +408,7 @@ fn compress_filename_legacy_produces_legacy_magic() {
 #[test]
 fn compress_multiple_filenames_legacy_empty_list_succeeds() {
     let prefs = Prefs::default();
-    compress_multiple_filenames_legacy(&[], ".lz4", 1, &prefs)
-        .expect("empty list must succeed");
+    compress_multiple_filenames_legacy(&[], ".lz4", 1, &prefs).expect("empty list must succeed");
 }
 
 #[test]
@@ -427,7 +449,10 @@ fn display_compressed_files_info_valid_frame_file() {
     fs::write(&src, make_frame_stream(b"info test content")).unwrap();
 
     let result = lz4::io::display_compressed_files_info(&[src.to_str().unwrap()]);
-    assert!(result.is_ok(), "display_compressed_files_info on valid file must succeed");
+    assert!(
+        result.is_ok(),
+        "display_compressed_files_info on valid file must succeed"
+    );
 }
 
 #[test]

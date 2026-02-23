@@ -62,8 +62,7 @@ pub fn set_file_stat(
     #[cfg(unix)]
     {
         use nix::unistd::{chown, Gid, Uid};
-        chown(path, Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid)))
-            .map_err(io::Error::from)?;
+        chown(path, Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid))).map_err(io::Error::from)?;
     }
 
     // Suppress "unused variable" warnings on non-Unix targets.
@@ -99,7 +98,9 @@ pub fn set_file_stat(
 pub fn is_reg_fd(fd: RawFd) -> bool {
     use nix::sys::stat::{fstat, SFlag};
     match fstat(fd) {
-        Ok(stat) => (stat.st_mode as u32) & (SFlag::S_IFMT.bits() as u32) == SFlag::S_IFREG.bits() as u32,
+        Ok(stat) => {
+            (stat.st_mode as u32) & (SFlag::S_IFMT.bits() as u32) == SFlag::S_IFREG.bits() as u32
+        }
         Err(_) => false,
     }
 }
@@ -170,7 +171,9 @@ mod tests {
 
     #[test]
     fn is_reg_file_returns_false_for_nonexistent_path() {
-        assert!(!is_reg_file(Path::new("/nonexistent/__lz4_test_path__.txt")));
+        assert!(!is_reg_file(Path::new(
+            "/nonexistent/__lz4_test_path__.txt"
+        )));
     }
 
     // ── is_directory ─────────────────────────────────────────────────────────

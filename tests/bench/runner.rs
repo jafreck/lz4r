@@ -16,15 +16,15 @@
 //   - bench_file_table: succeeds with a real file
 //   - bench_file_table: returns error when file list is empty / no readable data
 
-use lz4::bench::runner::{bench_c_level, load_files, bench_file_table};
 use lz4::bench::config::BenchConfig;
+use lz4::bench::runner::{bench_c_level, bench_file_table, load_files};
 use std::io::Write;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn quiet_config() -> BenchConfig {
     let mut c = BenchConfig::default();
-    c.set_nb_seconds(0);        // single pass — keeps tests fast
+    c.set_nb_seconds(0); // single pass — keeps tests fast
     c.set_notification_level(0); // suppress output
     c
 }
@@ -54,11 +54,13 @@ fn load_files_empty_path_list_returns_no_data_error() {
     assert_eq!(
         err.kind(),
         std::io::ErrorKind::InvalidInput,
-        "expected InvalidInput, got {:?}", err.kind()
+        "expected InvalidInput, got {:?}",
+        err.kind()
     );
     assert!(
         err.to_string().contains("no data to bench"),
-        "error message should mention 'no data to bench': {}", err
+        "error message should mention 'no data to bench': {}",
+        err
     );
 }
 
@@ -68,11 +70,15 @@ fn load_files_reads_single_file_correctly() {
     let (_tmp, path) = make_temp_file(content);
     let config = quiet_config();
 
-    let (buf, sizes) = load_files(&[&path], 4096, &config)
-        .expect("load_files must succeed for a valid file");
+    let (buf, sizes) =
+        load_files(&[&path], 4096, &config).expect("load_files must succeed for a valid file");
 
     assert_eq!(&buf[..], content, "buffer content must match file content");
-    assert_eq!(sizes[0], content.len(), "file_sizes[0] must equal file length");
+    assert_eq!(
+        sizes[0],
+        content.len(),
+        "file_sizes[0] must equal file length"
+    );
 }
 
 #[test]
@@ -93,8 +99,8 @@ fn load_files_truncates_to_buffer_size() {
     let (_tmp, path) = make_temp_file(content);
     let config = quiet_config();
 
-    let (buf, sizes) = load_files(&[&path], 10, &config)
-        .expect("truncated load should succeed (returns data)");
+    let (buf, sizes) =
+        load_files(&[&path], 10, &config).expect("truncated load should succeed (returns data)");
 
     assert_eq!(buf.len(), 10, "buffer must be truncated to buffer_size");
     assert_eq!(sizes[0], 10, "file_sizes[0] must reflect truncation");
@@ -141,7 +147,11 @@ fn load_files_multiple_files_concatenated() {
 #[test]
 fn load_files_missing_file_returns_error() {
     let config = quiet_config();
-    let result = load_files(&["/nonexistent_file_that_does_not_exist.bin"], 4096, &config);
+    let result = load_files(
+        &["/nonexistent_file_that_does_not_exist.bin"],
+        4096,
+        &config,
+    );
     assert!(result.is_err(), "missing file must return Err");
 }
 
@@ -165,7 +175,11 @@ fn bench_c_level_single_level_succeeds() {
     let src = make_src();
     let config = quiet_config();
     let result = bench_c_level(&src, "test_input", 1, 1, &config, b"", &[]);
-    assert!(result.is_ok(), "bench_c_level level 1 must succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "bench_c_level level 1 must succeed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -174,7 +188,11 @@ fn bench_c_level_multiple_levels_succeeds() {
     let src = make_src();
     let config = quiet_config();
     let result = bench_c_level(&src, "multi", 1, 3, &config, b"", &[]);
-    assert!(result.is_ok(), "bench_c_level levels 1–3 must succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "bench_c_level levels 1–3 must succeed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -183,7 +201,11 @@ fn bench_c_level_clamped_when_last_less_than_first() {
     let src = make_src();
     let config = quiet_config();
     let result = bench_c_level(&src, "clamped", 5, 2, &config, b"", &[]);
-    assert!(result.is_ok(), "clamped cLevelLast must still succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "clamped cLevelLast must still succeed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -219,7 +241,10 @@ fn bench_c_level_plain_filename_no_separator() {
     let src = make_src();
     let config = quiet_config();
     let result = bench_c_level(&src, "justfilename.bin", 1, 1, &config, b"", &[]);
-    assert!(result.is_ok(), "plain filename with no separator must not fail");
+    assert!(
+        result.is_ok(),
+        "plain filename with no separator must not fail"
+    );
 }
 
 #[test]
@@ -237,7 +262,11 @@ fn bench_c_level_with_dict() {
     let dict: Vec<u8> = (0u8..255).collect();
     let config = quiet_config();
     let result = bench_c_level(&src, "dicttest", 1, 1, &config, &dict, &[]);
-    assert!(result.is_ok(), "bench_c_level with non-empty dict must succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "bench_c_level with non-empty dict must succeed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -248,9 +277,13 @@ fn bench_c_level_display_level_1_no_additional_param() {
     let mut config = BenchConfig::default();
     config.set_nb_seconds(0);
     config.set_notification_level(1); // display_level = 1
-    // additional_param defaults to 0
+                                      // additional_param defaults to 0
     let result = bench_c_level(&src, "verbose1", 1, 1, &config, b"", &[]);
-    assert!(result.is_ok(), "display_level=1 path must not fail: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "display_level=1 path must not fail: {:?}",
+        result.err()
+    );
 }
 
 // ── bench_file_table ──────────────────────────────────────────────────────────
@@ -262,7 +295,11 @@ fn bench_file_table_single_file_succeeds() {
     let config = quiet_config();
 
     let result = bench_file_table(&[&path], 1, 1, b"", &config);
-    assert!(result.is_ok(), "bench_file_table single file must succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "bench_file_table single file must succeed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -274,17 +311,21 @@ fn bench_file_table_multiple_files_display_name_format() {
     let config = quiet_config();
 
     let result = bench_file_table(&[&path_a, &path_b], 1, 1, b"", &config);
-    assert!(result.is_ok(), "bench_file_table multiple files must succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "bench_file_table multiple files must succeed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
 fn bench_file_table_missing_file_propagates_error() {
     let config = quiet_config();
-    let result = bench_file_table(
-        &["/nonexistent_file_xyz_abc.bin"],
-        1, 1, b"", &config,
+    let result = bench_file_table(&["/nonexistent_file_xyz_abc.bin"], 1, 1, b"", &config);
+    assert!(
+        result.is_err(),
+        "missing file must cause bench_file_table to return Err"
     );
-    assert!(result.is_err(), "missing file must cause bench_file_table to return Err");
 }
 
 #[test]
@@ -294,5 +335,9 @@ fn bench_file_table_level_range_1_to_3() {
     let config = quiet_config();
 
     let result = bench_file_table(&[&path], 1, 3, b"", &config);
-    assert!(result.is_ok(), "bench_file_table levels 1–3 must succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "bench_file_table levels 1–3 must succeed: {:?}",
+        result.err()
+    );
 }

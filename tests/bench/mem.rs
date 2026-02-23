@@ -15,7 +15,7 @@
 //   - display_name is silently truncated to ≤17 chars without error
 //   - empty src produces no panic and valid BenchResult
 
-use lz4::bench::bench_mem::{bench_mem, BlockParams, BenchResult};
+use lz4::bench::bench_mem::{bench_mem, BenchResult, BlockParams};
 use lz4::bench::compress_strategy::build_compression_parameters;
 use lz4::bench::config::BenchConfig;
 use lz4::bench::decompress_binding::FrameDecompressor;
@@ -41,7 +41,12 @@ fn make_1mb_buf() -> Vec<u8> {
 
 /// 64 KiB of repeating text — easily compressible.
 fn make_64k_text() -> Vec<u8> {
-    b"hello world! ".iter().cycle().take(64 * 1024).cloned().collect()
+    b"hello world! "
+        .iter()
+        .cycle()
+        .take(64 * 1024)
+        .cloned()
+        .collect()
 }
 
 /// Highly compressible 4 KiB buffer (all-zero).
@@ -87,8 +92,21 @@ fn bench_mem_1mb_level1_succeeds() {
     let config = default_config_1s();
     let mut strategy = build_compression_parameters(1, src.len(), src.len());
     let mut decompressor = FrameDecompressor::new();
-    let result = bench_mem(&src, "test_1mb", &config, 1, &mut *strategy, &mut decompressor, b"", &[]);
-    assert!(result.is_ok(), "bench_mem must succeed on 1 MB input at level 1: {:?}", result.err());
+    let result = bench_mem(
+        &src,
+        "test_1mb",
+        &config,
+        1,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &[],
+    );
+    assert!(
+        result.is_ok(),
+        "bench_mem must succeed on 1 MB input at level 1: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -98,7 +116,17 @@ fn bench_mem_result_src_size_matches_input() {
     let config = default_config_1s();
     let mut strategy = build_compression_parameters(1, src.len(), src.len());
     let mut decompressor = FrameDecompressor::new();
-    let r = bench_mem(&src, "srcsize", &config, 1, &mut *strategy, &mut decompressor, b"", &[]).unwrap();
+    let r = bench_mem(
+        &src,
+        "srcsize",
+        &config,
+        1,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &[],
+    )
+    .unwrap();
     assert_eq!(r.src_size, src.len(), "src_size must equal input length");
 }
 
@@ -108,7 +136,17 @@ fn bench_mem_result_compressed_size_nonzero() {
     let config = default_config_1s();
     let mut strategy = build_compression_parameters(1, src.len(), src.len());
     let mut decompressor = FrameDecompressor::new();
-    let r = bench_mem(&src, "csize", &config, 1, &mut *strategy, &mut decompressor, b"", &[]).unwrap();
+    let r = bench_mem(
+        &src,
+        "csize",
+        &config,
+        1,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &[],
+    )
+    .unwrap();
     assert!(r.compressed_size > 0, "compressed_size must be non-zero");
 }
 
@@ -119,7 +157,17 @@ fn bench_mem_compressible_data_shrinks() {
     let config = default_config_1s();
     let mut strategy = build_compression_parameters(1, src.len(), src.len());
     let mut decompressor = FrameDecompressor::new();
-    let r = bench_mem(&src, "shrink", &config, 1, &mut *strategy, &mut decompressor, b"", &[]).unwrap();
+    let r = bench_mem(
+        &src,
+        "shrink",
+        &config,
+        1,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &[],
+    )
+    .unwrap();
     assert!(
         r.compressed_size < src.len(),
         "compressible data should shrink: compressed={} vs src={}",
@@ -134,7 +182,17 @@ fn bench_mem_ratio_is_positive() {
     let config = default_config_1s();
     let mut strategy = build_compression_parameters(1, src.len(), src.len());
     let mut decompressor = FrameDecompressor::new();
-    let r = bench_mem(&src, "ratio", &config, 1, &mut *strategy, &mut decompressor, b"", &[]).unwrap();
+    let r = bench_mem(
+        &src,
+        "ratio",
+        &config,
+        1,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &[],
+    )
+    .unwrap();
     assert!(r.ratio > 0.0, "ratio must be positive");
 }
 
@@ -145,8 +203,21 @@ fn bench_mem_compress_speed_positive() {
     let config = default_config_1s();
     let mut strategy = build_compression_parameters(1, src.len(), src.len());
     let mut decompressor = FrameDecompressor::new();
-    let r = bench_mem(&src, "cspeed", &config, 1, &mut *strategy, &mut decompressor, b"", &[]).unwrap();
-    assert!(r.compress_speed_mb_s > 0.0, "compress_speed_mb_s must be positive");
+    let r = bench_mem(
+        &src,
+        "cspeed",
+        &config,
+        1,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &[],
+    )
+    .unwrap();
+    assert!(
+        r.compress_speed_mb_s > 0.0,
+        "compress_speed_mb_s must be positive"
+    );
 }
 
 #[test]
@@ -155,8 +226,21 @@ fn bench_mem_decompress_speed_positive() {
     let config = default_config_1s();
     let mut strategy = build_compression_parameters(1, src.len(), src.len());
     let mut decompressor = FrameDecompressor::new();
-    let r = bench_mem(&src, "dspeed", &config, 1, &mut *strategy, &mut decompressor, b"", &[]).unwrap();
-    assert!(r.decompress_speed_mb_s > 0.0, "decompress_speed_mb_s must be positive");
+    let r = bench_mem(
+        &src,
+        "dspeed",
+        &config,
+        1,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &[],
+    )
+    .unwrap();
+    assert!(
+        r.decompress_speed_mb_s > 0.0,
+        "decompress_speed_mb_s must be positive"
+    );
 }
 
 #[test]
@@ -166,7 +250,17 @@ fn bench_mem_c_level_preserved_in_result() {
     let config = default_config_1s();
     let mut strategy = build_compression_parameters(1, src.len(), src.len());
     let mut decompressor = FrameDecompressor::new();
-    let r = bench_mem(&src, "clevel", &config, 1, &mut *strategy, &mut decompressor, b"", &[]).unwrap();
+    let r = bench_mem(
+        &src,
+        "clevel",
+        &config,
+        1,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &[],
+    )
+    .unwrap();
     assert_eq!(r.c_level, 1, "c_level must be preserved in BenchResult");
 }
 
@@ -179,8 +273,21 @@ fn bench_mem_hc_level9_succeeds() {
     let config = default_config_1s();
     let mut strategy = build_compression_parameters(9, src.len(), src.len());
     let mut decompressor = FrameDecompressor::new();
-    let result = bench_mem(&src, "hctest", &config, 9, &mut *strategy, &mut decompressor, b"", &[]);
-    assert!(result.is_ok(), "HC bench_mem must succeed: {:?}", result.err());
+    let result = bench_mem(
+        &src,
+        "hctest",
+        &config,
+        9,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &[],
+    );
+    assert!(
+        result.is_ok(),
+        "HC bench_mem must succeed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -189,7 +296,17 @@ fn bench_mem_hc_level9_c_level_in_result() {
     let config = default_config_1s();
     let mut strategy = build_compression_parameters(9, src.len(), src.len());
     let mut decompressor = FrameDecompressor::new();
-    let r = bench_mem(&src, "hc9", &config, 9, &mut *strategy, &mut decompressor, b"", &[]).unwrap();
+    let r = bench_mem(
+        &src,
+        "hc9",
+        &config,
+        9,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &[],
+    )
+    .unwrap();
     assert_eq!(r.c_level, 9);
 }
 
@@ -203,8 +320,21 @@ fn bench_mem_crc_passes_on_round_trip() {
     let config = default_config_1s();
     let mut strategy = build_compression_parameters(1, src.len(), src.len());
     let mut decompressor = FrameDecompressor::new();
-    let result = bench_mem(&src, "crctest", &config, 1, &mut *strategy, &mut decompressor, b"", &[]);
-    assert!(result.is_ok(), "CRC check must pass after round-trip: {:?}", result.err());
+    let result = bench_mem(
+        &src,
+        "crctest",
+        &config,
+        1,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &[],
+    );
+    assert!(
+        result.is_ok(),
+        "CRC check must pass after round-trip: {:?}",
+        result.err()
+    );
 }
 
 // ── nb_seconds = 0 (single-pass mode) ────────────────────────────────────────
@@ -216,7 +346,16 @@ fn bench_mem_zero_seconds_single_pass_succeeds() {
     let config = default_config_0s();
     let mut strategy = build_compression_parameters(1, src.len(), src.len());
     let mut decompressor = FrameDecompressor::new();
-    let result = bench_mem(&src, "zerotest", &config, 1, &mut *strategy, &mut decompressor, b"", &[]);
+    let result = bench_mem(
+        &src,
+        "zerotest",
+        &config,
+        1,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &[],
+    );
     assert!(result.is_ok(), "single-pass bench_mem must succeed");
 }
 
@@ -226,7 +365,17 @@ fn bench_mem_zero_seconds_result_is_valid() {
     let config = default_config_0s();
     let mut strategy = build_compression_parameters(1, src.len(), src.len());
     let mut decompressor = FrameDecompressor::new();
-    let r = bench_mem(&src, "0s_valid", &config, 1, &mut *strategy, &mut decompressor, b"", &[]).unwrap();
+    let r = bench_mem(
+        &src,
+        "0s_valid",
+        &config,
+        1,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &[],
+    )
+    .unwrap();
     assert_eq!(r.src_size, src.len());
     assert!(r.compressed_size > 0);
 }
@@ -241,7 +390,16 @@ fn bench_mem_long_display_name_truncated_silently() {
     let mut strategy = build_compression_parameters(1, src.len(), src.len());
     let mut decompressor = FrameDecompressor::new();
     let long_name = "this_name_is_definitely_longer_than_seventeen_characters";
-    let result = bench_mem(&src, long_name, &config, 1, &mut *strategy, &mut decompressor, b"", &[]);
+    let result = bench_mem(
+        &src,
+        long_name,
+        &config,
+        1,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &[],
+    );
     assert!(result.is_ok(), "long display_name must not cause error");
 }
 
@@ -252,7 +410,16 @@ fn bench_mem_exact_17_char_name_succeeds() {
     let mut strategy = build_compression_parameters(1, src.len(), src.len());
     let mut decompressor = FrameDecompressor::new();
     let name17 = "123456789abcdefgh"; // exactly 17 chars
-    let result = bench_mem(&src, name17, &config, 1, &mut *strategy, &mut decompressor, b"", &[]);
+    let result = bench_mem(
+        &src,
+        name17,
+        &config,
+        1,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &[],
+    );
     assert!(result.is_ok());
 }
 
@@ -266,8 +433,20 @@ fn bench_mem_block_size_32_is_used_when_set() {
     config.set_block_size(65536); // 64 KiB blocks
     let mut strategy = build_compression_parameters(1, src.len(), src.len());
     let mut decompressor = FrameDecompressor::new();
-    let result = bench_mem(&src, "blksize", &config, 1, &mut *strategy, &mut decompressor, b"", &[]);
-    assert!(result.is_ok(), "bench_mem with block_size=64KiB should succeed");
+    let result = bench_mem(
+        &src,
+        "blksize",
+        &config,
+        1,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &[],
+    );
+    assert!(
+        result.is_ok(),
+        "bench_mem with block_size=64KiB should succeed"
+    );
 }
 
 #[test]
@@ -278,8 +457,20 @@ fn bench_mem_block_size_below_32_falls_back_to_src_size() {
     config.set_block_size(16); // < 32 → should fall back to src_size
     let mut strategy = build_compression_parameters(1, src.len(), src.len());
     let mut decompressor = FrameDecompressor::new();
-    let result = bench_mem(&src, "blkfall", &config, 1, &mut *strategy, &mut decompressor, b"", &[]);
-    assert!(result.is_ok(), "bench_mem with block_size<32 must fall back gracefully");
+    let result = bench_mem(
+        &src,
+        "blkfall",
+        &config,
+        1,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &[],
+    );
+    assert!(
+        result.is_ok(),
+        "bench_mem with block_size<32 must fall back gracefully"
+    );
 }
 
 // ── Various data patterns ─────────────────────────────────────────────────────
@@ -290,7 +481,16 @@ fn bench_mem_all_zeros_succeeds() {
     let config = default_config_0s();
     let mut strategy = build_compression_parameters(1, src.len(), src.len());
     let mut decompressor = FrameDecompressor::new();
-    let result = bench_mem(&src, "allzeros", &config, 1, &mut *strategy, &mut decompressor, b"", &[]);
+    let result = bench_mem(
+        &src,
+        "allzeros",
+        &config,
+        1,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &[],
+    );
     assert!(result.is_ok());
 }
 
@@ -300,7 +500,16 @@ fn bench_mem_repetitive_byte_pattern() {
     let config = default_config_0s();
     let mut strategy = build_compression_parameters(1, src.len(), src.len());
     let mut decompressor = FrameDecompressor::new();
-    let result = bench_mem(&src, "repbytes", &config, 1, &mut *strategy, &mut decompressor, b"", &[]);
+    let result = bench_mem(
+        &src,
+        "repbytes",
+        &config,
+        1,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &[],
+    );
     assert!(result.is_ok());
 }
 
@@ -310,7 +519,16 @@ fn bench_mem_binary_pattern_succeeds() {
     let config = default_config_0s();
     let mut strategy = build_compression_parameters(1, src.len(), src.len());
     let mut decompressor = FrameDecompressor::new();
-    let result = bench_mem(&src, "binary", &config, 1, &mut *strategy, &mut decompressor, b"", &[]);
+    let result = bench_mem(
+        &src,
+        "binary",
+        &config,
+        1,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &[],
+    );
     assert!(result.is_ok());
 }
 
@@ -323,12 +541,24 @@ fn bench_mem_ratio_equals_src_over_compressed() {
     let config = default_config_1s();
     let mut strategy = build_compression_parameters(1, src.len(), src.len());
     let mut decompressor = FrameDecompressor::new();
-    let r = bench_mem(&src, "ratio_eq", &config, 1, &mut *strategy, &mut decompressor, b"", &[]).unwrap();
+    let r = bench_mem(
+        &src,
+        "ratio_eq",
+        &config,
+        1,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &[],
+    )
+    .unwrap();
     let expected_ratio = r.src_size as f64 / r.compressed_size as f64;
     // Allow floating-point rounding tolerance
     assert!(
         (r.ratio - expected_ratio).abs() < 0.01,
-        "ratio mismatch: got {} expected ~{}", r.ratio, expected_ratio
+        "ratio mismatch: got {} expected ~{}",
+        r.ratio,
+        expected_ratio
     );
 }
 
@@ -341,6 +571,15 @@ fn bench_mem_display_level_0_succeeds() {
     config.set_notification_level(0);
     let mut strategy = build_compression_parameters(1, src.len(), src.len());
     let mut decompressor = FrameDecompressor::new();
-    let result = bench_mem(&src, "quiet", &config, 1, &mut *strategy, &mut decompressor, b"", &[]);
+    let result = bench_mem(
+        &src,
+        "quiet",
+        &config,
+        1,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &[],
+    );
     assert!(result.is_ok());
 }

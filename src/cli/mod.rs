@@ -13,9 +13,9 @@
 //!
 //! Typical call sequence: `CliInit::detect_alias` → `ParsedArgs::parse` → dispatch to the I/O layer.
 
+pub mod arg_utils;
+pub mod args;
 pub mod constants;
 pub mod help;
-pub mod arg_utils;
-pub mod op_mode;
 pub mod init;
-pub mod args;
+pub mod op_mode;

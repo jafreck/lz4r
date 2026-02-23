@@ -21,12 +21,12 @@
 //   - init_internal: offset computation, 1 GB threshold, 64 KB guard
 
 use lz4::hc::types::{
-    clear_tables, count_back, get_clevel_params, hc_count, hash_ptr, init_internal, mid_hash4,
+    clear_tables, count_back, get_clevel_params, hash_ptr, hc_count, init_internal, mid_hash4,
     mid_hash4_ptr, mid_hash7, mid_hash8_ptr, nb_common_bytes32, read64, read_le64, CParams,
     DictCtxDirective, HcCCtxInternal, HcStrategy, K_CL_TABLE, LZ4HC_CLEVEL_DEFAULT,
     LZ4HC_CLEVEL_MAX, LZ4HC_CLEVEL_MIN, LZ4HC_CLEVEL_OPT_MIN, LZ4HC_DICTIONARY_LOGSIZE,
-    LZ4HC_HASH_LOG, LZ4HC_HASH_MASK, LZ4HC_HASHTABLESIZE, LZ4HC_HASHSIZE, LZ4HC_MAXD,
-    LZ4HC_MAXD_MASK, LZ4MID_HASHLOG, LZ4MID_HASHTABLESIZE, LZ4MID_HASHSIZE, LZ4_OPT_NUM,
+    LZ4HC_HASHSIZE, LZ4HC_HASHTABLESIZE, LZ4HC_HASH_LOG, LZ4HC_HASH_MASK, LZ4HC_MAXD,
+    LZ4HC_MAXD_MASK, LZ4MID_HASHLOG, LZ4MID_HASHSIZE, LZ4MID_HASHTABLESIZE, LZ4_OPT_NUM,
     OPTIMAL_ML,
 };
 
@@ -144,7 +144,10 @@ fn constant_lz4_opt_num() {
 
 #[test]
 fn dict_ctx_directive_variants_are_distinct() {
-    assert_ne!(DictCtxDirective::NoDictCtx, DictCtxDirective::UsingDictCtxHc);
+    assert_ne!(
+        DictCtxDirective::NoDictCtx,
+        DictCtxDirective::UsingDictCtxHc
+    );
 }
 
 #[test]
@@ -437,7 +440,10 @@ fn hash_ptr_result_fits_in_hash_log_bits() {
     // Result must be < LZ4HC_HASHTABLESIZE (2^15 == 32768)
     let buf = [0xDE, 0xAD, 0xBE, 0xEFu8];
     let h = unsafe { hash_ptr(buf.as_ptr()) };
-    assert!(h < LZ4HC_HASHTABLESIZE as u32, "hash_ptr result out of range: {h}");
+    assert!(
+        h < LZ4HC_HASHTABLESIZE as u32,
+        "hash_ptr result out of range: {h}"
+    );
 }
 
 #[test]
@@ -479,7 +485,10 @@ fn mid_hash4_zero_is_zero() {
 fn mid_hash4_result_fits_in_mid_hashlog_bits() {
     // Must be < LZ4MID_HASHTABLESIZE (2^14 == 16384)
     let h = mid_hash4(0xDEAD_BEEF);
-    assert!(h < LZ4MID_HASHTABLESIZE as u32, "mid_hash4 out of range: {h}");
+    assert!(
+        h < LZ4MID_HASHTABLESIZE as u32,
+        "mid_hash4 out of range: {h}"
+    );
 }
 
 #[test]
@@ -516,7 +525,10 @@ fn mid_hash7_zero_is_zero() {
 #[test]
 fn mid_hash7_result_fits_in_mid_hashlog_bits() {
     let h = mid_hash7(0xDEAD_BEEF_1234_5678u64);
-    assert!(h < LZ4MID_HASHTABLESIZE as u32, "mid_hash7 out of range: {h}");
+    assert!(
+        h < LZ4MID_HASHTABLESIZE as u32,
+        "mid_hash7 out of range: {h}"
+    );
 }
 
 #[test]
@@ -607,7 +619,7 @@ fn hc_count_all_matching() {
 
 #[test]
 fn hc_count_zero_matching() {
-    let p_in:    [u8; 8] = [0xAAu8; 8];
+    let p_in: [u8; 8] = [0xAAu8; 8];
     let p_match: [u8; 8] = [0xBBu8; 8];
     let result = unsafe {
         let limit = p_in.as_ptr().add(p_in.len());
@@ -618,7 +630,7 @@ fn hc_count_zero_matching() {
 
 #[test]
 fn hc_count_partial_match() {
-    let p_in:    [u8; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+    let p_in: [u8; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
     let p_match: [u8; 8] = [1, 2, 3, 4, 9, 9, 9, 9];
     let result = unsafe {
         let limit = p_in.as_ptr().add(p_in.len());
@@ -634,11 +646,11 @@ fn hc_count_partial_match() {
 #[test]
 fn count_back_no_common_bytes() {
     // ip[-1] != match[-1] → 0 common bytes backward
-    let ip_buf:    [u8; 4] = [0xAA, 0xBB, 0xCC, 0xDD];
+    let ip_buf: [u8; 4] = [0xAA, 0xBB, 0xCC, 0xDD];
     let match_buf: [u8; 4] = [0x11, 0x22, 0x33, 0x44];
     let result = unsafe {
-        let ip    = ip_buf.as_ptr().add(4);
-        let m     = match_buf.as_ptr().add(4);
+        let ip = ip_buf.as_ptr().add(4);
+        let m = match_buf.as_ptr().add(4);
         let i_min = ip_buf.as_ptr();
         let m_min = match_buf.as_ptr();
         count_back(ip, m, i_min, m_min)
@@ -649,11 +661,11 @@ fn count_back_no_common_bytes() {
 #[test]
 fn count_back_one_common_byte() {
     // ip[-1] == match[-1] but ip[-2] != match[-2]
-    let ip_buf:    [u8; 4] = [0x00, 0x00, 0x00, 0xAA];
+    let ip_buf: [u8; 4] = [0x00, 0x00, 0x00, 0xAA];
     let match_buf: [u8; 4] = [0x00, 0x00, 0x11, 0xAA];
     let result = unsafe {
-        let ip    = ip_buf.as_ptr().add(4);
-        let m     = match_buf.as_ptr().add(4);
+        let ip = ip_buf.as_ptr().add(4);
+        let m = match_buf.as_ptr().add(4);
         let i_min = ip_buf.as_ptr();
         let m_min = match_buf.as_ptr();
         count_back(ip, m, i_min, m_min)
@@ -666,8 +678,8 @@ fn count_back_all_common() {
     // All 4 bytes match backward
     let data: [u8; 4] = [0x55u8; 4];
     let result = unsafe {
-        let ip    = data.as_ptr().add(4);
-        let m     = data.as_ptr().add(4);
+        let ip = data.as_ptr().add(4);
+        let m = data.as_ptr().add(4);
         let i_min = data.as_ptr();
         let m_min = data.as_ptr();
         count_back(ip, m, i_min, m_min)
@@ -678,11 +690,11 @@ fn count_back_all_common() {
 #[test]
 fn count_back_limited_by_i_min() {
     // ip can step back 2 bytes, match can step back 4 — i_min is the binding limit
-    let ip_buf:    [u8; 4] = [0x55, 0x55, 0x55, 0x55];
+    let ip_buf: [u8; 4] = [0x55, 0x55, 0x55, 0x55];
     let match_buf: [u8; 8] = [0x55; 8];
     let result = unsafe {
-        let ip    = ip_buf.as_ptr().add(4);
-        let m     = match_buf.as_ptr().add(8);
+        let ip = ip_buf.as_ptr().add(4);
+        let m = match_buf.as_ptr().add(8);
         // i_min only lets us go back 2 bytes from ip
         let i_min = ip_buf.as_ptr().add(2);
         let m_min = match_buf.as_ptr();
@@ -763,8 +775,8 @@ fn hc_ctx_table_sizes_match_constants() {
 fn clear_tables_zeroes_hash_table() {
     let mut ctx = HcCCtxInternal::new();
     // Dirty it first
-    ctx.hash_table[0]     = 0xDEAD_BEEF;
-    ctx.hash_table[100]   = 0x1234_5678;
+    ctx.hash_table[0] = 0xDEAD_BEEF;
+    ctx.hash_table[100] = 0x1234_5678;
     ctx.hash_table[32767] = 0xFFFF_FFFF;
     clear_tables(&mut ctx);
     assert!(ctx.hash_table.iter().all(|&x| x == 0));

@@ -54,7 +54,10 @@ fn convenience_round_trip_empty() {
     // lz4_read_frame should recover an empty byte slice.
     let original: &[u8] = b"";
     let compressed = compress_to_frame(original);
-    assert!(!compressed.is_empty(), "compressed frame must not be empty even for empty input");
+    assert!(
+        !compressed.is_empty(),
+        "compressed frame must not be empty even for empty input"
+    );
     let recovered = decompress_frame(&compressed);
     assert_eq!(recovered.as_slice(), original);
 }
@@ -106,7 +109,10 @@ fn write_frame_returns_inner_writer() {
     // lz4_write_frame should return the inner writer (the Vec) on success.
     let data = b"test data";
     let result: Vec<u8> = lz4_write_frame(data, Vec::new()).expect("should succeed");
-    assert!(!result.is_empty(), "returned Vec must contain the LZ4 frame bytes");
+    assert!(
+        !result.is_empty(),
+        "returned Vec must contain the LZ4 frame bytes"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -123,7 +129,10 @@ fn write_file_open_default_prefs() {
         writer.finish().expect("finish should succeed");
     }
     // The resulting frame should be a valid LZ4 frame (starts with magic 0x184D2204).
-    assert!(buf.len() >= 7, "frame must contain at least header + end-mark");
+    assert!(
+        buf.len() >= 7,
+        "frame must contain at least header + end-mark"
+    );
     let magic = u32::from_le_bytes(buf[0..4].try_into().unwrap());
     assert_eq!(magic, 0x184D2204, "frame must start with LZ4 magic number");
 }
@@ -245,9 +254,10 @@ fn read_file_open_empty_input_fails() {
 #[test]
 fn read_file_open_corrupt_magic_fails() {
     // A stream with an invalid magic number should be rejected during open.
-    let corrupt = vec![0xDEu8, 0xAD, 0xBE, 0xEF, 0x00, 0x00, 0x00, 0x00,
-                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                       0x00, 0x00, 0x00];
+    let corrupt = vec![
+        0xDEu8, 0xAD, 0xBE, 0xEF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+    ];
     let result = Lz4ReadFile::open(Cursor::new(corrupt));
     assert!(result.is_err(), "open on corrupt magic must fail");
 }
@@ -274,7 +284,9 @@ fn read_file_read_chunks_reassemble_correctly() {
     let mut tmp = [0u8; 512];
     loop {
         let n = lz4r.read(&mut tmp).unwrap();
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         recovered.extend_from_slice(&tmp[..n]);
     }
     assert_eq!(recovered, original);
@@ -291,7 +303,9 @@ fn read_file_returns_zero_at_eof() {
     let mut out = vec![0u8; 4096];
     loop {
         let n = lz4r.read(&mut out).unwrap();
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
     }
     // Another read should return 0 (EOF).
     let n = lz4r.read(&mut out).unwrap();
@@ -309,7 +323,9 @@ fn read_file_multi_block_frame() {
     let mut tmp = [0u8; 65536];
     loop {
         let n = lz4r.read(&mut tmp).unwrap();
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         recovered.extend_from_slice(&tmp[..n]);
     }
     assert_eq!(recovered, original);
@@ -345,7 +361,9 @@ fn streaming_write_then_streaming_read() {
     let mut tmp = [0u8; 3 * 1024];
     loop {
         let n = lz4r.read(&mut tmp).unwrap();
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         recovered.extend_from_slice(&tmp[..n]);
     }
 

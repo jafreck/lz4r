@@ -28,8 +28,8 @@ use lz4::hc::dispatch::{
     compress_generic_no_dict_ctx, set_external_dict,
 };
 use lz4::hc::types::{
-    init_internal, DictCtxDirective, HcCCtxInternal, HcStrategy, LZ4HC_CLEVEL_MAX,
-    LZ4HC_CLEVEL_OPT_MIN, get_clevel_params,
+    get_clevel_params, init_internal, DictCtxDirective, HcCCtxInternal, HcStrategy,
+    LZ4HC_CLEVEL_MAX, LZ4HC_CLEVEL_OPT_MIN,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -92,8 +92,8 @@ fn is_compatible_both_opt() {
 fn is_compatible_mid_vs_hc() {
     let mut a = HcCCtxInternal::new();
     let mut b = HcCCtxInternal::new();
-    a.compression_level = 2;  // Mid
-    b.compression_level = 5;  // Hc
+    a.compression_level = 2; // Mid
+    b.compression_level = 5; // Hc
     assert!(!a.is_compatible(&b), "Mid vs Hc should not be compatible");
 }
 
@@ -102,7 +102,7 @@ fn is_compatible_mid_vs_hc() {
 fn is_compatible_mid_vs_opt() {
     let mut a = HcCCtxInternal::new();
     let mut b = HcCCtxInternal::new();
-    a.compression_level = 2;  // Mid
+    a.compression_level = 2; // Mid
     b.compression_level = 10; // Opt (non-mid)
     assert!(!a.is_compatible(&b), "Mid vs Opt should not be compatible");
 }
@@ -113,11 +113,14 @@ fn is_compatible_mid_vs_opt() {
 fn is_compatible_level_zero_clamped_to_default() {
     let mut a = HcCCtxInternal::new();
     let mut b = HcCCtxInternal::new();
-    a.compression_level = 0;  // clamped to Hc
-    b.compression_level = 2;  // Mid
-    // get_clevel_params(0) returns default (Hc)
+    a.compression_level = 0; // clamped to Hc
+    b.compression_level = 2; // Mid
+                             // get_clevel_params(0) returns default (Hc)
     assert_eq!(get_clevel_params(0).strat, HcStrategy::Lz4Hc);
-    assert!(!a.is_compatible(&b), "clamped-Hc vs Mid should not be compatible");
+    assert!(
+        !a.is_compatible(&b),
+        "clamped-Hc vs Mid should not be compatible"
+    );
 }
 
 /// is_compatible is reflexive: any context is compatible with itself.
@@ -130,7 +133,10 @@ fn is_compatible_reflexive() {
         // by building a second ctx with the same level.
         let mut ctx2 = HcCCtxInternal::new();
         ctx2.compression_level = level;
-        assert!(ctx.is_compatible(&ctx2), "level {level} should be self-compatible");
+        assert!(
+            ctx.is_compatible(&ctx2),
+            "level {level} should be self-compatible"
+        );
     }
 }
 
@@ -168,7 +174,10 @@ fn set_external_dict_basic_state() {
         assert_eq!(ctx.end, new_block_data.as_ptr());
 
         // dict_ctx must be null after call (cannot hold both extDict and dictCtx).
-        assert!(ctx.dict_ctx.is_null(), "dict_ctx must be null after set_external_dict");
+        assert!(
+            ctx.dict_ctx.is_null(),
+            "dict_ctx must be null after set_external_dict"
+        );
 
         // next_to_update must equal the new dict_limit.
         assert_eq!(
@@ -342,7 +351,10 @@ fn compress_generic_internal_hc_level_compresses_data() {
             DictCtxDirective::NoDictCtx,
         );
         assert!(n > 0, "Lz4Hc compression of repeated data should succeed");
-        assert!((n as usize) < input.len(), "compressed output should be smaller than input");
+        assert!(
+            (n as usize) < input.len(),
+            "compressed output should be smaller than input"
+        );
     }
 }
 
@@ -367,7 +379,10 @@ fn compress_generic_internal_opt_level_compresses_data() {
             DictCtxDirective::NoDictCtx,
         );
         assert!(n > 0, "Lz4Opt compression of repeated data should succeed");
-        assert!((n as usize) < input.len(), "Lz4Opt output should be smaller than input");
+        assert!(
+            (n as usize) < input.len(),
+            "Lz4Opt output should be smaller than input"
+        );
     }
 }
 
@@ -392,7 +407,10 @@ fn compress_generic_internal_mid_level_compresses_data() {
             DictCtxDirective::NoDictCtx,
         );
         assert!(n > 0, "Lz4Mid compression of repeated data should succeed");
-        assert!((n as usize) < input.len(), "Lz4Mid output should be smaller than input");
+        assert!(
+            (n as usize) < input.len(),
+            "Lz4Mid output should be smaller than input"
+        );
     }
 }
 
@@ -447,7 +465,10 @@ fn compress_generic_no_dict_ctx_succeeds() {
             9,
             LimitedOutputDirective::NotLimited,
         );
-        assert!(n > 0, "compress_generic_no_dict_ctx should return positive on success");
+        assert!(
+            n > 0,
+            "compress_generic_no_dict_ctx should return positive on success"
+        );
         assert!((n as usize) < input.len());
     }
 }
@@ -535,7 +556,10 @@ fn compress_generic_non_null_dict_ctx_routes_to_dict_path() {
         );
         // Either it succeeds or the position-check falls back to no-dict path.
         // Either way it must not be a crash and if repeated data, likely > 0.
-        assert!(n > 0, "compress_generic with non-null dict_ctx should produce output");
+        assert!(
+            n > 0,
+            "compress_generic with non-null dict_ctx should produce output"
+        );
     }
 }
 
@@ -564,7 +588,7 @@ fn compress_generic_dict_ctx_position_ge_64kb_discards_dict() {
         // The simplest way: set dict_limit - low_limit to 65536.
         ctx.low_limit = 0;
         ctx.dict_limit = 65536; // 64 KB
-        // end == prefix_start → prefix length = 0; but dict portion is 65536 → position >= 64 KB.
+                                // end == prefix_start → prefix length = 0; but dict portion is 65536 → position >= 64 KB.
 
         let mut src_size = input.len() as i32;
         let n = compress_generic_dict_ctx(
@@ -578,7 +602,10 @@ fn compress_generic_dict_ctx_position_ge_64kb_discards_dict() {
         );
 
         // dict_ctx must now be null (discarded by the function).
-        assert!(ctx.dict_ctx.is_null(), "dict_ctx must be null after position >= 64KB");
+        assert!(
+            ctx.dict_ctx.is_null(),
+            "dict_ctx must be null after position >= 64KB"
+        );
         // Should still produce some output.
         assert!(n > 0, "expected output even after dict discard");
     }

@@ -14,14 +14,13 @@
 
 use lz4::block::types::{
     clear_hash, count, get_index_on_hash, get_position_on_hash, hash4, hash5, hash_position,
-    memcpy_using_offset, nb_common_bytes, prepare_table,
-    put_index_on_hash, put_position_on_hash, read16, read32, read_arch, read_le16, read_le32,
-    wild_copy32, wild_copy8, write16, write32, write_le16, DEC64TABLE, INC32TABLE,
-    DictDirective, DictIssueDirective, LimitedOutputDirective, StreamStateInternal, TableType,
-    FASTLOOP_SAFE_DISTANCE, GB, KB, LASTLITERALS, LZ4_64KLIMIT, LZ4_DISTANCE_ABSOLUTE_MAX,
-    LZ4_DISTANCE_MAX, LZ4_HASH_SIZE_U32, LZ4_HASHLOG, LZ4_HASHTABLESIZE, LZ4_MEMORY_USAGE,
-    LZ4_MIN_LENGTH, LZ4_SKIP_TRIGGER, MB, MATCH_SAFEGUARD_DISTANCE, MFLIMIT, MINMATCH, ML_BITS,
-    ML_MASK, RUN_BITS, RUN_MASK, WILDCOPYLENGTH,
+    memcpy_using_offset, nb_common_bytes, prepare_table, put_index_on_hash, put_position_on_hash,
+    read16, read32, read_arch, read_le16, read_le32, wild_copy32, wild_copy8, write16, write32,
+    write_le16, DictDirective, DictIssueDirective, LimitedOutputDirective, StreamStateInternal,
+    TableType, DEC64TABLE, FASTLOOP_SAFE_DISTANCE, GB, INC32TABLE, KB, LASTLITERALS, LZ4_64KLIMIT,
+    LZ4_DISTANCE_ABSOLUTE_MAX, LZ4_DISTANCE_MAX, LZ4_HASHLOG, LZ4_HASHTABLESIZE, LZ4_HASH_SIZE_U32,
+    LZ4_MEMORY_USAGE, LZ4_MIN_LENGTH, LZ4_SKIP_TRIGGER, MATCH_SAFEGUARD_DISTANCE, MB, MFLIMIT,
+    MINMATCH, ML_BITS, ML_MASK, RUN_BITS, RUN_MASK, WILDCOPYLENGTH,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -451,7 +450,7 @@ fn count_all_matching() {
 
 #[test]
 fn count_partial_match() {
-    let p_in:   [u8; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+    let p_in: [u8; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
     let p_match: [u8; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 99, 99, 99, 99, 99, 99, 99, 99];
     let result = unsafe {
         let limit = p_in.as_ptr().add(p_in.len());
@@ -462,7 +461,7 @@ fn count_partial_match() {
 
 #[test]
 fn count_single_match() {
-    let p_in:    [u8; 8] = [0xAA, 0xBB, 0, 0, 0, 0, 0, 0];
+    let p_in: [u8; 8] = [0xAA, 0xBB, 0, 0, 0, 0, 0, 0];
     let p_match: [u8; 8] = [0xAA, 0xCC, 0, 0, 0, 0, 0, 0];
     let result = unsafe {
         let limit = p_in.as_ptr().add(p_in.len());
@@ -488,8 +487,14 @@ fn hash4_byu16_produces_wider_index() {
     let seq = 0xDEAD_BEEFu32;
     let h32 = hash4(seq, TableType::ByU32);
     let h16 = hash4(seq, TableType::ByU16);
-    assert!(h32 < (1u32 << LZ4_HASHLOG), "ByU32 hash must fit in LZ4_HASHLOG bits");
-    assert!(h16 < (1u32 << (LZ4_HASHLOG + 1)), "ByU16 hash must fit in LZ4_HASHLOG+1 bits");
+    assert!(
+        h32 < (1u32 << LZ4_HASHLOG),
+        "ByU32 hash must fit in LZ4_HASHLOG bits"
+    );
+    assert!(
+        h16 < (1u32 << (LZ4_HASHLOG + 1)),
+        "ByU16 hash must fit in LZ4_HASHLOG+1 bits"
+    );
 }
 
 #[test]
@@ -582,7 +587,12 @@ fn put_and_get_position_byptr() {
     let mut table = [core::ptr::null::<u8>(); LZ4_HASH_SIZE_U32];
     let h = 5u32;
     unsafe {
-        put_position_on_hash(ptr, h, table.as_mut_ptr() as *mut *const u8, TableType::ByPtr);
+        put_position_on_hash(
+            ptr,
+            h,
+            table.as_mut_ptr() as *mut *const u8,
+            TableType::ByPtr,
+        );
         let got = get_position_on_hash(h, table.as_ptr() as *const *const u8, TableType::ByPtr);
         assert_eq!(got, ptr);
     }

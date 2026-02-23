@@ -9,20 +9,18 @@
 //   - Internal dict rolling window: `Lz4FDCtx::update_dict` (exposed via public field)
 //   - `DecompressOptions` struct
 
-use lz4::frame::compress::{
-    lz4f_compress_frame, lz4f_compress_frame_using_cdict,
-};
 use lz4::frame::cdict::Lz4FCDict;
-use lz4::frame::types::Lz4FCCtx;
+use lz4::frame::compress::{lz4f_compress_frame, lz4f_compress_frame_using_cdict};
 use lz4::frame::decompress::{
     lz4f_create_decompression_context, lz4f_decompress, lz4f_decompress_using_dict,
     lz4f_free_decompression_context, lz4f_get_frame_info, lz4f_header_size,
     lz4f_reset_decompression_context, DecompressOptions, Lz4FDCtx,
 };
 use lz4::frame::header::lz4f_compress_frame_bound;
+use lz4::frame::types::Lz4FCCtx;
 use lz4::frame::types::{
-    BlockChecksum, BlockMode, BlockSizeId, ContentChecksum, DecompressStage, FrameInfo,
-    Lz4FError, Preferences, LZ4F_VERSION, BH_SIZE, MAX_FH_SIZE, MIN_FH_SIZE,
+    BlockChecksum, BlockMode, BlockSizeId, ContentChecksum, DecompressStage, FrameInfo, Lz4FError,
+    Preferences, BH_SIZE, LZ4F_VERSION, MAX_FH_SIZE, MIN_FH_SIZE,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -218,7 +216,7 @@ fn header_size_minimal_frame_is_7() {
     buf[..4].copy_from_slice(&0x184D_2204u32.to_le_bytes());
     buf[4] = 0x60; // FLG: version=01, B.Indep=1, no C.Size, no DictID
     buf[5] = 0x70; // BD: blockSizeID=7
-    buf[6] = 0;    // HC — not checked here
+    buf[6] = 0; // HC — not checked here
     assert_eq!(lz4f_header_size(&buf), Ok(7));
 }
 
@@ -411,10 +409,16 @@ fn decompress_skip_checksums_ignores_bad_content_checksum() {
     frame[n - 1] ^= 0xFF; // Corrupt checksum
     let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
     let mut dst = vec![0u8; original.len() + 64];
-    let opts = DecompressOptions { skip_checksums: true, ..Default::default() };
+    let opts = DecompressOptions {
+        skip_checksums: true,
+        ..Default::default()
+    };
     // Should succeed despite bad checksum when skip_checksums=true
     let result = lz4f_decompress(&mut dctx, Some(&mut dst), &frame, Some(&opts));
-    assert!(result.is_ok(), "skip_checksums must bypass checksum validation");
+    assert!(
+        result.is_ok(),
+        "skip_checksums must bypass checksum validation"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -493,7 +497,10 @@ fn decompress_block_linked_mode() {
 fn decompress_block_size_max64kb() {
     let original = repetitive_bytes(64 * 1024);
     let prefs = Preferences {
-        frame_info: FrameInfo { block_size_id: BlockSizeId::Max64Kb, ..FrameInfo::default() },
+        frame_info: FrameInfo {
+            block_size_id: BlockSizeId::Max64Kb,
+            ..FrameInfo::default()
+        },
         ..Preferences::default()
     };
     let frame = compress_frame_with_prefs(&original, &prefs);
@@ -509,7 +516,10 @@ fn decompress_block_size_max64kb() {
 fn decompress_block_size_max256kb() {
     let original = repetitive_bytes(200 * 1024);
     let prefs = Preferences {
-        frame_info: FrameInfo { block_size_id: BlockSizeId::Max256Kb, ..FrameInfo::default() },
+        frame_info: FrameInfo {
+            block_size_id: BlockSizeId::Max256Kb,
+            ..FrameInfo::default()
+        },
         ..Preferences::default()
     };
     let frame = compress_frame_with_prefs(&original, &prefs);
@@ -540,7 +550,10 @@ fn decompress_hint_zero_after_complete_frame() {
 fn decompress_hint_nonzero_when_frame_incomplete() {
     let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
     let (_, _, hint) = lz4f_decompress(&mut dctx, None, &[], None).unwrap();
-    assert!(hint > 0, "hint must be >0 when frame header not yet received");
+    assert!(
+        hint > 0,
+        "hint must be >0 when frame header not yet received"
+    );
     assert_eq!(hint, MIN_FH_SIZE);
 }
 
@@ -561,8 +574,7 @@ fn decompress_streaming_chunked_input() {
         // Feed 256 bytes at a time
         let end = (pos + 256).min(frame.len());
         let chunk = &frame[pos..end];
-        let (sc, dw, _hint) =
-            lz4f_decompress(&mut dctx, Some(&mut dst_buf), chunk, None).unwrap();
+        let (sc, dw, _hint) = lz4f_decompress(&mut dctx, Some(&mut dst_buf), chunk, None).unwrap();
         output.extend_from_slice(&dst_buf[..dw]);
         pos += sc;
         if sc == 0 && dw == 0 {
@@ -642,14 +654,20 @@ fn decompress_skip_checksum_sticky() {
 
     // Set skip on first call with empty src (just to set the flag)
     let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
-    let opts_skip = DecompressOptions { skip_checksums: true, ..Default::default() };
+    let opts_skip = DecompressOptions {
+        skip_checksums: true,
+        ..Default::default()
+    };
     let _ = lz4f_decompress(&mut dctx, None, &[], Some(&opts_skip));
     assert!(dctx.skip_checksum, "skip_checksum should be set sticky");
 
     // Second call without opts — skip_checksum remains true
     let mut dst = vec![0u8; original.len() + 64];
     let result = lz4f_decompress(&mut dctx, Some(&mut dst), &frame, None);
-    assert!(result.is_ok(), "sticky skip_checksum must bypass bad checksum");
+    assert!(
+        result.is_ok(),
+        "sticky skip_checksum must bypass bad checksum"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -762,10 +780,13 @@ fn decompress_using_dict_matches_dict_compressed_frame() {
     let mut compressed = vec![0u8; bound];
     let mut cctx = Lz4FCCtx::new(LZ4F_VERSION);
     let written = lz4f_compress_frame_using_cdict(
-        &mut cctx, &mut compressed, &original,
+        &mut cctx,
+        &mut compressed,
+        &original,
         cdict.as_ref() as *const Lz4FCDict,
         Some(&prefs),
-    ).expect("compress with cdict");
+    )
+    .expect("compress with cdict");
     compressed.truncate(written);
 
     let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);

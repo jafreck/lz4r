@@ -66,10 +66,7 @@ impl TPool {
             slot_tx.send(()).ok()?;
         }
 
-        let state = Arc::new((
-            Mutex::new(PoolState { pending: 0 }),
-            Condvar::new(),
-        ));
+        let state = Arc::new((Mutex::new(PoolState { pending: 0 }), Condvar::new()));
 
         Some(TPool {
             pool: Arc::new(pool),

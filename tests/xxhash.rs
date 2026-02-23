@@ -17,7 +17,10 @@ use lz4::xxhash::{xxh32_oneshot, Xxh32State};
 #[test]
 fn oneshot_empty_input_known_vector() {
     let hash = xxh32_oneshot(b"", 0);
-    assert_eq!(hash, 0x02CC5D05, "XXH32(\"\", 0) must equal spec value 0x02CC5D05");
+    assert_eq!(
+        hash, 0x02CC5D05,
+        "XXH32(\"\", 0) must equal spec value 0x02CC5D05"
+    );
 }
 
 /// Non-empty input must return a non-zero hash for seed 0.
@@ -32,7 +35,10 @@ fn oneshot_nonempty_input_nonzero() {
 fn oneshot_deterministic() {
     let a = xxh32_oneshot(b"hello, world", 42);
     let b = xxh32_oneshot(b"hello, world", 42);
-    assert_eq!(a, b, "xxh32_oneshot must return identical results on repeated calls");
+    assert_eq!(
+        a, b,
+        "xxh32_oneshot must return identical results on repeated calls"
+    );
 }
 
 /// Different seeds must produce different hashes for the same input.
@@ -115,7 +121,10 @@ fn streaming_empty_matches_oneshot() {
     state.update(b"");
     let streaming = state.digest();
     let oneshot = xxh32_oneshot(b"", 0);
-    assert_eq!(streaming, oneshot, "streaming and one-shot must agree on empty input");
+    assert_eq!(
+        streaming, oneshot,
+        "streaming and one-shot must agree on empty input"
+    );
 }
 
 /// Streaming hash of b"lz4" with seed 0 must equal the one-shot result.
@@ -125,7 +134,10 @@ fn streaming_lz4_matches_oneshot() {
     state.update(b"lz4");
     let streaming = state.digest();
     let oneshot = xxh32_oneshot(b"lz4", 0);
-    assert_eq!(streaming, oneshot, "streaming and one-shot must agree for b\"lz4\"");
+    assert_eq!(
+        streaming, oneshot,
+        "streaming and one-shot must agree for b\"lz4\""
+    );
 }
 
 /// Feeding data in multiple chunks must equal a single one-shot call —
@@ -160,7 +172,10 @@ fn streaming_nonzero_seed_matches_oneshot() {
     let streaming = state.digest();
 
     let oneshot = xxh32_oneshot(data, seed);
-    assert_eq!(streaming, oneshot, "streaming and one-shot must agree for non-zero seed");
+    assert_eq!(
+        streaming, oneshot,
+        "streaming and one-shot must agree for non-zero seed"
+    );
 }
 
 /// Many small single-byte updates must equal the one-shot result — stress-tests
@@ -195,7 +210,10 @@ fn streaming_deterministic() {
     s2.update(data);
     let h2 = s2.digest();
 
-    assert_eq!(h1, h2, "two independent streaming states must produce the same digest");
+    assert_eq!(
+        h1, h2,
+        "two independent streaming states must produce the same digest"
+    );
 }
 
 /// digest() must be repeatable — calling it twice on the same state returns
@@ -206,7 +224,10 @@ fn streaming_digest_repeatable() {
     state.update(b"repeat");
     let h1 = state.digest();
     let h2 = state.digest();
-    assert_eq!(h1, h2, "digest() must return identical values on repeated calls");
+    assert_eq!(
+        h1, h2,
+        "digest() must return identical values on repeated calls"
+    );
 }
 
 /// Large streaming input must match the one-shot result.
@@ -222,7 +243,10 @@ fn streaming_large_input_matches_oneshot() {
     let streaming = state.digest();
     let oneshot = xxh32_oneshot(&data, 0);
 
-    assert_eq!(streaming, oneshot, "large chunked streaming must equal one-shot");
+    assert_eq!(
+        streaming, oneshot,
+        "large chunked streaming must equal one-shot"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -248,5 +272,8 @@ fn lz4frame_content_checksum_pattern() {
     let frame_cksum = xxh.digest();
 
     let reference = xxh32_oneshot(&full, 0);
-    assert_eq!(frame_cksum, reference, "lz4frame content-checksum pattern must match one-shot reference");
+    assert_eq!(
+        frame_cksum, reference,
+        "lz4frame content-checksum pattern must match one-shot reference"
+    );
 }

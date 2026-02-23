@@ -37,8 +37,7 @@ fn bench_frame_compress_decompress(c: &mut Criterion) {
             );
 
             // Build the pre-compressed buffer for the decompress bench below.
-            let n =
-                lz4::frame::lz4f_compress_frame(&mut dst, &chunk, Some(&prefs)).unwrap();
+            let n = lz4::frame::lz4f_compress_frame(&mut dst, &chunk, Some(&prefs)).unwrap();
             let compressed = dst[..n].to_vec();
 
             // ── lz4f_decompress (streaming) ──────────────────────────────────
@@ -46,8 +45,7 @@ fn bench_frame_compress_decompress(c: &mut Criterion) {
             // The decompression context is reset at the start of every
             // iteration so we only measure the decode work, not allocation.
             let mut out_buf = vec![0u8; chunk_size + 65_536];
-            let mut dctx =
-                lz4::frame::lz4f_create_decompression_context(100).unwrap();
+            let mut dctx = lz4::frame::lz4f_create_decompression_context(100).unwrap();
 
             group.throughput(Throughput::Bytes(chunk_size as u64));
             group.bench_with_input(

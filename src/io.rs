@@ -4,27 +4,27 @@
 //! consumed by the CLI and library users.  The organisation mirrors `lz4io.h`
 //! from the LZ4 reference implementation.
 
-pub mod prefs;
-pub mod file_io;
-pub mod sparse;
-pub mod compress_legacy;
 pub mod compress_frame;
+pub mod compress_legacy;
 pub mod compress_mt;
-pub mod decompress_resources;
-pub mod decompress_legacy;
-pub mod decompress_frame;
 pub mod decompress_dispatch;
+pub mod decompress_frame;
+pub mod decompress_legacy;
+pub mod decompress_resources;
 pub mod file_info;
+pub mod file_io;
+pub mod prefs;
+pub mod sparse;
 
 // ── Core type re-exports (lz4io.h public surface) ────────────────────────────
-pub use prefs::Prefs;
 pub use file_info::CompressedFileInfo;
+pub use prefs::Prefs;
 
 // ── Special I/O sentinels (mirrors lz4io.h #defines) ─────────────────────────
-pub use file_io::{STDIN_MARK, STDOUT_MARK, NULL_OUTPUT, NUL_MARK};
+pub use file_io::{NULL_OUTPUT, NUL_MARK, STDIN_MARK, STDOUT_MARK};
 
 // ── Magic number constants ────────────────────────────────────────────────────
-pub use prefs::{LZ4IO_MAGICNUMBER, LEGACY_MAGICNUMBER, LZ4IO_SKIPPABLE0, LZ4IO_SKIPPABLEMASK};
+pub use prefs::{LEGACY_MAGICNUMBER, LZ4IO_MAGICNUMBER, LZ4IO_SKIPPABLE0, LZ4IO_SKIPPABLEMASK};
 
 // ── Notification level (global, mirrors g_displayLevel) ──────────────────────
 /// Set the global display/notification level. Mirrors `LZ4IO_setNotificationLevel`.

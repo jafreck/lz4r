@@ -220,16 +220,14 @@ fn decompress_safe_api_round_trip_pattern() {
 fn decompress_safe_partial_api_zero_target_returns_zero() {
     // target_output_size = 0 → Ok(0).
     let mut dst = [0u8; 10];
-    let n = decompress_safe_partial(BLOCK_HELLO, &mut dst, 0)
-        .expect("partial decompress failed");
+    let n = decompress_safe_partial(BLOCK_HELLO, &mut dst, 0).expect("partial decompress failed");
     assert_eq!(n, 0);
 }
 
 #[test]
 fn decompress_safe_partial_api_exactly_full_block() {
     let mut dst = [0u8; 5];
-    let n = decompress_safe_partial(BLOCK_HELLO, &mut dst, 5)
-        .expect("partial decompress failed");
+    let n = decompress_safe_partial(BLOCK_HELLO, &mut dst, 5).expect("partial decompress failed");
     assert_eq!(n, 5);
     assert_eq!(&dst[..n], b"Hello");
 }
@@ -238,8 +236,7 @@ fn decompress_safe_partial_api_exactly_full_block() {
 fn decompress_safe_partial_api_target_clamped_to_dst_len() {
     // target_output_size > dst.len() → clamped to dst.len().
     let mut dst = [0u8; 5];
-    let n = decompress_safe_partial(BLOCK_HELLO, &mut dst, 999)
-        .expect("partial decompress failed");
+    let n = decompress_safe_partial(BLOCK_HELLO, &mut dst, 999).expect("partial decompress failed");
     assert_eq!(&dst[..n], b"Hello");
 }
 
@@ -247,8 +244,7 @@ fn decompress_safe_partial_api_target_clamped_to_dst_len() {
 fn decompress_safe_partial_api_request_fewer_bytes() {
     // Request 3 of 5 bytes.
     let mut dst = [0u8; 5];
-    let n = decompress_safe_partial(BLOCK_HELLO, &mut dst, 3)
-        .expect("partial decompress failed");
+    let n = decompress_safe_partial(BLOCK_HELLO, &mut dst, 3).expect("partial decompress failed");
     assert!(n <= 5);
     if n >= 3 {
         assert_eq!(&dst[..3], b"Hel");
@@ -665,16 +661,9 @@ fn decompress_safe_continue_contiguous_second_block() {
     let mut ctx = Lz4StreamDecode::new();
 
     // First call — fills buf[0..n1].
-    let n1 = unsafe {
-        decompress_safe_continue(
-            &mut ctx,
-            c1.as_ptr(),
-            buf.as_mut_ptr(),
-            c1.len(),
-            128,
-        )
-    }
-    .expect("first block failed");
+    let n1 =
+        unsafe { decompress_safe_continue(&mut ctx, c1.as_ptr(), buf.as_mut_ptr(), c1.len(), 128) }
+            .expect("first block failed");
     assert_eq!(&buf[..n1], input1.as_ref());
 
     // Second call — dst = buf[n1..], which is immediately after the first output.

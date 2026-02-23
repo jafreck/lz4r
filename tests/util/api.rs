@@ -118,21 +118,28 @@ fn reexport_count_cores_accessible() {
 fn reexport_is_reg_file_accessible() {
     use std::path::Path;
     // Non-existent path must return false — mirrors UTIL_isRegFile returning 0.
-    assert!(!util::is_reg_file(Path::new("/nonexistent/__lz4_util_mod_test_reg__")));
+    assert!(!util::is_reg_file(Path::new(
+        "/nonexistent/__lz4_util_mod_test_reg__"
+    )));
 }
 
 #[test]
 fn reexport_is_directory_accessible() {
     use std::path::Path;
     // Non-existent path must return false — mirrors UTIL_isDirectory returning 0.
-    assert!(!util::is_directory(Path::new("/nonexistent/__lz4_util_mod_test_dir__")));
+    assert!(!util::is_directory(Path::new(
+        "/nonexistent/__lz4_util_mod_test_dir__"
+    )));
 }
 
 #[test]
 fn reexport_get_file_size_accessible() {
     use std::path::Path;
     // Non-existent path returns 0 — mirrors UTIL_getFileSize returning 0 on error.
-    assert_eq!(util::get_file_size(Path::new("/nonexistent/__lz4_util_mod_size__")), 0);
+    assert_eq!(
+        util::get_file_size(Path::new("/nonexistent/__lz4_util_mod_size__")),
+        0
+    );
 }
 
 #[test]

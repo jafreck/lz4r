@@ -7,9 +7,9 @@
 //       unlz4   → decompress
 //       lz4c    → lz4c_legacy flag
 
+use lz4::cli::constants::{set_display_level, set_lz4c_legacy_commands};
 use lz4::cli::init::detect_alias;
 use lz4::cli::op_mode::{OpMode, LZ4_CLEVEL_DEFAULT, LZ4_NBWORKERS_DEFAULT};
-use lz4::cli::constants::{set_display_level, set_lz4c_legacy_commands};
 use lz4::io::file_io::STDOUT_MARK;
 
 // Helper: reset global state so tests don't interfere with each other.
@@ -278,7 +278,9 @@ fn unknown_binary_no_flags_set() {
 #[test]
 fn subprocess_helper_clevel_wiring() {
     if let Ok(expected) = std::env::var("LZ4_TEST_CLEVEL_WIRING") {
-        let expected: i32 = expected.parse().expect("LZ4_TEST_CLEVEL_WIRING must be numeric");
+        let expected: i32 = expected
+            .parse()
+            .expect("LZ4_TEST_CLEVEL_WIRING must be numeric");
         reset_globals();
         let init = detect_alias("lz4");
         assert_eq!(
@@ -307,7 +309,11 @@ fn detect_alias_c_level_reads_env_var() {
     // process with no risk of racing against other concurrent test threads.
     let exe = std::env::current_exe().expect("could not find test executable");
     let output = std::process::Command::new(&exe)
-        .args(["init::subprocess_helper_clevel_wiring", "--exact", "--nocapture"])
+        .args([
+            "init::subprocess_helper_clevel_wiring",
+            "--exact",
+            "--nocapture",
+        ])
         .env("LZ4_CLEVEL", "9")
         .env("LZ4_TEST_CLEVEL_WIRING", "9")
         .output()

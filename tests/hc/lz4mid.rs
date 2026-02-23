@@ -18,10 +18,11 @@
 //     output-too-small (LimitedOutput), src_size_ptr updated correctly
 
 use lz4::block::types::LimitedOutputDirective;
-use lz4::hc::lz4mid::{add_position, fill_htable, lz4mid_compress, select_dict_search_mode,
-                       DictSearchMode, Match};
-use lz4::hc::types::{init_internal, HcCCtxInternal, LZ4MID_HASHTABLESIZE};
+use lz4::hc::lz4mid::{
+    add_position, fill_htable, lz4mid_compress, select_dict_search_mode, DictSearchMode, Match,
+};
 use lz4::hc::types::DictCtxDirective;
+use lz4::hc::types::{init_internal, HcCCtxInternal, LZ4MID_HASHTABLESIZE};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Match struct
@@ -37,8 +38,12 @@ fn match_default_is_zero() {
 
 #[test]
 fn match_copy_clone() {
-    let m = Match { off: 10, len: 20, back: -3 };
-    let m2 = m;        // Copy
+    let m = Match {
+        off: 10,
+        len: 20,
+        back: -3,
+    };
+    let m2 = m; // Copy
     let m3 = m.clone(); // Clone
     assert_eq!(m2.off, 10);
     assert_eq!(m3.len, 20);
@@ -47,7 +52,11 @@ fn match_copy_clone() {
 
 #[test]
 fn match_debug_does_not_panic() {
-    let m = Match { off: 5, len: 8, back: -1 };
+    let m = Match {
+        off: 5,
+        len: 8,
+        back: -1,
+    };
     let _ = format!("{:?}", m);
 }
 
@@ -65,8 +74,8 @@ fn dict_search_mode_eq() {
 #[test]
 fn dict_search_mode_copy_clone() {
     let a = DictSearchMode::Ext;
-    let b = a;           // Copy
-    let c = a.clone();   // Clone
+    let b = a; // Copy
+    let c = a.clone(); // Clone
     assert_eq!(b, DictSearchMode::Ext);
     assert_eq!(c, DictSearchMode::Ext);
 }
@@ -161,9 +170,11 @@ fn fill_htable_advances_next_to_update_for_normal_dict() {
     unsafe {
         fill_htable(&mut ctx, buf.as_ptr(), buf.len());
     }
-    assert!(ctx.next_to_update > old_next,
+    assert!(
+        ctx.next_to_update > old_next,
         "next_to_update should have advanced; was={old_next}, now={}",
-        ctx.next_to_update);
+        ctx.next_to_update
+    );
 }
 
 #[test]
@@ -180,7 +191,10 @@ fn fill_htable_populates_hash_tables() {
     // hash_table is shared for both hash4 and hash8 (hash8 starts at offset
     // LZ4MID_HASHTABLESIZE).  At least one entry should be nonzero.
     let any_nonzero = ctx.hash_table.iter().any(|&v| v != 0);
-    assert!(any_nonzero, "hash tables must contain at least one entry after fill");
+    assert!(
+        any_nonzero,
+        "hash tables must contain at least one entry after fill"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -254,7 +268,10 @@ fn lz4mid_compress_empty_input_returns_one_byte() {
     };
 
     // Must return 1 (the empty-run token byte).
-    assert_eq!(ret, 1, "empty input must produce exactly 1 byte (last-run token)");
+    assert_eq!(
+        ret, 1,
+        "empty input must produce exactly 1 byte (last-run token)"
+    );
     assert_eq!(dst[0], 0x00, "empty last-run token must be 0x00");
     assert_eq!(src_size, 0);
 }
@@ -270,7 +287,9 @@ fn lz4mid_compress_negative_max_output_size_returns_zero() {
     let mut dst = vec![0u8; 32];
     let mut src_size = 1i32;
     let mut ctx = make_compress_ctx(src.as_ptr());
-    unsafe { ctx.end = src.as_ptr(); }
+    unsafe {
+        ctx.end = src.as_ptr();
+    }
 
     let ret = unsafe {
         lz4mid_compress(
@@ -293,7 +312,9 @@ fn lz4mid_compress_oversized_src_returns_zero() {
     let mut dst = vec![0u8; 32];
     let mut src_size = 0x7F00_0000i32; // > 0x7E000000
     let mut ctx = make_compress_ctx(src.as_ptr());
-    unsafe { ctx.end = src.as_ptr(); }
+    unsafe {
+        ctx.end = src.as_ptr();
+    }
 
     let ret = unsafe {
         lz4mid_compress(
@@ -317,7 +338,9 @@ fn lz4mid_compress_incompressible_small_input() {
     let mut src_size = src.len() as i32;
 
     let mut ctx = make_compress_ctx(src.as_ptr());
-    unsafe { ctx.end = src.as_ptr(); }
+    unsafe {
+        ctx.end = src.as_ptr();
+    }
 
     let ret = unsafe {
         lz4mid_compress(
@@ -332,7 +355,10 @@ fn lz4mid_compress_incompressible_small_input() {
     };
 
     // Must return a positive value (at least 1 byte for the last-literal token).
-    assert!(ret > 0, "must produce output for incompressible data; got {ret}");
+    assert!(
+        ret > 0,
+        "must produce output for incompressible data; got {ret}"
+    );
     // src_size_ptr must be set to how many bytes were consumed.
     assert_eq!(src_size as usize, 16);
 }
@@ -345,7 +371,9 @@ fn lz4mid_compress_compressible_data_smaller_than_input() {
     let mut src_size = src.len() as i32;
 
     let mut ctx = make_compress_ctx(src.as_ptr());
-    unsafe { ctx.end = src.as_ptr(); }
+    unsafe {
+        ctx.end = src.as_ptr();
+    }
 
     let ret = unsafe {
         lz4mid_compress(
@@ -360,8 +388,11 @@ fn lz4mid_compress_compressible_data_smaller_than_input() {
     };
 
     assert!(ret > 0, "must produce output; got {ret}");
-    assert!(ret < src.len() as i32,
-        "compressible data must compress smaller: output={ret}, input={}", src.len());
+    assert!(
+        ret < src.len() as i32,
+        "compressible data must compress smaller: output={ret}, input={}",
+        src.len()
+    );
 }
 
 #[test]
@@ -372,7 +403,9 @@ fn lz4mid_compress_limited_output_tiny_buffer_returns_zero() {
     let mut src_size = src.len() as i32;
 
     let mut ctx = make_compress_ctx(src.as_ptr());
-    unsafe { ctx.end = src.as_ptr(); }
+    unsafe {
+        ctx.end = src.as_ptr();
+    }
 
     let ret = unsafe {
         lz4mid_compress(
@@ -398,7 +431,9 @@ fn lz4mid_compress_src_size_ptr_updated() {
     let mut src_size = original_size;
 
     let mut ctx = make_compress_ctx(src.as_ptr());
-    unsafe { ctx.end = src.as_ptr(); }
+    unsafe {
+        ctx.end = src.as_ptr();
+    }
 
     let ret = unsafe {
         lz4mid_compress(
@@ -414,8 +449,10 @@ fn lz4mid_compress_src_size_ptr_updated() {
 
     assert!(ret > 0);
     // src_size must have been updated to consumed bytes (≤ original).
-    assert!(src_size <= original_size,
-        "src_size_ptr must not exceed original size; got src_size={src_size}");
+    assert!(
+        src_size <= original_size,
+        "src_size_ptr must not exceed original size; got src_size={src_size}"
+    );
     assert!(src_size >= 0);
 }
 
@@ -428,7 +465,9 @@ fn lz4mid_compress_not_limited_produces_valid_output() {
     let mut src_size = src.len() as i32;
 
     let mut ctx = make_compress_ctx(src.as_ptr());
-    unsafe { ctx.end = src.as_ptr(); }
+    unsafe {
+        ctx.end = src.as_ptr();
+    }
 
     let ret = unsafe {
         lz4mid_compress(
@@ -442,6 +481,9 @@ fn lz4mid_compress_not_limited_produces_valid_output() {
         )
     };
 
-    assert!(ret > 0, "NotLimited compress must succeed for 32-byte input");
+    assert!(
+        ret > 0,
+        "NotLimited compress must succeed for 32-byte input"
+    );
     assert!(ret <= dst.len() as i32);
 }

@@ -19,8 +19,8 @@
 use crate::block::decompress_api::decompress_safe_using_dict;
 use crate::frame::header::{lz4f_get_block_size, lz4f_header_checksum, read_le32, read_le64};
 use crate::frame::types::{
-    BlockChecksum, BlockMode, BlockSizeId, ContentChecksum, CustomMem, DecompressStage,
-    FrameInfo, FrameType, Lz4FError, LZ4F_VERSION, BF_SIZE, BH_SIZE, MAX_FH_SIZE, MIN_FH_SIZE,
+    BlockChecksum, BlockMode, BlockSizeId, ContentChecksum, CustomMem, DecompressStage, FrameInfo,
+    FrameType, Lz4FError, BF_SIZE, BH_SIZE, LZ4F_VERSION, MAX_FH_SIZE, MIN_FH_SIZE,
 };
 use crate::xxhash::{xxh32_oneshot, Xxh32State};
 
@@ -165,7 +165,11 @@ pub fn lz4f_reset_decompression_context(dctx: &mut Lz4FDCtx) {
 ///
 /// Returns number of bytes consumed, or an error.
 /// Equivalent to `LZ4F_decodeHeader` (lz4frame.c:1346).
-fn decode_header(dctx: &mut Lz4FDCtx, src: &[u8], from_header_buf: bool) -> Result<usize, Lz4FError> {
+fn decode_header(
+    dctx: &mut Lz4FDCtx,
+    src: &[u8],
+    from_header_buf: bool,
+) -> Result<usize, Lz4FError> {
     if src.len() < MIN_FH_SIZE {
         return Err(Lz4FError::FrameHeaderIncomplete);
     }
@@ -243,11 +247,21 @@ fn decode_header(dctx: &mut Lz4FDCtx, src: &[u8], from_header_buf: bool) -> Resu
         _ => return Err(Lz4FError::MaxBlockSizeInvalid),
     };
 
-    dctx.frame_info.block_mode = if block_mode != 0 { BlockMode::Independent } else { BlockMode::Linked };
-    dctx.frame_info.block_checksum_flag =
-        if block_checksum_flag != 0 { BlockChecksum::Enabled } else { BlockChecksum::Disabled };
-    dctx.frame_info.content_checksum_flag =
-        if content_checksum_flag != 0 { ContentChecksum::Enabled } else { ContentChecksum::Disabled };
+    dctx.frame_info.block_mode = if block_mode != 0 {
+        BlockMode::Independent
+    } else {
+        BlockMode::Linked
+    };
+    dctx.frame_info.block_checksum_flag = if block_checksum_flag != 0 {
+        BlockChecksum::Enabled
+    } else {
+        BlockChecksum::Disabled
+    };
+    dctx.frame_info.content_checksum_flag = if content_checksum_flag != 0 {
+        ContentChecksum::Enabled
+    } else {
+        ContentChecksum::Disabled
+    };
     dctx.frame_info.block_size_id = block_size_id;
     dctx.max_block_size = lz4f_get_block_size(block_size_id).unwrap_or(MAX_DICT_SIZE);
 
@@ -353,7 +367,6 @@ pub fn lz4f_decompress(
             break;
         }
         match dctx.stage {
-
             // ── GetFrameHeader ───────────────────────────────────────────────
             DecompressStage::GetFrameHeader => {
                 let src_avail = src_len - src_pos;
@@ -407,7 +420,11 @@ pub fn lz4f_decompress(
                     dctx.xxh = Xxh32State::new(0);
                 }
                 let buf_needed = dctx.max_block_size
-                    + if dctx.frame_info.block_mode == BlockMode::Linked { 128 * 1024 } else { 0 };
+                    + if dctx.frame_info.block_mode == BlockMode::Linked {
+                        128 * 1024
+                    } else {
+                        0
+                    };
                 if buf_needed > dctx.max_buffer_size {
                     dctx.max_buffer_size = 0;
                     dctx.tmp_in.resize(dctx.max_block_size + BF_SIZE, 0);
@@ -428,7 +445,12 @@ pub fn lz4f_decompress(
                 let src_avail = src_len - src_pos;
                 let bh: [u8; BH_SIZE];
                 if src_avail >= BH_SIZE {
-                    bh = [src[src_pos], src[src_pos+1], src[src_pos+2], src[src_pos+3]];
+                    bh = [
+                        src[src_pos],
+                        src[src_pos + 1],
+                        src[src_pos + 2],
+                        src[src_pos + 3],
+                    ];
                     src_pos += BH_SIZE;
                 } else {
                     dctx.tmp_in_size = 0;
@@ -442,9 +464,23 @@ pub fn lz4f_decompress(
                         do_another = false;
                         continue 'sm;
                     }
-                    bh = [dctx.tmp_in[0], dctx.tmp_in[1], dctx.tmp_in[2], dctx.tmp_in[3]];
+                    bh = [
+                        dctx.tmp_in[0],
+                        dctx.tmp_in[1],
+                        dctx.tmp_in[2],
+                        dctx.tmp_in[3],
+                    ];
                 }
-                process_block_header(dctx, bh, &mut src_pos, src_len, dst_pos, dst_len, &mut next_hint, &mut do_another)?;
+                process_block_header(
+                    dctx,
+                    bh,
+                    &mut src_pos,
+                    src_len,
+                    dst_pos,
+                    dst_len,
+                    &mut next_hint,
+                    &mut do_another,
+                )?;
             }
 
             // ── StoreBlockHeader ─────────────────────────────────────────────
@@ -460,8 +496,22 @@ pub fn lz4f_decompress(
                     do_another = false;
                     continue 'sm;
                 }
-                let bh = [dctx.tmp_in[0], dctx.tmp_in[1], dctx.tmp_in[2], dctx.tmp_in[3]];
-                process_block_header(dctx, bh, &mut src_pos, src_len, dst_pos, dst_len, &mut next_hint, &mut do_another)?;
+                let bh = [
+                    dctx.tmp_in[0],
+                    dctx.tmp_in[1],
+                    dctx.tmp_in[2],
+                    dctx.tmp_in[3],
+                ];
+                process_block_header(
+                    dctx,
+                    bh,
+                    &mut src_pos,
+                    src_len,
+                    dst_pos,
+                    dst_len,
+                    &mut next_hint,
+                    &mut do_another,
+                )?;
             }
 
             // ── CopyDirect (uncompressed block) ──────────────────────────────
@@ -484,7 +534,8 @@ pub fn lz4f_decompress(
                     }
                     if !dctx.skip_checksum {
                         if dctx.frame_info.block_checksum_flag == BlockChecksum::Enabled {
-                            dctx.block_checksum.update(&src[src_pos..src_pos + size_to_copy]);
+                            dctx.block_checksum
+                                .update(&src[src_pos..src_pos + size_to_copy]);
                         }
                         if dctx.frame_info.content_checksum_flag == ContentChecksum::Enabled {
                             dctx.xxh.update(&src[src_pos..src_pos + size_to_copy]);
@@ -510,7 +561,11 @@ pub fn lz4f_decompress(
                 } else {
                     dctx.tmp_in_target -= size_to_copy;
                     next_hint = dctx.tmp_in_target
-                        + if dctx.frame_info.block_checksum_flag == BlockChecksum::Enabled { BF_SIZE } else { 0 }
+                        + if dctx.frame_info.block_checksum_flag == BlockChecksum::Enabled {
+                            BF_SIZE
+                        } else {
+                            0
+                        }
                         + BH_SIZE;
                     do_another = false;
                 }
@@ -520,7 +575,12 @@ pub fn lz4f_decompress(
             DecompressStage::GetBlockChecksum => {
                 let crc4: [u8; 4];
                 if (src_len - src_pos) >= 4 && dctx.tmp_in_size == 0 {
-                    crc4 = [src[src_pos], src[src_pos+1], src[src_pos+2], src[src_pos+3]];
+                    crc4 = [
+                        src[src_pos],
+                        src[src_pos + 1],
+                        src[src_pos + 2],
+                        src[src_pos + 3],
+                    ];
                     src_pos += 4;
                 } else {
                     let still = 4 - dctx.tmp_in_size;
@@ -533,7 +593,12 @@ pub fn lz4f_decompress(
                         do_another = false;
                         continue 'sm;
                     }
-                    crc4 = [dctx.header[0], dctx.header[1], dctx.header[2], dctx.header[3]];
+                    crc4 = [
+                        dctx.header[0],
+                        dctx.header[1],
+                        dctx.header[2],
+                        dctx.header[3],
+                    ];
                 }
                 if !dctx.skip_checksum {
                     let read_crc = u32::from_le_bytes(crc4);
@@ -556,7 +621,12 @@ pub fn lz4f_decompress(
                     dctx.tmp_in_size = copy;
                     src_pos += copy;
                     if dctx.tmp_in_size < dctx.tmp_in_target {
-                        let crc_extra = if dctx.frame_info.block_checksum_flag == BlockChecksum::Enabled { BF_SIZE } else { 0 };
+                        let crc_extra =
+                            if dctx.frame_info.block_checksum_flag == BlockChecksum::Enabled {
+                                BF_SIZE
+                            } else {
+                                0
+                            };
                         next_hint = (dctx.tmp_in_target - dctx.tmp_in_size) + crc_extra + BH_SIZE;
                         do_another = false;
                         continue 'sm;
@@ -567,8 +637,10 @@ pub fn lz4f_decompress(
                     if dctx.frame_info.block_checksum_flag == BlockChecksum::Enabled {
                         c_size -= BF_SIZE;
                         let read_crc = u32::from_le_bytes([
-                            dctx.tmp_in[c_size], dctx.tmp_in[c_size+1],
-                            dctx.tmp_in[c_size+2], dctx.tmp_in[c_size+3],
+                            dctx.tmp_in[c_size],
+                            dctx.tmp_in[c_size + 1],
+                            dctx.tmp_in[c_size + 2],
+                            dctx.tmp_in[c_size + 3],
                         ]);
                         let calc_crc = xxh32_oneshot(&dctx.tmp_in[..c_size], 0);
                         if !dctx.skip_checksum && read_crc != calc_crc {
@@ -576,7 +648,15 @@ pub fn lz4f_decompress(
                         }
                     }
                     let src_data: Vec<u8> = dctx.tmp_in[..c_size].to_vec();
-                    decompress_and_dispatch(dctx, &src_data, &mut dst_pos, dst_len, dst_raw, &mut next_hint, &mut do_another)?;
+                    decompress_and_dispatch(
+                        dctx,
+                        &src_data,
+                        &mut dst_pos,
+                        dst_len,
+                        dst_raw,
+                        &mut next_hint,
+                        &mut do_another,
+                    )?;
                 } else {
                     // Enough input — decode directly from src
                     let block_start = src_pos;
@@ -586,7 +666,10 @@ pub fn lz4f_decompress(
                         c_size -= BF_SIZE;
                         let crc_off = block_start + c_size;
                         let read_crc = u32::from_le_bytes([
-                            src[crc_off], src[crc_off+1], src[crc_off+2], src[crc_off+3],
+                            src[crc_off],
+                            src[crc_off + 1],
+                            src[crc_off + 2],
+                            src[crc_off + 3],
                         ]);
                         let calc_crc = xxh32_oneshot(&src[block_start..block_start + c_size], 0);
                         if !dctx.skip_checksum && read_crc != calc_crc {
@@ -594,7 +677,15 @@ pub fn lz4f_decompress(
                         }
                     }
                     let src_data: Vec<u8> = src[block_start..block_start + c_size].to_vec();
-                    decompress_and_dispatch(dctx, &src_data, &mut dst_pos, dst_len, dst_raw, &mut next_hint, &mut do_another)?;
+                    decompress_and_dispatch(
+                        dctx,
+                        &src_data,
+                        &mut dst_pos,
+                        dst_len,
+                        dst_raw,
+                        &mut next_hint,
+                        &mut do_another,
+                    )?;
                 }
             }
 
@@ -607,7 +698,12 @@ pub fn lz4f_decompress(
                 dctx.tmp_in_size += copy;
                 src_pos += copy;
                 if dctx.tmp_in_size < dctx.tmp_in_target {
-                    let crc_extra = if dctx.frame_info.block_checksum_flag == BlockChecksum::Enabled { BF_SIZE } else { 0 };
+                    let crc_extra = if dctx.frame_info.block_checksum_flag == BlockChecksum::Enabled
+                    {
+                        BF_SIZE
+                    } else {
+                        0
+                    };
                     next_hint = (dctx.tmp_in_target - dctx.tmp_in_size) + crc_extra + BH_SIZE;
                     do_another = false;
                     continue 'sm;
@@ -616,8 +712,10 @@ pub fn lz4f_decompress(
                 if dctx.frame_info.block_checksum_flag == BlockChecksum::Enabled {
                     c_size -= BF_SIZE;
                     let read_crc = u32::from_le_bytes([
-                        dctx.tmp_in[c_size], dctx.tmp_in[c_size+1],
-                        dctx.tmp_in[c_size+2], dctx.tmp_in[c_size+3],
+                        dctx.tmp_in[c_size],
+                        dctx.tmp_in[c_size + 1],
+                        dctx.tmp_in[c_size + 2],
+                        dctx.tmp_in[c_size + 3],
                     ]);
                     let calc_crc = xxh32_oneshot(&dctx.tmp_in[..c_size], 0);
                     if !dctx.skip_checksum && read_crc != calc_crc {
@@ -625,7 +723,15 @@ pub fn lz4f_decompress(
                     }
                 }
                 let src_data: Vec<u8> = dctx.tmp_in[..c_size].to_vec();
-                decompress_and_dispatch(dctx, &src_data, &mut dst_pos, dst_len, dst_raw, &mut next_hint, &mut do_another)?;
+                decompress_and_dispatch(
+                    dctx,
+                    &src_data,
+                    &mut dst_pos,
+                    dst_len,
+                    dst_raw,
+                    &mut next_hint,
+                    &mut do_another,
+                )?;
             }
 
             // ── FlushOut ─────────────────────────────────────────────────────
@@ -686,10 +792,20 @@ pub fn lz4f_decompress(
                         do_another = false;
                         continue 'sm;
                     }
-                    let crc4 = [dctx.tmp_in[0], dctx.tmp_in[1], dctx.tmp_in[2], dctx.tmp_in[3]];
+                    let crc4 = [
+                        dctx.tmp_in[0],
+                        dctx.tmp_in[1],
+                        dctx.tmp_in[2],
+                        dctx.tmp_in[3],
+                    ];
                     verify_content_checksum(dctx, crc4)?;
                 } else {
-                    let crc4 = [src[src_pos], src[src_pos+1], src[src_pos+2], src[src_pos+3]];
+                    let crc4 = [
+                        src[src_pos],
+                        src[src_pos + 1],
+                        src[src_pos + 2],
+                        src[src_pos + 3],
+                    ];
                     src_pos += 4;
                     verify_content_checksum(dctx, crc4)?;
                 }
@@ -711,7 +827,12 @@ pub fn lz4f_decompress(
                     do_another = false;
                     continue 'sm;
                 }
-                let crc4 = [dctx.tmp_in[0], dctx.tmp_in[1], dctx.tmp_in[2], dctx.tmp_in[3]];
+                let crc4 = [
+                    dctx.tmp_in[0],
+                    dctx.tmp_in[1],
+                    dctx.tmp_in[2],
+                    dctx.tmp_in[3],
+                ];
                 verify_content_checksum(dctx, crc4)?;
                 next_hint = 0;
                 lz4f_reset_decompression_context(dctx);
@@ -721,7 +842,12 @@ pub fn lz4f_decompress(
             // ── GetSFrameSize ────────────────────────────────────────────────
             DecompressStage::GetSFrameSize => {
                 if (src_len - src_pos) >= 4 {
-                    let sf = u32::from_le_bytes([src[src_pos], src[src_pos+1], src[src_pos+2], src[src_pos+3]]) as usize;
+                    let sf = u32::from_le_bytes([
+                        src[src_pos],
+                        src[src_pos + 1],
+                        src[src_pos + 2],
+                        src[src_pos + 3],
+                    ]) as usize;
                     src_pos += 4;
                     dctx.frame_info.content_size = sf as u64;
                     dctx.tmp_in_target = sf;
@@ -741,7 +867,12 @@ pub fn lz4f_decompress(
                         do_another = false;
                         continue 'sm;
                     }
-                    let sf = u32::from_le_bytes([dctx.header[4], dctx.header[5], dctx.header[6], dctx.header[7]]) as usize;
+                    let sf = u32::from_le_bytes([
+                        dctx.header[4],
+                        dctx.header[5],
+                        dctx.header[6],
+                        dctx.header[7],
+                    ]) as usize;
                     dctx.frame_info.content_size = sf as u64;
                     dctx.tmp_in_target = sf;
                     dctx.stage = DecompressStage::SkipSkippable;
@@ -760,7 +891,12 @@ pub fn lz4f_decompress(
                     do_another = false;
                     continue 'sm;
                 }
-                let sf = u32::from_le_bytes([dctx.header[4], dctx.header[5], dctx.header[6], dctx.header[7]]) as usize;
+                let sf = u32::from_le_bytes([
+                    dctx.header[4],
+                    dctx.header[5],
+                    dctx.header[6],
+                    dctx.header[7],
+                ]) as usize;
                 dctx.frame_info.content_size = sf as u64;
                 dctx.tmp_in_target = sf;
                 dctx.stage = DecompressStage::SkipSkippable;
@@ -819,7 +955,11 @@ fn process_block_header(
 ) -> Result<(), Lz4FError> {
     let block_header = u32::from_le_bytes(bh);
     let next_c_block_size = (block_header & 0x7FFF_FFFF) as usize;
-    let crc_size = if dctx.frame_info.block_checksum_flag == BlockChecksum::Enabled { BF_SIZE } else { 0 };
+    let crc_size = if dctx.frame_info.block_checksum_flag == BlockChecksum::Enabled {
+        BF_SIZE
+    } else {
+        0
+    };
 
     if block_header == 0 {
         dctx.stage = DecompressStage::GetSuffix;
@@ -891,19 +1031,18 @@ fn decompress_and_dispatch(
 
         // Post-decode: update checksum and dict by reading back the decoded bytes.
         // SAFETY: we just wrote `decoded` bytes at dst_raw+*dst_pos; they are valid.
-        if !dctx.skip_checksum && dctx.frame_info.content_checksum_flag == ContentChecksum::Enabled {
-            let decoded_slice = unsafe {
-                core::slice::from_raw_parts(dst_raw.add(*dst_pos) as *const u8, decoded)
-            };
+        if !dctx.skip_checksum && dctx.frame_info.content_checksum_flag == ContentChecksum::Enabled
+        {
+            let decoded_slice =
+                unsafe { core::slice::from_raw_parts(dst_raw.add(*dst_pos) as *const u8, decoded) };
             dctx.xxh.update(decoded_slice);
         }
         if dctx.frame_info.content_size != 0 {
             dctx.frame_remaining_size -= decoded as u64;
         }
         if dctx.frame_info.block_mode == BlockMode::Linked {
-            let decoded_slice = unsafe {
-                core::slice::from_raw_parts(dst_raw.add(*dst_pos) as *const u8, decoded)
-            };
+            let decoded_slice =
+                unsafe { core::slice::from_raw_parts(dst_raw.add(*dst_pos) as *const u8, decoded) };
             dctx.update_dict(decoded_slice);
         }
         *dst_pos += decoded;
@@ -926,7 +1065,8 @@ fn decompress_and_dispatch(
             .map_err(|_| Lz4FError::DecompressionFailed)?
         };
 
-        if !dctx.skip_checksum && dctx.frame_info.content_checksum_flag == ContentChecksum::Enabled {
+        if !dctx.skip_checksum && dctx.frame_info.content_checksum_flag == ContentChecksum::Enabled
+        {
             dctx.xxh.update(&dctx.tmp_out_buffer[..decoded]);
         }
         if dctx.frame_info.content_size != 0 {

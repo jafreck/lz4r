@@ -9,10 +9,12 @@
 //! then layers explicit flags on top of these values.
 
 use crate::cli::arg_utils::{exe_name_match, last_name_from_path};
-use crate::cli::constants::{set_display_level, set_lz4c_legacy_commands, LZ4CAT, LZ4_LEGACY, UNLZ4};
+use crate::cli::constants::{
+    set_display_level, set_lz4c_legacy_commands, LZ4CAT, LZ4_LEGACY, UNLZ4,
+};
 use crate::cli::op_mode::{init_c_level, init_nb_workers, OpMode};
-use crate::io::prefs::{Prefs, LZ4IO_BLOCKSIZEID_DEFAULT};
 use crate::io::file_io::STDOUT_MARK;
+use crate::io::prefs::{Prefs, LZ4IO_BLOCKSIZEID_DEFAULT};
 
 /// Initial CLI state derived from the binary name and environment.
 ///
@@ -117,8 +119,10 @@ pub fn detect_alias(argv0: &str) -> CliInit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::constants::{
+        lz4c_legacy_commands, set_display_level, set_lz4c_legacy_commands,
+    };
     use crate::cli::op_mode::OpMode;
-    use crate::cli::constants::{set_display_level, set_lz4c_legacy_commands, lz4c_legacy_commands};
 
     // Reset shared atomics before each test to prevent inter-test interference.
     fn reset_globals() {
@@ -232,7 +236,10 @@ mod tests {
         let observed = lz4c_legacy_commands();
         // Restore before asserting to minimise window for other tests.
         set_lz4c_legacy_commands(false);
-        assert!(observed, "detect_alias(\"lz4c\") should have set LZ4C_LEGACY_COMMANDS to true");
+        assert!(
+            observed,
+            "detect_alias(\"lz4c\") should have set LZ4C_LEGACY_COMMANDS to true"
+        );
     }
 
     #[test]

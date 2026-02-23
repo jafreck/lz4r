@@ -39,8 +39,6 @@
 
 use core::mem;
 
-use crate::block::compress::compress_bound;
-use crate::block::types::LimitedOutputDirective;
 use super::dispatch::{compress_generic, set_external_dict};
 use super::lz4mid::fill_htable;
 use super::search::insert;
@@ -48,6 +46,8 @@ use super::types::{
     clear_tables, get_clevel_params, init_internal, HcCCtxInternal, HcStrategy,
     LZ4HC_CLEVEL_DEFAULT, LZ4HC_CLEVEL_MAX, LZ4HC_HASHSIZE,
 };
+use crate::block::compress::compress_bound;
+use crate::block::types::LimitedOutputDirective;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Lz4StreamHc — streaming HC state (equivalent to LZ4_streamHC_t)
@@ -116,16 +116,16 @@ pub fn sizeof_state_hc() -> usize {
 pub fn init_stream_hc(state: &mut Lz4StreamHc) {
     let ctx = &mut state.ctx;
     clear_tables(ctx);
-    ctx.end             = core::ptr::null();
-    ctx.prefix_start    = core::ptr::null();
-    ctx.dict_start      = core::ptr::null();
-    ctx.dict_limit      = 0;
-    ctx.low_limit       = 0;
-    ctx.next_to_update  = 0;
+    ctx.end = core::ptr::null();
+    ctx.prefix_start = core::ptr::null();
+    ctx.dict_start = core::ptr::null();
+    ctx.dict_limit = 0;
+    ctx.low_limit = 0;
+    ctx.next_to_update = 0;
     ctx.compression_level = 0;
     ctx.favor_dec_speed = 0;
-    ctx.dirty           = 0;
-    ctx.dict_ctx        = core::ptr::null();
+    ctx.dirty = 0;
+    ctx.dict_ctx = core::ptr::null();
     // Set default compression level after clearing
     set_compression_level(state, LZ4HC_CLEVEL_DEFAULT);
 }
@@ -232,7 +232,14 @@ pub unsafe fn compress_hc(
     let Some(mut state) = Lz4StreamHc::create() else {
         return 0;
     };
-    compress_hc_ext_state(&mut state, src, dst, src_size, dst_capacity, compression_level)
+    compress_hc_ext_state(
+        &mut state,
+        src,
+        dst,
+        src_size,
+        dst_capacity,
+        compression_level,
+    )
     // state dropped here — equivalent to `FREEMEM(statePtr)` in C
 }
 
@@ -315,10 +322,10 @@ pub fn reset_stream_hc_fast(state: &mut Lz4StreamHc, compression_level: i32) {
             // SAFETY: both are non-null and end >= prefix_start by invariant.
             (unsafe { ctx.end.offset_from(ctx.prefix_start) }) as u32
         };
-        ctx.dict_limit   = ctx.dict_limit.wrapping_add(prefix_len);
+        ctx.dict_limit = ctx.dict_limit.wrapping_add(prefix_len);
         ctx.prefix_start = core::ptr::null();
-        ctx.end          = core::ptr::null();
-        ctx.dict_ctx     = core::ptr::null();
+        ctx.end = core::ptr::null();
+        ctx.dict_ctx = core::ptr::null();
     }
     set_compression_level(state, compression_level);
 }
@@ -373,11 +380,7 @@ pub fn favor_decompression_speed(state: &mut Lz4StreamHc, favor: bool) {
 /// `dictionary` must be readable for `dict_size` bytes and remain valid
 /// (unmodified) for the lifetime of all subsequent compression calls on
 /// `state`.
-pub unsafe fn load_dict_hc(
-    state: &mut Lz4StreamHc,
-    dictionary: *const u8,
-    dict_size: i32,
-) -> i32 {
+pub unsafe fn load_dict_hc(state: &mut Lz4StreamHc, dictionary: *const u8, dict_size: i32) -> i32 {
     debug_assert!(dict_size >= 0);
 
     // Trim to last 64 KB.
@@ -438,7 +441,7 @@ pub unsafe fn attach_hc_dictionary(
 ) {
     working_stream.ctx.dict_ctx = match dictionary_stream {
         Some(ptr) => &(*ptr).ctx as *const HcCCtxInternal,
-        None      => core::ptr::null(),
+        None => core::ptr::null(),
     };
 }
 
@@ -515,13 +518,17 @@ unsafe fn compress_hc_continue_generic(
 
             if source_end > dict_begin && src < dict_end {
                 // Trim source_end to dict_end
-                let eff_source_end = if source_end > dict_end { dict_end } else { source_end };
+                let eff_source_end = if source_end > dict_end {
+                    dict_end
+                } else {
+                    source_end
+                };
                 // Both lowLimit and dictStart advance by (eff_source_end - dictStart).
                 let advance = eff_source_end.offset_from(ctx.dict_start) as u32;
-                let low_limit_new  = ctx.low_limit.wrapping_add(advance);
-                let dict_limit     = ctx.dict_limit;
+                let low_limit_new = ctx.low_limit.wrapping_add(advance);
+                let dict_limit = ctx.dict_limit;
                 let dict_start_new = ctx.dict_start.add(advance as usize);
-                let prefix_start   = ctx.prefix_start;
+                let prefix_start = ctx.prefix_start;
                 // ctx immutable borrow ends here (last use of ctx)
                 Some((low_limit_new, dict_limit, dict_start_new, prefix_start))
             } else {
@@ -534,11 +541,11 @@ unsafe fn compress_hc_continue_generic(
     };
     if let Some((low_limit_new, dict_limit, dict_start_new, prefix_start)) = overlap_update {
         let ctx = &mut state.ctx;
-        ctx.low_limit  = low_limit_new;
+        ctx.low_limit = low_limit_new;
         ctx.dict_start = dict_start_new;
         // Invalidate dictionary if it has become too small.
         if dict_limit - ctx.low_limit < LZ4HC_HASHSIZE as u32 {
-            ctx.low_limit  = dict_limit;
+            ctx.low_limit = dict_limit;
             ctx.dict_start = prefix_start;
         }
     }
@@ -644,20 +651,22 @@ pub unsafe fn compress_hc_continue_dest_size(
 /// - If `safe_buffer` is non-null it must be writable for `dict_size` bytes
 ///   and remain valid as long as `state` is used for subsequent compressions.
 /// - If `safe_buffer` is null, `dict_size` must be 0.
-pub unsafe fn save_dict_hc(
-    state: &mut Lz4StreamHc,
-    safe_buffer: *mut u8,
-    dict_size: i32,
-) -> i32 {
+pub unsafe fn save_dict_hc(state: &mut Lz4StreamHc, safe_buffer: *mut u8, dict_size: i32) -> i32 {
     let ctx = &state.ctx;
     let prefix_size = (ctx.end as usize).wrapping_sub(ctx.prefix_start as usize) as i32;
     debug_assert!(prefix_size >= 0);
 
     // Clamp dict_size to [0, min(64 KB, prefix_size)].
     let mut dict_size = dict_size;
-    if dict_size > 64 * 1024 { dict_size = 64 * 1024; }
-    if dict_size < 4          { dict_size = 0; }
-    if dict_size > prefix_size { dict_size = prefix_size; }
+    if dict_size > 64 * 1024 {
+        dict_size = 64 * 1024;
+    }
+    if dict_size < 4 {
+        dict_size = 0;
+    }
+    if dict_size > prefix_size {
+        dict_size = prefix_size;
+    }
 
     debug_assert!(safe_buffer != core::ptr::null_mut() || dict_size == 0);
 
@@ -672,9 +681,8 @@ pub unsafe fn save_dict_hc(
     }
 
     // Compute the new end index (keeps absolute position consistent).
-    let end_index = (ctx.end as usize)
-        .wrapping_sub(ctx.prefix_start as usize) as u32
-        + ctx.dict_limit;
+    let end_index =
+        (ctx.end as usize).wrapping_sub(ctx.prefix_start as usize) as u32 + ctx.dict_limit;
 
     // Update context to point at the new safe buffer.
     let ctx = &mut state.ctx;
@@ -684,9 +692,9 @@ pub unsafe fn save_dict_hc(
         (safe_buffer as *const u8).add(dict_size as usize)
     };
     ctx.prefix_start = safe_buffer as *const u8;
-    ctx.dict_limit   = end_index.wrapping_sub(dict_size as u32);
-    ctx.low_limit    = end_index.wrapping_sub(dict_size as u32);
-    ctx.dict_start   = ctx.prefix_start;
+    ctx.dict_limit = end_index.wrapping_sub(dict_size as u32);
+    ctx.low_limit = end_index.wrapping_sub(dict_size as u32);
+    ctx.dict_start = ctx.prefix_start;
 
     if ctx.next_to_update < ctx.dict_limit {
         ctx.next_to_update = ctx.dict_limit;

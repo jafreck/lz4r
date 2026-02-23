@@ -19,22 +19,22 @@
 //! | `config`     | Compile-time configuration constants. |
 //! | `util`       | File enumeration and sizing utilities. |
 
+pub mod config;
 pub mod lorem;
 pub mod timefn;
-pub mod config;
 
 #[cfg(feature = "c-abi")]
 pub mod abi;
-pub mod util;
-pub mod threadpool;
-pub mod io;
 pub mod bench;
 pub mod block;
-pub mod hc;
-pub mod frame;
-pub mod xxhash;
-pub mod file;
 pub mod cli;
+pub mod file;
+pub mod frame;
+pub mod hc;
+pub mod io;
+pub mod threadpool;
+pub mod util;
+pub mod xxhash;
 
 // ── Version constants (mirrors lz4.h lines 131–143) ──────────────────────────
 pub const LZ4_VERSION_MAJOR: u32 = 1;
@@ -87,10 +87,9 @@ pub use block::decompress_api::decompress_safe as lz4_decompress_safe;
 
 // Block API — one-shot compression (needed by e2e tests)
 pub use block::{
-    compress_bound, compress_dest_size, compress_fast,
-    decompress_safe_partial, decompress_safe_using_dict,
-    LZ4_ACCELERATION_DEFAULT, LZ4_ACCELERATION_MAX, LZ4_MAX_INPUT_SIZE,
-    Lz4Error,
+    compress_bound, compress_dest_size, compress_fast, decompress_safe_partial,
+    decompress_safe_using_dict, Lz4Error, LZ4_ACCELERATION_DEFAULT, LZ4_ACCELERATION_MAX,
+    LZ4_MAX_INPUT_SIZE,
 };
 
 // Error types

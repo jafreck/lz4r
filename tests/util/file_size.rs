@@ -169,9 +169,9 @@ fn get_total_file_size_sums_multiple_files() {
     let p1 = dir.path().join("a.bin");
     let p2 = dir.path().join("b.bin");
     let p3 = dir.path().join("c.bin");
-    fs::write(&p1, b"aaa").unwrap();       // 3 bytes
-    fs::write(&p2, b"bbbbb").unwrap();     // 5 bytes
-    fs::write(&p3, b"cccccccc").unwrap();  // 8 bytes
+    fs::write(&p1, b"aaa").unwrap(); // 3 bytes
+    fs::write(&p2, b"bbbbb").unwrap(); // 5 bytes
+    fs::write(&p3, b"cccccccc").unwrap(); // 8 bytes
     let total = get_total_file_size(&[p1.as_path(), p2.as_path(), p3.as_path()]);
     assert_eq!(total, 3 + 5 + 8);
 }

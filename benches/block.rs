@@ -28,9 +28,7 @@ fn bench_block_compress_decompress(c: &mut Criterion) {
             group.bench_with_input(
                 BenchmarkId::new("compress_default", chunk_size),
                 &chunk,
-                |b, chunk| {
-                    b.iter(|| lz4::block::compress_default(chunk, &mut dst).unwrap())
-                },
+                |b, chunk| b.iter(|| lz4::block::compress_default(chunk, &mut dst).unwrap()),
             );
         }
 
@@ -41,9 +39,7 @@ fn bench_block_compress_decompress(c: &mut Criterion) {
             group.bench_with_input(
                 BenchmarkId::new(format!("compress_fast_{acc}"), chunk_size),
                 &chunk,
-                |b, chunk| {
-                    b.iter(|| lz4::block::compress_fast(chunk, &mut dst, acc).unwrap())
-                },
+                |b, chunk| b.iter(|| lz4::block::compress_fast(chunk, &mut dst, acc).unwrap()),
             );
         }
 

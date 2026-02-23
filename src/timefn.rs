@@ -41,10 +41,7 @@ pub fn get_time() -> TimeT {
 /// Returns the nanosecond duration between `clock_start` and `clock_end`.
 /// Equivalent to `Duration_ns TIME_span_ns(TIME_t clockStart, TIME_t clockEnd)`.
 pub fn span_ns(clock_start: TimeT, clock_end: TimeT) -> DurationNs {
-    clock_end
-        .t
-        .duration_since(clock_start.t)
-        .as_nanos() as DurationNs
+    clock_end.t.duration_since(clock_start.t).as_nanos() as DurationNs
 }
 
 /// Measures nanoseconds elapsed since `clock_start` (captures current time internally).

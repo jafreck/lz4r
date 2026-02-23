@@ -24,14 +24,14 @@
 //! The algorithm here corresponds to `LZ4HC_compress_generic*` and
 //! `LZ4HC_setExternalDict` in `lz4hc.c` v1.10.0.
 
-use crate::block::compress::LZ4_MAX_INPUT_SIZE;
-use crate::block::types::LimitedOutputDirective;
 use super::compress_hc::{compress_hash_chain, compress_optimal};
 use super::lz4mid::lz4mid_compress;
 use super::search::{insert, HcFavor};
 use super::types::{
-    DictCtxDirective, HcCCtxInternal, HcStrategy, LZ4HC_CLEVEL_MAX, get_clevel_params,
+    get_clevel_params, DictCtxDirective, HcCCtxInternal, HcStrategy, LZ4HC_CLEVEL_MAX,
 };
+use crate::block::compress::LZ4_MAX_INPUT_SIZE;
+use crate::block::types::LimitedOutputDirective;
 
 /// Maximum back-reference distance at which a dict-ctx is still usable.
 /// Beyond 64 KB the LZ4 format cannot encode the offset, so the dict is discarded.
@@ -50,8 +50,10 @@ impl HcCCtxInternal {
     /// logically equivalent to `isMid1 == isMid2`.
     #[inline]
     pub fn is_compatible(&self, other: &Self) -> bool {
-        let is_mid_self  = get_clevel_params(self.compression_level as i32).strat == HcStrategy::Lz4Mid;
-        let is_mid_other = get_clevel_params(other.compression_level as i32).strat == HcStrategy::Lz4Mid;
+        let is_mid_self =
+            get_clevel_params(self.compression_level as i32).strat == HcStrategy::Lz4Mid;
+        let is_mid_other =
+            get_clevel_params(other.compression_level as i32).strat == HcStrategy::Lz4Mid;
         is_mid_self == is_mid_other
     }
 }
@@ -86,14 +88,14 @@ pub unsafe fn set_external_dict(ctx: &mut HcCCtxInternal, new_block: *const u8) 
 
     // Slide the prefix window into the external-dictionary slot.
     // Only one extDict segment is supported; any prior one is discarded.
-    ctx.low_limit  = ctx.dict_limit;
+    ctx.low_limit = ctx.dict_limit;
     ctx.dict_start = ctx.prefix_start;
-    ctx.dict_limit = ctx.dict_limit.wrapping_add(
-        (ctx.end as usize - ctx.prefix_start as usize) as u32
-    );
-    ctx.prefix_start    = new_block;
-    ctx.end             = new_block;
-    ctx.next_to_update  = ctx.dict_limit; // resume match-referencing at the new dict boundary
+    ctx.dict_limit = ctx
+        .dict_limit
+        .wrapping_add((ctx.end as usize - ctx.prefix_start as usize) as u32);
+    ctx.prefix_start = new_block;
+    ctx.end = new_block;
+    ctx.next_to_update = ctx.dict_limit; // resume match-referencing at the new dict boundary
 
     // An ext-dict and a dict-ctx are mutually exclusive in LZ4 HC.
     ctx.dict_ctx = core::ptr::null();
@@ -159,15 +161,9 @@ pub unsafe fn compress_generic_internal(
     };
 
     let result = match c_param.strat {
-        HcStrategy::Lz4Mid => lz4mid_compress(
-            ctx,
-            src,
-            dst,
-            src_size_ptr,
-            dst_capacity,
-            limit,
-            dict,
-        ),
+        HcStrategy::Lz4Mid => {
+            lz4mid_compress(ctx, src, dst, src_size_ptr, dst_capacity, limit, dict)
+        }
         HcStrategy::Lz4Hc => compress_hash_chain(
             ctx,
             src,
@@ -273,10 +269,7 @@ pub unsafe fn compress_generic_dict_ctx(
         // Dictionary is too far behind; discard and fall back to no-dict path.
         ctx.dict_ctx = core::ptr::null();
         compress_generic_no_dict_ctx(ctx, src, dst, src_size_ptr, dst_capacity, c_level, limit)
-    } else if position == 0
-        && *src_size_ptr > KB_4 as i32
-        && ctx.is_compatible(&*ctx.dict_ctx)
-    {
+    } else if position == 0 && *src_size_ptr > KB_4 as i32 && ctx.is_compatible(&*ctx.dict_ctx) {
         // No history yet and source is large enough to justify the promotion:
         // overwrite ctx with the full dict-ctx state (inheriting its hash tables),
         // then slide it into ext-dict position so the new block can reference it.

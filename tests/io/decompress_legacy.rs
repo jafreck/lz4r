@@ -84,9 +84,8 @@ fn st_empty_input_returns_zero_and_no_magic() {
     let prefs = st_prefs();
     let res = make_resources();
     let mut out = Vec::new();
-    let (size, magic) =
-        decode_legacy_stream(&mut Cursor::new(b""), &mut out, &prefs, &res)
-            .expect("empty ST stream should succeed");
+    let (size, magic) = decode_legacy_stream(&mut Cursor::new(b""), &mut out, &prefs, &res)
+        .expect("empty ST stream should succeed");
 
     assert_eq!(size, 0);
     assert!(out.is_empty());
@@ -98,7 +97,10 @@ fn st_empty_input_returns_zero_and_no_magic() {
 #[test]
 fn st_decompress_multiple_blocks() {
     // Build data that spans multiple LEGACY_BLOCKSIZE chunks.
-    let original: Vec<u8> = (0u8..=255).cycle().take(LEGACY_BLOCKSIZE * 3 + 100).collect();
+    let original: Vec<u8> = (0u8..=255)
+        .cycle()
+        .take(LEGACY_BLOCKSIZE * 3 + 100)
+        .collect();
     let payload = make_legacy_payload(&original);
 
     let prefs = st_prefs();
@@ -252,9 +254,8 @@ fn mt_empty_input_returns_zero_and_no_magic() {
     let prefs = mt_prefs();
     let res = make_resources();
     let mut out = Vec::new();
-    let (size, magic) =
-        decode_legacy_stream(&mut Cursor::new(b""), &mut out, &prefs, &res)
-            .expect("empty MT stream should succeed");
+    let (size, magic) = decode_legacy_stream(&mut Cursor::new(b""), &mut out, &prefs, &res)
+        .expect("empty MT stream should succeed");
 
     assert_eq!(size, 0);
     assert!(out.is_empty());
@@ -354,22 +355,12 @@ fn st_and_mt_produce_identical_output_small() {
     let res = make_resources();
 
     let mut out_st = Vec::new();
-    let (sz_st, mag_st) = decode_legacy_stream(
-        &mut Cursor::new(&payload),
-        &mut out_st,
-        &st_prefs(),
-        &res,
-    )
-    .unwrap();
+    let (sz_st, mag_st) =
+        decode_legacy_stream(&mut Cursor::new(&payload), &mut out_st, &st_prefs(), &res).unwrap();
 
     let mut out_mt = Vec::new();
-    let (sz_mt, mag_mt) = decode_legacy_stream(
-        &mut Cursor::new(&payload),
-        &mut out_mt,
-        &mt_prefs(),
-        &res,
-    )
-    .unwrap();
+    let (sz_mt, mag_mt) =
+        decode_legacy_stream(&mut Cursor::new(&payload), &mut out_mt, &mt_prefs(), &res).unwrap();
 
     assert_eq!(out_st, out_mt, "ST and MT output must match");
     assert_eq!(sz_st, sz_mt, "ST and MT decoded sizes must match");
@@ -391,22 +382,12 @@ fn st_and_mt_produce_identical_output_multi_batch() {
     let res = make_resources();
 
     let mut out_st = Vec::new();
-    let (sz_st, _) = decode_legacy_stream(
-        &mut Cursor::new(&payload),
-        &mut out_st,
-        &st_prefs(),
-        &res,
-    )
-    .unwrap();
+    let (sz_st, _) =
+        decode_legacy_stream(&mut Cursor::new(&payload), &mut out_st, &st_prefs(), &res).unwrap();
 
     let mut out_mt = Vec::new();
-    let (sz_mt, _) = decode_legacy_stream(
-        &mut Cursor::new(&payload),
-        &mut out_mt,
-        &mt_prefs(),
-        &res,
-    )
-    .unwrap();
+    let (sz_mt, _) =
+        decode_legacy_stream(&mut Cursor::new(&payload), &mut out_mt, &mt_prefs(), &res).unwrap();
 
     assert_eq!(out_st, out_mt);
     assert_eq!(sz_st, sz_mt);
@@ -422,22 +403,12 @@ fn st_and_mt_agree_on_chained_frame_magic() {
     let res = make_resources();
 
     let mut out_st = Vec::new();
-    let (_, mag_st) = decode_legacy_stream(
-        &mut Cursor::new(&payload),
-        &mut out_st,
-        &st_prefs(),
-        &res,
-    )
-    .unwrap();
+    let (_, mag_st) =
+        decode_legacy_stream(&mut Cursor::new(&payload), &mut out_st, &st_prefs(), &res).unwrap();
 
     let mut out_mt = Vec::new();
-    let (_, mag_mt) = decode_legacy_stream(
-        &mut Cursor::new(&payload),
-        &mut out_mt,
-        &mt_prefs(),
-        &res,
-    )
-    .unwrap();
+    let (_, mag_mt) =
+        decode_legacy_stream(&mut Cursor::new(&payload), &mut out_mt, &mt_prefs(), &res).unwrap();
 
     assert_eq!(mag_st, Some(LZ4_FRAME_MAGIC));
     assert_eq!(mag_mt, Some(LZ4_FRAME_MAGIC));
@@ -459,9 +430,8 @@ fn nb_workers_one_routes_to_st_path() {
     prefs.nb_workers = 1;
 
     let mut out = Vec::new();
-    let (size, magic) =
-        decode_legacy_stream(&mut Cursor::new(&payload), &mut out, &prefs, &res)
-            .expect("nb_workers=1 should succeed");
+    let (size, magic) = decode_legacy_stream(&mut Cursor::new(&payload), &mut out, &prefs, &res)
+        .expect("nb_workers=1 should succeed");
 
     assert_eq!(out, original.as_ref());
     assert_eq!(size, original.len() as u64);

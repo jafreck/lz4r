@@ -33,12 +33,10 @@ use std::time::SystemTime;
 
 use rayon::prelude::*;
 
-use crate::frame::{
-    lz4f_compress_frame_using_cdict, Lz4FCDict,
-};
 use crate::frame::compress::lz4f_compress_begin;
 use crate::frame::header::lz4f_compress_frame_bound;
-use crate::frame::types::{ContentChecksum, BlockMode};
+use crate::frame::types::{BlockMode, ContentChecksum};
+use crate::frame::{lz4f_compress_frame_using_cdict, Lz4FCDict};
 use crate::io::compress_frame::{compress_frame_chunk, CfcParameters, CompressResources};
 use crate::io::file_io::{open_dst_file, open_src_file, NUL_MARK, STDIN_MARK};
 use crate::io::prefs::{display_level, Prefs, KB, MB};
@@ -162,11 +160,7 @@ impl WriteRegister {
                 };
                 display_level(
                     2,
-                    &format!(
-                        "\rRead : {} MiB   ==> {:.2}%   ",
-                        processed >> 20,
-                        ratio
-                    ),
+                    &format!("\rRead : {} MiB   ==> {:.2}%   ", processed >> 20, ratio),
                 );
             }
             self.expected_rank += 1;
@@ -292,9 +286,7 @@ pub fn compress_filename_mt(
             cdict_ptr,
             Some(&prefs),
         )
-        .map_err(|e| {
-            io::Error::new(io::ErrorKind::Other, format!("Compression failed: {}", e))
-        })?;
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Compression failed: {}", e)))?;
         compressedfilesize = c_size as u64;
 
         display_level(
@@ -323,17 +315,13 @@ pub fn compress_filename_mt(
         // is present; the flag is cleared on the working copy of `prefs` after
         // the header is written so the LZ4F context does not attempt to compute
         // a second, internal checksum.
-        let header_size = lz4f_compress_begin(
-            &mut ress.ctx,
-            &mut ress.dst_buffer,
-            Some(&prefs),
-        )
-        .map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("File header generation failed : {}", e),
-            )
-        })?;
+        let header_size = lz4f_compress_begin(&mut ress.ctx, &mut ress.dst_buffer, Some(&prefs))
+            .map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("File header generation failed : {}", e),
+                )
+            })?;
         dst_writer
             .write_all(&ress.dst_buffer[..header_size])
             .map_err(|_| {
@@ -381,7 +369,10 @@ pub fn compress_filename_mt(
 
         // Seed the first batch with the already-read first chunk.
         // The first chunk never has a prefix because there is no preceding chunk.
-        let mut pending: Option<Chunk> = Some(Chunk { data: first_buf, prefix: None });
+        let mut pending: Option<Chunk> = Some(Chunk {
+            data: first_buf,
+            prefix: None,
+        });
         let mut eof = false;
 
         loop {
@@ -392,18 +383,25 @@ pub fn compress_filename_mt(
             if let Some(c) = pending.take() {
                 let short = c.data.len() < CHUNK_SIZE;
                 batch.push(c);
-                if short { eof = true; }
+                if short {
+                    eof = true;
+                }
             }
 
             // Read additional chunks to fill the batch.
             while !eof && batch.len() < batch_size {
                 let mut buf = vec![0u8; CHUNK_SIZE];
                 let n = read_to_capacity(&mut *src_reader, &mut buf)?;
-                if n == 0 { eof = true; break; }
+                if n == 0 {
+                    eof = true;
+                    break;
+                }
                 buf.truncate(n);
                 filesize += n as u64;
 
-                if let Some(ref mut h) = xxh32 { h.update(&buf); }
+                if let Some(ref mut h) = xxh32 {
+                    h.update(&buf);
+                }
 
                 // Prefix for this chunk = suffix of the previous chunk.
                 let prefix = last_suffix.take();
@@ -413,10 +411,14 @@ pub fn compress_filename_mt(
 
                 let short = n < CHUNK_SIZE;
                 batch.push(Chunk { data: buf, prefix });
-                if short { eof = true; }
+                if short {
+                    eof = true;
+                }
             }
 
-            if batch.is_empty() { break; }
+            if batch.is_empty() {
+                break;
+            }
 
             // Compress this batch in parallel.  Collecting into a Vec preserves
             // the original chunk order so writing is straightforward.
@@ -456,7 +458,9 @@ pub fn compress_filename_mt(
                 })?;
             }
 
-            if eof { break; }
+            if eof {
+                break;
+            }
         }
         compressedfilesize += write_register.total_csize;
 
@@ -478,14 +482,12 @@ pub fn compress_filename_mt(
         } else {
             4
         };
-        dst_writer
-            .write_all(&end_buf[..end_size])
-            .map_err(|_| {
-                io::Error::new(
-                    io::ErrorKind::WriteZero,
-                    "Write error : cannot write end of frame",
-                )
-            })?;
+        dst_writer.write_all(&end_buf[..end_size]).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::WriteZero,
+                "Write error : cannot write end of frame",
+            )
+        })?;
         compressedfilesize += end_size as u64;
     }
 

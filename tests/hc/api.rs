@@ -25,8 +25,8 @@ use lz4::block::decompress_api::decompress_safe;
 use lz4::hc::api::{
     attach_hc_dictionary, compress_hc, compress_hc_continue, compress_hc_continue_dest_size,
     compress_hc_dest_size, compress_hc_ext_state, compress_hc_ext_state_fast_reset,
-    favor_decompression_speed, init_stream_hc, load_dict_hc, reset_stream_hc,
-    reset_stream_hc_fast, save_dict_hc, set_compression_level, sizeof_state_hc, Lz4StreamHc,
+    favor_decompression_speed, init_stream_hc, load_dict_hc, reset_stream_hc, reset_stream_hc_fast,
+    save_dict_hc, set_compression_level, sizeof_state_hc, Lz4StreamHc,
 };
 use lz4::hc::types::{HcCCtxInternal, LZ4HC_CLEVEL_DEFAULT, LZ4HC_CLEVEL_MAX};
 
@@ -90,7 +90,10 @@ fn create_allows_immediate_compression() {
             dst.len() as i32,
         )
     };
-    assert!(n > 0, "stream from create() must compress immediately: got {n}");
+    assert!(
+        n > 0,
+        "stream from create() must compress immediately: got {n}"
+    );
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -179,7 +182,10 @@ fn set_compression_level_negative_clamped_still_compresses() {
             -99,
         )
     };
-    assert!(n > 0, "level -99 clamped to default must still compress: {n}");
+    assert!(
+        n > 0,
+        "level -99 clamped to default must still compress: {n}"
+    );
 }
 
 /// Level above max is clamped — still produces output.
@@ -247,7 +253,10 @@ fn favor_decompression_speed_true_compresses_at_opt_level() {
             LZ4HC_CLEVEL_MAX, // level 12 triggers optimal parser
         )
     };
-    assert!(n > 0, "favor_dec_speed=true must still compress at max level: {n}");
+    assert!(
+        n > 0,
+        "favor_dec_speed=true must still compress at max level: {n}"
+    );
     let recovered = roundtrip_decompress(&dst, n as usize, src.len());
     assert_eq!(recovered, src);
 }
@@ -308,7 +317,10 @@ fn reset_stream_hc_enables_reuse() {
             dst.len() as i32,
         )
     };
-    assert!(n2 > 0, "stream reused after reset_stream_hc must compress: {n2}");
+    assert!(
+        n2 > 0,
+        "stream reused after reset_stream_hc must compress: {n2}"
+    );
 }
 
 /// reset_stream_hc with different levels produces output at those levels.
@@ -330,7 +342,10 @@ fn reset_stream_hc_applies_new_level() {
                 dst.len() as i32,
             )
         };
-        assert!(n > 0, "after reset with level {level}, compress must succeed: {n}");
+        assert!(
+            n > 0,
+            "after reset with level {level}, compress must succeed: {n}"
+        );
     }
 }
 
@@ -414,7 +429,10 @@ fn compress_hc_ext_state_fast_reset_basic_compression() {
         )
     };
     assert!(n > 0, "expected positive output, got {n}");
-    assert!((n as usize) < src.len(), "compressed should be smaller than input");
+    assert!(
+        (n as usize) < src.len(),
+        "compressed should be smaller than input"
+    );
 }
 
 /// Returns 0 when dst_capacity is too small (limited output mode).
@@ -667,7 +685,10 @@ fn compress_hc_dest_size_fills_dst_and_updates_src_size() {
         src_size > 0 && src_size <= 4096,
         "src_size_ptr must be updated to bytes consumed, got {src_size}"
     );
-    assert!(n <= dst.len() as i32, "output must not exceed target_dst_size");
+    assert!(
+        n <= dst.len() as i32,
+        "output must not exceed target_dst_size"
+    );
 }
 
 /// With adequate capacity, all input is consumed and output is decompressible.
@@ -732,7 +753,11 @@ fn load_dict_hc_trims_to_64kb() {
     let dict = repeated_input(128 * 1024); // 128 KB
     let mut stream = Lz4StreamHc::create().unwrap();
     let loaded = unsafe { load_dict_hc(&mut stream, dict.as_ptr(), dict.len() as i32) };
-    assert_eq!(loaded, 64 * 1024, "dict larger than 64 KB must be trimmed to 64 KB");
+    assert_eq!(
+        loaded,
+        64 * 1024,
+        "dict larger than 64 KB must be trimmed to 64 KB"
+    );
 }
 
 /// load_dict_hc with empty dict returns 0.
@@ -996,9 +1021,7 @@ fn save_dict_hc_returns_bytes_saved() {
     assert!(n > 0);
 
     let mut save_buf = vec![0u8; 256];
-    let saved = unsafe {
-        save_dict_hc(&mut stream, save_buf.as_mut_ptr(), save_buf.len() as i32)
-    };
+    let saved = unsafe { save_dict_hc(&mut stream, save_buf.as_mut_ptr(), save_buf.len() as i32) };
     assert!(saved >= 0, "save_dict_hc must return non-negative");
     assert!(saved <= 256, "saved bytes must not exceed requested size");
 }
@@ -1021,9 +1044,7 @@ fn save_dict_hc_clamps_to_64kb() {
     assert!(n > 0);
 
     let mut save_buf = vec![0u8; 128 * 1024]; // request 128 KB
-    let saved = unsafe {
-        save_dict_hc(&mut stream, save_buf.as_mut_ptr(), save_buf.len() as i32)
-    };
+    let saved = unsafe { save_dict_hc(&mut stream, save_buf.as_mut_ptr(), save_buf.len() as i32) };
     assert!(
         saved <= 64 * 1024,
         "save_dict_hc must clamp to 64 KB, got {saved}"
@@ -1074,8 +1095,7 @@ fn save_dict_hc_stream_remains_usable_after_save() {
 
     // Save dict.
     let mut save_buf = vec![0u8; 256];
-    let saved =
-        unsafe { save_dict_hc(&mut stream, save_buf.as_mut_ptr(), save_buf.len() as i32) };
+    let saved = unsafe { save_dict_hc(&mut stream, save_buf.as_mut_ptr(), save_buf.len() as i32) };
     assert!(saved >= 0);
 
     // Subsequent compression block on the same stream.

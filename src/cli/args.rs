@@ -18,10 +18,10 @@ use anyhow::anyhow;
 use crate::bench::BenchConfig;
 use crate::cli::arg_utils::{long_command_w_arg, read_u32_from_str};
 use crate::cli::constants::{display_level, set_display_level, AUTHOR, COMPRESSOR_NAME, IO_MT};
-use crate::displaylevel;
 use crate::cli::help::{print_long_help, print_usage_advanced};
 use crate::cli::init::CliInit;
 use crate::cli::op_mode::OpMode;
+use crate::displaylevel;
 use crate::hc::types::LZ4HC_CLEVEL_MAX;
 use crate::io::file_io::{NULL_OUTPUT, NUL_MARK, STDIN_MARK, STDOUT_MARK};
 use crate::io::prefs::{BlockMode, Prefs};
@@ -270,10 +270,11 @@ pub fn parse_args_from(
                 prefs.set_remove_src_file(true);
             } else if let Some(rest) = long_command_w_arg(argument, "--threads") {
                 // Accepts `--threads=N` or `--threads N` syntax.
-                let (val, rest_pos) =
-                    parse_next_uint32(rest, argv, &mut arg_idx, exe_name)?;
+                let (val, rest_pos) = parse_next_uint32(rest, argv, &mut arg_idx, exe_name)?;
                 if !rest_pos.is_empty() {
-                    return Err(anyhow!("bad usage: --threads: only numeric values are allowed"));
+                    return Err(anyhow!(
+                        "bad usage: --threads: only numeric values are allowed"
+                    ));
                 }
                 nb_workers = val as usize;
             } else if let Some(rest) = long_command_w_arg(argument, "--fast") {
@@ -294,7 +295,9 @@ pub fn parse_args_from(
                 } else if rest.is_empty() {
                     c_level = -1; // default acceleration
                 } else {
-                    return Err(anyhow!("bad usage: --fast: unexpected characters after option"));
+                    return Err(anyhow!(
+                        "bad usage: --fast: unexpected characters after option"
+                    ));
                 }
             } else if argument == "--best" {
                 // gzip(1) compatibility alias for maximum HC compression level.
@@ -414,10 +417,8 @@ pub fn parse_args_from(
                         if arg_idx >= argv.len() {
                             return Err(anyhow!("bad usage: -T requires a numeric argument"));
                         }
-                        let (val, _rest) =
-                            read_u32_from_str(&argv[arg_idx]).ok_or_else(|| {
-                                anyhow!("bad usage: -T: expected numeric value")
-                            })?;
+                        let (val, _rest) = read_u32_from_str(&argv[arg_idx])
+                            .ok_or_else(|| anyhow!("bad usage: -T: expected numeric value"))?;
                         nb_workers = val as usize;
                         char_pos = bytes.len() - 1; // skip to end of current arg
                     } else {
@@ -509,15 +510,12 @@ pub fn parse_args_from(
                             }
                             c if c.is_ascii_digit() => {
                                 // Numeric suffix: 4–7 selects a preset block-size ID; ≥32 is a raw byte count.
-                                let (b_val, remainder) =
-                                    read_u32_from_str(&argument[j..]).unwrap();
+                                let (b_val, remainder) = read_u32_from_str(&argument[j..]).unwrap();
                                 let consumed = argument[j..].len() - remainder.len();
                                 // j advances by consumed chars; inner loop does not auto-advance.
                                 j += consumed;
                                 if b_val < 4 {
-                                    return Err(anyhow!(
-                                        "bad usage: block size ID must be >= 4"
-                                    ));
+                                    return Err(anyhow!("bad usage: block size ID must be >= 4"));
                                 }
                                 if b_val <= 7 {
                                     block_size = prefs.set_block_size_id(b_val);
@@ -682,9 +680,9 @@ fn parse_next_uint32<'a>(
     } else if rest.is_empty() {
         // `--option VALUE` syntax: consume the next argv element.
         *arg_idx += 1;
-        let next = argv.get(*arg_idx).ok_or_else(|| {
-            anyhow!("bad usage: {}: missing command argument", exe_name)
-        })?;
+        let next = argv
+            .get(*arg_idx)
+            .ok_or_else(|| anyhow!("bad usage: {}: missing command argument", exe_name))?;
         if next.starts_with('-') {
             return Err(anyhow!(
                 "bad usage: {}: option argument cannot be another option",
@@ -699,7 +697,10 @@ fn parse_next_uint32<'a>(
         let _ = suffix;
         Ok((val, ""))
     } else {
-        Err(anyhow!("bad usage: {}: unexpected text after option", exe_name))
+        Err(anyhow!(
+            "bad usage: {}: unexpected text after option",
+            exe_name
+        ))
     }
 }
 

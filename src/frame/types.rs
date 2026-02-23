@@ -14,8 +14,8 @@
 //! - [`DecompressStage`] — decompression state-machine stages
 //! - [`Lz4FError`] — error code enum with `Display` and `Error` impls
 
-use core::fmt;
 use crate::xxhash::Xxh32State;
+use core::fmt;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // API version (lz4frame.h:256)
@@ -516,26 +516,83 @@ mod tests {
     fn error_name_strings() {
         assert_eq!(Lz4FError::OkNoError.error_name(), "OK_NoError");
         assert_eq!(Lz4FError::Generic.error_name(), "ERROR_GENERIC");
-        assert_eq!(Lz4FError::MaxBlockSizeInvalid.error_name(), "ERROR_maxBlockSize_invalid");
-        assert_eq!(Lz4FError::BlockModeInvalid.error_name(), "ERROR_blockMode_invalid");
-        assert_eq!(Lz4FError::ParameterInvalid.error_name(), "ERROR_parameter_invalid");
-        assert_eq!(Lz4FError::CompressionLevelInvalid.error_name(), "ERROR_compressionLevel_invalid");
-        assert_eq!(Lz4FError::HeaderVersionWrong.error_name(), "ERROR_headerVersion_wrong");
-        assert_eq!(Lz4FError::BlockChecksumInvalid.error_name(), "ERROR_blockChecksum_invalid");
-        assert_eq!(Lz4FError::ReservedFlagSet.error_name(), "ERROR_reservedFlag_set");
-        assert_eq!(Lz4FError::AllocationFailed.error_name(), "ERROR_allocation_failed");
-        assert_eq!(Lz4FError::SrcSizeTooLarge.error_name(), "ERROR_srcSize_tooLarge");
-        assert_eq!(Lz4FError::DstMaxSizeTooSmall.error_name(), "ERROR_dstMaxSize_tooSmall");
-        assert_eq!(Lz4FError::FrameHeaderIncomplete.error_name(), "ERROR_frameHeader_incomplete");
-        assert_eq!(Lz4FError::FrameTypeUnknown.error_name(), "ERROR_frameType_unknown");
-        assert_eq!(Lz4FError::FrameSizeWrong.error_name(), "ERROR_frameSize_wrong");
+        assert_eq!(
+            Lz4FError::MaxBlockSizeInvalid.error_name(),
+            "ERROR_maxBlockSize_invalid"
+        );
+        assert_eq!(
+            Lz4FError::BlockModeInvalid.error_name(),
+            "ERROR_blockMode_invalid"
+        );
+        assert_eq!(
+            Lz4FError::ParameterInvalid.error_name(),
+            "ERROR_parameter_invalid"
+        );
+        assert_eq!(
+            Lz4FError::CompressionLevelInvalid.error_name(),
+            "ERROR_compressionLevel_invalid"
+        );
+        assert_eq!(
+            Lz4FError::HeaderVersionWrong.error_name(),
+            "ERROR_headerVersion_wrong"
+        );
+        assert_eq!(
+            Lz4FError::BlockChecksumInvalid.error_name(),
+            "ERROR_blockChecksum_invalid"
+        );
+        assert_eq!(
+            Lz4FError::ReservedFlagSet.error_name(),
+            "ERROR_reservedFlag_set"
+        );
+        assert_eq!(
+            Lz4FError::AllocationFailed.error_name(),
+            "ERROR_allocation_failed"
+        );
+        assert_eq!(
+            Lz4FError::SrcSizeTooLarge.error_name(),
+            "ERROR_srcSize_tooLarge"
+        );
+        assert_eq!(
+            Lz4FError::DstMaxSizeTooSmall.error_name(),
+            "ERROR_dstMaxSize_tooSmall"
+        );
+        assert_eq!(
+            Lz4FError::FrameHeaderIncomplete.error_name(),
+            "ERROR_frameHeader_incomplete"
+        );
+        assert_eq!(
+            Lz4FError::FrameTypeUnknown.error_name(),
+            "ERROR_frameType_unknown"
+        );
+        assert_eq!(
+            Lz4FError::FrameSizeWrong.error_name(),
+            "ERROR_frameSize_wrong"
+        );
         assert_eq!(Lz4FError::SrcPtrWrong.error_name(), "ERROR_srcPtr_wrong");
-        assert_eq!(Lz4FError::DecompressionFailed.error_name(), "ERROR_decompressionFailed");
-        assert_eq!(Lz4FError::HeaderChecksumInvalid.error_name(), "ERROR_headerChecksum_invalid");
-        assert_eq!(Lz4FError::ContentChecksumInvalid.error_name(), "ERROR_contentChecksum_invalid");
-        assert_eq!(Lz4FError::FrameDecodingAlreadyStarted.error_name(), "ERROR_frameDecoding_alreadyStarted");
-        assert_eq!(Lz4FError::CompressionStateUninitialized.error_name(), "ERROR_compressionState_uninitialized");
-        assert_eq!(Lz4FError::ParameterNull.error_name(), "ERROR_parameter_null");
+        assert_eq!(
+            Lz4FError::DecompressionFailed.error_name(),
+            "ERROR_decompressionFailed"
+        );
+        assert_eq!(
+            Lz4FError::HeaderChecksumInvalid.error_name(),
+            "ERROR_headerChecksum_invalid"
+        );
+        assert_eq!(
+            Lz4FError::ContentChecksumInvalid.error_name(),
+            "ERROR_contentChecksum_invalid"
+        );
+        assert_eq!(
+            Lz4FError::FrameDecodingAlreadyStarted.error_name(),
+            "ERROR_frameDecoding_alreadyStarted"
+        );
+        assert_eq!(
+            Lz4FError::CompressionStateUninitialized.error_name(),
+            "ERROR_compressionState_uninitialized"
+        );
+        assert_eq!(
+            Lz4FError::ParameterNull.error_name(),
+            "ERROR_parameter_null"
+        );
         assert_eq!(Lz4FError::IoWrite.error_name(), "ERROR_io_write");
         assert_eq!(Lz4FError::IoRead.error_name(), "ERROR_io_read");
     }

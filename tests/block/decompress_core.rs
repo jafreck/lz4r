@@ -32,7 +32,10 @@ const BLOCK_EMPTY: &[u8] = &[0x00];
 
 #[test]
 fn decompress_error_eq() {
-    assert_eq!(DecompressError::MalformedInput, DecompressError::MalformedInput);
+    assert_eq!(
+        DecompressError::MalformedInput,
+        DecompressError::MalformedInput
+    );
 }
 
 #[test]
@@ -130,14 +133,20 @@ fn decompress_safe_variable_length_270_literals() {
 fn decompress_safe_empty_src_is_error() {
     // Zero-length compressed input is always malformed.
     let mut dst = [0u8; 8];
-    assert_eq!(decompress_safe(&[], &mut dst), Err(DecompressError::MalformedInput));
+    assert_eq!(
+        decompress_safe(&[], &mut dst),
+        Err(DecompressError::MalformedInput)
+    );
 }
 
 #[test]
 fn decompress_safe_zero_dst_non_empty_token_is_error() {
     // dst has zero capacity but src is not the 0x00 single-token block.
     let mut dst: [u8; 0] = [];
-    assert_eq!(decompress_safe(BLOCK_A, &mut dst), Err(DecompressError::MalformedInput));
+    assert_eq!(
+        decompress_safe(BLOCK_A, &mut dst),
+        Err(DecompressError::MalformedInput)
+    );
 }
 
 #[test]
@@ -259,8 +268,7 @@ fn round_trip_longer_string_with_matches() {
 fn decompress_safe_partial_zero_target_returns_zero() {
     // target_output_size = 0 → partial_decoding=true, output_size=0 → Ok(0).
     let mut dst = [0u8; 10];
-    let n = decompress_safe_partial(BLOCK_HELLO, &mut dst, 0)
-        .expect("partial decompress failed");
+    let n = decompress_safe_partial(BLOCK_HELLO, &mut dst, 0).expect("partial decompress failed");
     assert_eq!(n, 0);
 }
 
@@ -268,8 +276,7 @@ fn decompress_safe_partial_zero_target_returns_zero() {
 fn decompress_safe_partial_exactly_full_block() {
     // target_output_size matches actual decompressed size.
     let mut dst = [0u8; 5];
-    let n = decompress_safe_partial(BLOCK_HELLO, &mut dst, 5)
-        .expect("partial decompress failed");
+    let n = decompress_safe_partial(BLOCK_HELLO, &mut dst, 5).expect("partial decompress failed");
     assert_eq!(n, 5);
     assert_eq!(&dst[..n], b"Hello");
 }
@@ -278,8 +285,7 @@ fn decompress_safe_partial_exactly_full_block() {
 fn decompress_safe_partial_target_larger_than_content() {
     // target_output_size > actual decompressed size → behaves like decompress_safe.
     let mut dst = [0u8; 10];
-    let n = decompress_safe_partial(BLOCK_HELLO, &mut dst, 100)
-        .expect("partial decompress failed");
+    let n = decompress_safe_partial(BLOCK_HELLO, &mut dst, 100).expect("partial decompress failed");
     assert_eq!(&dst[..n], b"Hello");
 }
 
@@ -287,8 +293,7 @@ fn decompress_safe_partial_target_larger_than_content() {
 fn decompress_safe_partial_target_clamped_to_dst_len() {
     // target_output_size > dst.len() → internally clamped to dst.len().
     let mut dst = [0u8; 5];
-    let n = decompress_safe_partial(BLOCK_HELLO, &mut dst, 999)
-        .expect("partial decompress failed");
+    let n = decompress_safe_partial(BLOCK_HELLO, &mut dst, 999).expect("partial decompress failed");
     assert_eq!(&dst[..n], b"Hello");
 }
 
@@ -296,8 +301,7 @@ fn decompress_safe_partial_target_clamped_to_dst_len() {
 fn decompress_safe_partial_fewer_bytes_than_block() {
     // Request 3 bytes from a 5-byte block.  The partial-decode path clamps to 3.
     let mut dst = [0u8; 5];
-    let n = decompress_safe_partial(BLOCK_HELLO, &mut dst, 3)
-        .expect("partial decompress failed");
+    let n = decompress_safe_partial(BLOCK_HELLO, &mut dst, 3).expect("partial decompress failed");
     // We should get at most 5 bytes, at least 3 are valid 'H','e','l'.
     assert!(n <= 5);
     if n >= 3 {
@@ -315,8 +319,8 @@ fn decompress_safe_partial_roundtrip_compressible() {
     compressed.truncate(n);
 
     let mut dst = vec![0u8; 256];
-    let decoded = decompress_safe_partial(&compressed, &mut dst, 128)
-        .expect("partial decompress failed");
+    let decoded =
+        decompress_safe_partial(&compressed, &mut dst, 128).expect("partial decompress failed");
     // Must have decoded at least up to the clamped target (or the whole block).
     assert!(decoded <= 256);
     assert!(dst[..decoded].iter().all(|&b| b == b'A'));
@@ -341,8 +345,7 @@ fn decompress_safe_using_dict_empty_dict_equals_decompress_safe() {
     let mut dst1 = [0u8; 5];
     let mut dst2 = [0u8; 5];
     let n1 = decompress_safe(BLOCK_HELLO, &mut dst1).expect("decompress_safe failed");
-    let n2 = decompress_safe_using_dict(BLOCK_HELLO, &mut dst2, &[])
-        .expect("using_dict failed");
+    let n2 = decompress_safe_using_dict(BLOCK_HELLO, &mut dst2, &[]).expect("using_dict failed");
     assert_eq!(n1, n2);
     assert_eq!(dst1, dst2);
 }
@@ -350,8 +353,7 @@ fn decompress_safe_using_dict_empty_dict_equals_decompress_safe() {
 #[test]
 fn decompress_safe_using_dict_empty_dict_single_literal() {
     let mut dst = [0u8; 1];
-    let n = decompress_safe_using_dict(BLOCK_A, &mut dst, &[])
-        .expect("using_dict failed");
+    let n = decompress_safe_using_dict(BLOCK_A, &mut dst, &[]).expect("using_dict failed");
     assert_eq!(n, 1);
     assert_eq!(dst[0], b'A');
 }
@@ -366,8 +368,7 @@ fn decompress_safe_using_dict_roundtrip_no_dict_matches() {
     compressed.truncate(n);
 
     let mut dst = vec![0u8; input.len()];
-    let m = decompress_safe_using_dict(&compressed, &mut dst, &[])
-        .expect("using_dict failed");
+    let m = decompress_safe_using_dict(&compressed, &mut dst, &[]).expect("using_dict failed");
     assert_eq!(&dst[..m], input.as_ref());
 }
 

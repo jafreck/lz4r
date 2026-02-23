@@ -20,7 +20,7 @@ use std::path::Path;
 
 use crossbeam_channel::{bounded, Receiver, Sender};
 
-use crate::io::prefs::{LZ4_MAX_DICT_SIZE, MB, Prefs};
+use crate::io::prefs::{Prefs, LZ4_MAX_DICT_SIZE, MB};
 
 // ---------------------------------------------------------------------------
 // Buffer-size constants
@@ -140,10 +140,12 @@ impl DecompressResources {
     /// `prefs.dictionary_filename` if `prefs.use_dictionary` is set.
     pub fn from_prefs(prefs: &Prefs) -> io::Result<Self> {
         if prefs.use_dictionary {
-            let path = prefs
-                .dictionary_filename
-                .as_deref()
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Dictionary error: no filename provided"))?;
+            let path = prefs.dictionary_filename.as_deref().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Dictionary error: no filename provided",
+                )
+            })?;
             Self::with_dict(prefs, Path::new(path))
         } else {
             Self::new(prefs)

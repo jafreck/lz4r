@@ -23,8 +23,8 @@ use std::io;
 
 use crate::block::{compress_bound, compress_fast, decompress_safe, Lz4Stream};
 use crate::hc::{
-    Lz4StreamHc, compress_hc, compress_hc_continue,
-    reset_stream_hc_fast, load_dict_hc, attach_hc_dictionary,
+    attach_hc_dictionary, compress_hc, compress_hc_continue, load_dict_hc, reset_stream_hc_fast,
+    Lz4StreamHc,
 };
 
 /// Minimum compression level that activates HC (high-compression) mode.
@@ -87,8 +87,9 @@ impl CompressionStrategy for NoStreamFast {
     fn compress_block(&mut self, src: &[u8], dst: &mut Vec<u8>) -> io::Result<usize> {
         ensure_dst_capacity(src.len(), dst);
         // Block API: compress_fast returns Result<usize, Lz4Error>.
-        compress_fast(src, dst, self.acceleration)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("compress_fast failed: {e:?}")))
+        compress_fast(src, dst, self.acceleration).map_err(|e| {
+            io::Error::new(io::ErrorKind::Other, format!("compress_fast failed: {e:?}"))
+        })
     }
 }
 
@@ -231,9 +232,8 @@ impl StreamHC {
     ///
     /// Pass an empty slice for `dict` to compress without a dictionary.
     pub fn new(c_level: i32, dict: &[u8]) -> io::Result<Self> {
-        let stream_hc = Lz4StreamHc::create().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::Other, "Lz4StreamHc::create failed")
-        })?;
+        let stream_hc = Lz4StreamHc::create()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Lz4StreamHc::create failed"))?;
         let mut dict_stream_hc = Lz4StreamHc::create().ok_or_else(|| {
             io::Error::new(io::ErrorKind::Other, "Lz4StreamHc::create (dict) failed")
         })?;
@@ -343,14 +343,12 @@ pub fn build_compression_parameters_with_dict(
 mod tests {
     use super::*;
 
-    const SAMPLE: &[u8] =
-        b"hello world hello world hello world hello world \
+    const SAMPLE: &[u8] = b"hello world hello world hello world hello world \
           this is a test of lz4 block compression round-trip!";
 
     fn lz4_decompress(compressed: &[u8], original_len: usize) -> Vec<u8> {
         let mut out = vec![0u8; original_len];
-        let n = decompress_safe(compressed, &mut out)
-            .expect("decompress_safe failed");
+        let n = decompress_safe(compressed, &mut out).expect("decompress_safe failed");
         assert_eq!(n, original_len);
         out
     }

@@ -10,12 +10,23 @@ fn main() {
     // SET_SPARSE_FILE_MODE in platform.h is a no-op on POSIX — the OS handles it.
     // On Windows, explicit IOCTL calls are required (handled separately).
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-    let unix_targets = ["linux", "macos", "freebsd", "netbsd", "openbsd",
-                        "dragonfly", "solaris", "illumos", "haiku", "android",
-                        "ios", "watchos", "tvos", "visionos"];
-    if unix_targets.contains(&target_os.as_str())
-        || std::env::var("CARGO_CFG_UNIX").is_ok()
-    {
+    let unix_targets = [
+        "linux",
+        "macos",
+        "freebsd",
+        "netbsd",
+        "openbsd",
+        "dragonfly",
+        "solaris",
+        "illumos",
+        "haiku",
+        "android",
+        "ios",
+        "watchos",
+        "tvos",
+        "visionos",
+    ];
+    if unix_targets.contains(&target_os.as_str()) || std::env::var("CARGO_CFG_UNIX").is_ok() {
         println!("cargo:rustc-cfg=has_sparse_files");
     }
 }
