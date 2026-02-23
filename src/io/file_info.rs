@@ -351,8 +351,9 @@ fn base_name(path: &str) -> &str {
 #[cfg(unix)]
 fn is_stdin_regular_file() -> bool {
     use nix::sys::stat::fstat;
-    use std::os::unix::io::RawFd;
-    match fstat(0 as RawFd) {
+    use std::os::unix::io::BorrowedFd;
+    // SAFETY: fd 0 (stdin) is always valid for the lifetime of this call.
+    match fstat(unsafe { BorrowedFd::borrow_raw(0) }) {
         Ok(stat) => (stat.st_mode & 0o0170000) == 0o0100000,
         Err(_) => false,
     }

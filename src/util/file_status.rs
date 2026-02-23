@@ -97,7 +97,9 @@ pub fn set_file_stat(
 #[cfg(unix)]
 pub fn is_reg_fd(fd: RawFd) -> bool {
     use nix::sys::stat::{fstat, SFlag};
-    match fstat(fd) {
+    use std::os::unix::io::BorrowedFd;
+    // SAFETY: caller guarantees fd is valid for the lifetime of this call.
+    match fstat(unsafe { BorrowedFd::borrow_raw(fd) }) {
         Ok(stat) => {
             (stat.st_mode as u32) & (SFlag::S_IFMT.bits() as u32) == SFlag::S_IFREG.bits() as u32
         }
