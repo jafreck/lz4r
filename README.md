@@ -1,6 +1,7 @@
 # lz4r
 
 [![CI](https://github.com/jafreck/Lz4r/actions/workflows/ci.yml/badge.svg)](https://github.com/jafreck/Lz4r/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/jafreck/lz4r/branch/main/graph/badge.svg)](https://codecov.io/gh/jafreck/lz4r)
 [![Crates.io](https://img.shields.io/crates/v/lz4-programs.svg)](https://crates.io/crates/lz4-programs)
 [![docs.rs](https://img.shields.io/docsrs/lz4-programs)](https://docs.rs/lz4-programs)
 [![License: GPL-2.0](https://img.shields.io/badge/license-GPL--2.0-blue.svg)](LICENSE)
