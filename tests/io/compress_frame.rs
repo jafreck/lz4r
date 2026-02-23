@@ -852,7 +852,12 @@ fn compress_filename_large_multiblock_streaming_round_trips() {
 #[test]
 fn compress_filename_small_dict_round_trips() {
     let dir = tempfile::tempdir().unwrap();
-    let dict_data: Vec<u8> = b"small dict content".iter().cycle().take(1024).copied().collect();
+    let dict_data: Vec<u8> = b"small dict content"
+        .iter()
+        .cycle()
+        .take(1024)
+        .copied()
+        .collect();
     let dict_path = dir.path().join("small.dict");
     std::fs::write(&dict_path, &dict_data).unwrap();
 

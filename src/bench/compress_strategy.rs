@@ -87,9 +87,8 @@ impl CompressionStrategy for NoStreamFast {
     fn compress_block(&mut self, src: &[u8], dst: &mut Vec<u8>) -> io::Result<usize> {
         ensure_dst_capacity(src.len(), dst);
         // Block API: compress_fast returns Result<usize, Lz4Error>.
-        compress_fast(src, dst, self.acceleration).map_err(|e| {
-            io::Error::other(format!("compress_fast failed: {e:?}"))
-        })
+        compress_fast(src, dst, self.acceleration)
+            .map_err(|e| io::Error::other(format!("compress_fast failed: {e:?}")))
     }
 }
 
@@ -125,9 +124,7 @@ impl CompressionStrategy for NoStreamHC {
             )
         };
         if written == 0 {
-            Err(io::Error::other(
-                "compress_hc returned 0",
-            ))
+            Err(io::Error::other("compress_hc returned 0"))
         } else {
             Ok(written as usize)
         }
@@ -200,9 +197,7 @@ impl CompressionStrategy for StreamFast {
 
         let written = self.stream.compress_fast_continue(src, dst, acceleration);
         if written == 0 {
-            Err(io::Error::other(
-                "compress_fast_continue returned 0",
-            ))
+            Err(io::Error::other("compress_fast_continue returned 0"))
         } else {
             Ok(written as usize)
         }
@@ -230,11 +225,10 @@ impl StreamHC {
     ///
     /// Pass an empty slice for `dict` to compress without a dictionary.
     pub fn new(c_level: i32, dict: &[u8]) -> io::Result<Self> {
-        let stream_hc = Lz4StreamHc::create()
-            .ok_or_else(|| io::Error::other("Lz4StreamHc::create failed"))?;
-        let mut dict_stream_hc = Lz4StreamHc::create().ok_or_else(|| {
-            io::Error::other("Lz4StreamHc::create (dict) failed")
-        })?;
+        let stream_hc =
+            Lz4StreamHc::create().ok_or_else(|| io::Error::other("Lz4StreamHc::create failed"))?;
+        let mut dict_stream_hc = Lz4StreamHc::create()
+            .ok_or_else(|| io::Error::other("Lz4StreamHc::create (dict) failed"))?;
         let dict_copy: Vec<u8> = dict.to_vec();
         // Initialise the dict stream at the target level before loading the dictionary.
         reset_stream_hc_fast(&mut dict_stream_hc, c_level);
@@ -286,9 +280,7 @@ impl CompressionStrategy for StreamHC {
             )
         };
         if written == 0 {
-            Err(io::Error::other(
-                "compress_hc_continue returned 0",
-            ))
+            Err(io::Error::other("compress_hc_continue returned 0"))
         } else {
             Ok(written as usize)
         }
