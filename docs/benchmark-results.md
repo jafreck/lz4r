@@ -2,7 +2,7 @@
 
 ---
 
-## Part 1 — True Apples-to-Apples: lzbench harness, Rust vs C
+## True Apples-to-Apples: lzbench harness, Rust vs C
 
 The fundamental problem with cross-harness comparisons is that timing methodology,
 data-loading, and chunk-iteration strategy all differ between Criterion (Rust) and
@@ -264,63 +264,3 @@ Overall: **the Rust port is 0–20% slower than C on compression and 0–27% slo
 decompression** under a truly identical harness.  The previous Criterion-vs-lzbench
 cross-harness comparisons showed up to −51% gaps that were largely harness artefacts,
 not algorithmic regressions.
-
----
-
-## Part 2 — Criterion Benchmarks (in-process, `--release`)
-
-> **Note:** These benchmarks use a different harness than Part 1 and measure only the
-> first 256 KB of each file.  Cross-harness comparisons to Part 1 are not meaningful.
-
-### Methodology
-
-- **Rust**: Criterion 0.5, 100 samples, `--release` profile, lz4 v1.10.0 Rust port
-- **C reference**: lzbench 2.2.1, Clang 17.0.0, lz4 v1.10.0 reference implementation (separate run)
-- Input: first 256 KB of `webster` (English text, ~50% compressibility), Apple Silicon macOS
-
-```sh
-# Prerequisites
-git clone --depth 1 https://github.com/inikep/lzbench /path/to/lzbench && cd /path/to/lzbench && make
-mkdir -p ~/silesia && cd ~/silesia && curl -LO https://sun.aei.polsl.pl/~sdeor/corpus/silesia.zip && unzip silesia.zip
-
-# Rust benchmarks
-SILESIA_CORPUS_DIR=~/silesia cargo bench
-
-# C reference
-/path/to/lzbench/lzbench -elz4/lz4hc,1,4,8,12 \
-    /tmp/webster_256k.bin /tmp/mozilla_256k.bin /tmp/xml_256k.bin /tmp/dickens_256k.bin
-```
-
-### Block API (256 KB, `webster`)
-
-| Benchmark | Rust | C (lzbench) | Rust vs C |
-|---|---|---|---|
-| `compress_default` 64 KB | 623 MiB/s | ~650 MB/s | −4% |
-| `compress_default` 256 KB | 585 MiB/s | 693 MB/s | −15% |
-| `compress_fast` acc=1, 256 KB | 571 MiB/s | 693 MB/s | −17% |
-| `compress_fast` acc=3, 256 KB | 632 MiB/s | 693 MB/s | −9% |
-| `compress_fast` acc=9, 256 KB | 888 MiB/s | 693 MB/s | +28% ¹ |
-| `decompress_safe` 64 KB | 3.28 GiB/s | 4,632 MB/s | −28% |
-| `decompress_safe` 256 KB | 4.07 GiB/s | 4,632 MB/s | −6% |
-
-¹ `compress_fast` acceleration=9 trades ratio for speed; C `lz4` defaults to acceleration=1.
-
-### Frame API (`lz4f`, `webster`)
-
-| Benchmark | Rust | C (lzbench, `lz4`) | Rust vs C |
-|---|---|---|---|
-| `lz4f_compress_frame` 64 KB | 605 MiB/s | ~693 MB/s | −12% |
-| `lz4f_compress_frame` 256 KB | 559 MiB/s | 693 MB/s | −19% |
-| `lz4f_compress_frame` 4 MB | 534 MiB/s | 693 MB/s | −23% |
-| `lz4f_decompress` 64 KB | 3.06 GiB/s | 4,632 MB/s | −30% |
-| `lz4f_decompress` 256 KB | 3.06 GiB/s | 4,632 MB/s | −30% |
-| `lz4f_decompress` 4 MB | 2.26 GiB/s | 4,632 MB/s | −51% |
-
-### HC (High-Compression) — 256 KB, `webster`
-
-| Level | Rust | C (lzbench, `lz4hc`) | Rust vs C |
-|---|---|---|---|
-| 1 | 310 MiB/s | 340 MB/s | −9% |
-| 4 | 91 MiB/s | 120 MB/s | −24% |
-| 8 | 45 MiB/s | 58 MB/s | −22% |
-| 12 | 19 MiB/s | 22 MB/s | −14% |
