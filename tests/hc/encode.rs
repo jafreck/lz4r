@@ -104,7 +104,7 @@ fn basic_small_literal_small_match() {
         input.extend_from_slice(b"XYZXYZXYZ");
 
         let ip_start = input.as_ptr().add(3); // ip points past the literal bytes
-        let anchor_start = input.as_ptr();    // anchor at start → 3 literals
+        let anchor_start = input.as_ptr(); // anchor at start → 3 literals
 
         let op_start = output.as_mut_ptr();
         let oend = op_start.add(output.len());
@@ -119,8 +119,8 @@ fn basic_small_literal_small_match() {
             &mut ip,
             &mut op,
             &mut anchor,
-            7,  // match_length
-            5,  // offset
+            7, // match_length
+            5, // offset
             LimitedOutputDirective::NotLimited,
             oend,
         );
@@ -173,7 +173,7 @@ fn large_literal_exactly_runmask() {
             &mut ip,
             &mut op,
             &mut anchor,
-            4,  // match_length = MINMATCH
+            4, // match_length = MINMATCH
             1,
             LimitedOutputDirective::NotLimited,
             oend,
@@ -368,8 +368,8 @@ fn offset_large_little_endian() {
             &mut ip,
             &mut op,
             &mut anchor,
-            4,       // MINMATCH
-            0x1234,  // offset
+            4,      // MINMATCH
+            0x1234, // offset
             LimitedOutputDirective::NotLimited,
             oend,
         );

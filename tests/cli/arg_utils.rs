@@ -6,7 +6,9 @@
 //   - `readU32FromChar`   → `read_u32_from_str`
 //   - `longCommandWArg`   → `long_command_w_arg`
 
-use lz4::cli::arg_utils::{exe_name_match, last_name_from_path, long_command_w_arg, read_u32_from_str};
+use lz4::cli::arg_utils::{
+    exe_name_match, last_name_from_path, long_command_w_arg, read_u32_from_str,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // last_name_from_path  (lz4cli.c: lastNameFromPath)
@@ -254,7 +256,10 @@ fn read_u32_4m() {
 #[test]
 fn long_command_w_arg_matching_prefix() {
     // "--block-size=64K" with prefix "--block-size=" → Some("64K")
-    assert_eq!(long_command_w_arg("--block-size=64K", "--block-size="), Some("64K"));
+    assert_eq!(
+        long_command_w_arg("--block-size=64K", "--block-size="),
+        Some("64K")
+    );
 }
 
 #[test]

@@ -10,7 +10,9 @@
 //   `lz4::io::decompress_dispatch::decompress_multiple_filenames`
 //   `lz4::io::decompress_dispatch::DecompressStats`
 
-use lz4::io::decompress_dispatch::{decompress_filename, decompress_multiple_filenames, DecompressStats};
+use lz4::io::decompress_dispatch::{
+    decompress_filename, decompress_multiple_filenames, DecompressStats,
+};
 use lz4::io::prefs::{Prefs, LEGACY_BLOCKSIZE};
 use std::fs;
 use std::io::Write;
@@ -56,7 +58,9 @@ fn decompress_stats_default_is_zero() {
 #[test]
 fn decompress_stats_clone_and_debug() {
     // DecompressStats must implement Clone and Debug (used by callers for logging).
-    let s = DecompressStats { decompressed_bytes: 42 };
+    let s = DecompressStats {
+        decompressed_bytes: 42,
+    };
     let cloned = s.clone();
     assert_eq!(cloned.decompressed_bytes, 42);
     let _ = format!("{:?}", s); // must not panic
@@ -292,7 +296,10 @@ fn decompress_filename_no_overwrite_existing_dst_returns_error() {
     prefs.overwrite = false;
 
     let result = decompress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), &prefs);
-    assert!(result.is_err(), "existing dst without overwrite must return error");
+    assert!(
+        result.is_err(),
+        "existing dst without overwrite must return error"
+    );
     // Existing file must not have been overwritten.
     assert_eq!(fs::read(&dst).unwrap(), b"already here");
 }
@@ -350,7 +357,10 @@ fn decompress_multiple_filenames_single_file_strips_suffix() {
     decompress_multiple_filenames(&[src.to_str().unwrap()], suffix, &prefs)
         .expect("single file should succeed");
 
-    assert_eq!(fs::read(&expected_dst).unwrap().as_slice(), original.as_ref());
+    assert_eq!(
+        fs::read(&expected_dst).unwrap().as_slice(),
+        original.as_ref()
+    );
 }
 
 #[test]
@@ -371,7 +381,8 @@ fn decompress_multiple_filenames_multiple_files() {
 
     let src_strs: Vec<&str> = srcs.iter().map(|p| p.to_str().unwrap()).collect();
     let prefs = Prefs::default();
-    decompress_multiple_filenames(&src_strs, suffix, &prefs).expect("multiple files should succeed");
+    decompress_multiple_filenames(&src_strs, suffix, &prefs)
+        .expect("multiple files should succeed");
 
     for (i, d) in data.iter().enumerate() {
         let dst = dir.path().join(format!("file{}.raw", i));
@@ -389,7 +400,10 @@ fn decompress_multiple_filenames_skips_wrong_extension() {
 
     let prefs = Prefs::default();
     let result = decompress_multiple_filenames(&[src.to_str().unwrap()], ".lz4", &prefs);
-    assert!(result.is_err(), "wrong-extension file must cause an error return");
+    assert!(
+        result.is_err(),
+        "wrong-extension file must cause an error return"
+    );
 }
 
 #[test]
@@ -435,7 +449,10 @@ fn decompress_multiple_filenames_legacy_format() {
     decompress_multiple_filenames(&[src.to_str().unwrap()], suffix, &prefs)
         .expect("legacy format should succeed");
 
-    assert_eq!(fs::read(&expected_dst).unwrap().as_slice(), original.as_ref());
+    assert_eq!(
+        fs::read(&expected_dst).unwrap().as_slice(),
+        original.as_ref()
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

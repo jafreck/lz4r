@@ -215,8 +215,8 @@ fn set_file_stat_error_on_directory() {
 #[test]
 fn set_file_stat_error_kind_is_invalid_input_for_directory() {
     let dir = TempDir::new().unwrap();
-    let err = set_file_stat(dir.path(), SystemTime::now(), 0, 0, 0o755)
-        .expect_err("should be an error");
+    let err =
+        set_file_stat(dir.path(), SystemTime::now(), 0, 0, 0o755).expect_err("should be an error");
     assert_eq!(
         err.kind(),
         std::io::ErrorKind::InvalidInput,

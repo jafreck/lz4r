@@ -24,7 +24,7 @@ use std::io::Write;
 
 fn quiet_config() -> BenchConfig {
     let mut c = BenchConfig::default();
-    c.set_nb_seconds(0);         // single pass — keeps tests fast
+    c.set_nb_seconds(0); // single pass — keeps tests fast
     c.set_notification_level(0); // suppress output
     c
 }
@@ -43,7 +43,11 @@ fn bench_files_empty_list_runs_synthetic_test() {
     // C: if (nbFiles == 0) BMK_syntheticTest(...)
     let config = quiet_config();
     let result = bench_files(&[], 1, 1, None, &config);
-    assert!(result.is_ok(), "synthetic test must return Ok: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "synthetic test must return Ok: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -51,7 +55,11 @@ fn bench_files_empty_list_multiple_levels_ok() {
     // Synthetic path with level range 1–3.
     let config = quiet_config();
     let result = bench_files(&[], 1, 3, None, &config);
-    assert!(result.is_ok(), "synthetic multi-level must return Ok: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "synthetic multi-level must return Ok: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -70,7 +78,11 @@ fn bench_files_level_above_max_is_clamped_ok() {
     // Passing a level above max (e.g., 999) should succeed after clamping.
     let config = quiet_config();
     let result = bench_files(&[], 999, 999, None, &config);
-    assert!(result.is_ok(), "over-max level must be clamped and succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "over-max level must be clamped and succeed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -78,7 +90,11 @@ fn bench_files_level_last_above_max_is_clamped_ok() {
     // c_level_last also clamped to LZ4HC_CLEVEL_MAX.
     let config = quiet_config();
     let result = bench_files(&[], 1, 999, None, &config);
-    assert!(result.is_ok(), "over-max c_level_last must be clamped and succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "over-max c_level_last must be clamped and succeed: {:?}",
+        result.err()
+    );
 }
 
 // ── Decode-only adjustments (bench.c lines 811–818) ──────────────────────────
@@ -116,7 +132,8 @@ fn bench_files_decode_only_with_dict_returns_err() {
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     assert!(
         err.to_string().contains("not compatible with dictionary"),
-        "error message should mention compatibility: {}", err
+        "error message should mention compatibility: {}",
+        err
     );
 }
 
@@ -133,7 +150,7 @@ fn bench_files_missing_dict_file_returns_err() {
 #[test]
 fn bench_files_empty_dict_file_returns_err() {
     // C bench.c lines 843–845: if (dictFileSize == 0) END_PROCESS error.
-    let (_tmp, dict_path) = make_temp_file(b"");  // empty file
+    let (_tmp, dict_path) = make_temp_file(b""); // empty file
 
     let config = quiet_config();
     let result = bench_files(&[], 1, 1, Some(&dict_path), &config);
@@ -151,7 +168,11 @@ fn bench_files_dict_file_smaller_than_max_used_fully() {
 
     let config = quiet_config();
     let result = bench_files(&[&data_path], 1, 1, Some(&dict_path), &config);
-    assert!(result.is_ok(), "small dict file must succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "small dict file must succeed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -167,7 +188,11 @@ fn bench_files_dict_file_larger_than_max_uses_last_bytes() {
 
     let config = quiet_config();
     let result = bench_files(&[&data_path], 1, 1, Some(&dict_path), &config);
-    assert!(result.is_ok(), "oversized dict file must succeed (last bytes used): {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "oversized dict file must succeed (last bytes used): {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -176,12 +201,21 @@ fn bench_files_dict_exactly_max_dict_size_ok() {
     let dict_content: Vec<u8> = (0u8..=255).cycle().take(LZ4_MAX_DICT_SIZE).collect();
     let (_tmp_dict, dict_path) = make_temp_file(&dict_content);
 
-    let data: Vec<u8> = b"hello world ".iter().cycle().take(65536).cloned().collect();
+    let data: Vec<u8> = b"hello world "
+        .iter()
+        .cycle()
+        .take(65536)
+        .cloned()
+        .collect();
     let (_tmp_data, data_path) = make_temp_file(&data);
 
     let config = quiet_config();
     let result = bench_files(&[&data_path], 1, 1, Some(&dict_path), &config);
-    assert!(result.is_ok(), "dict exactly LZ4_MAX_DICT_SIZE must succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "dict exactly LZ4_MAX_DICT_SIZE must succeed: {:?}",
+        result.err()
+    );
 }
 
 // ── File dispatch paths ───────────────────────────────────────────────────────
@@ -194,7 +228,11 @@ fn bench_files_single_file_default_config_ok() {
 
     let config = quiet_config();
     let result = bench_files(&[&path], 1, 1, None, &config);
-    assert!(result.is_ok(), "single file bench must succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "single file bench must succeed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -206,7 +244,11 @@ fn bench_files_single_file_three_levels_ok() {
     let mut config = quiet_config();
     config.set_notification_level(0);
     let result = bench_files(&[&path], 1, 3, None, &config);
-    assert!(result.is_ok(), "3-level file bench must succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "3-level file bench must succeed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -218,7 +260,11 @@ fn bench_files_multiple_files_combined_ok() {
 
     let config = quiet_config();
     let result = bench_files(&[&path1, &path2], 1, 1, None, &config);
-    assert!(result.is_ok(), "multi-file combined bench must succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "multi-file combined bench must succeed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -242,7 +288,11 @@ fn bench_files_separately_two_files_ok() {
     config.set_bench_separately(true);
 
     let result = bench_files(&[&path1, &path2], 1, 1, None, &config);
-    assert!(result.is_ok(), "bench_separately two files must succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "bench_separately two files must succeed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -252,7 +302,10 @@ fn bench_files_separately_nonexistent_file_returns_err() {
     config.set_bench_separately(true);
 
     let result = bench_files(&["/nonexistent_separate_xyz.bin"], 1, 1, None, &config);
-    assert!(result.is_err(), "nonexistent file in separate mode must return Err");
+    assert!(
+        result.is_err(),
+        "nonexistent file in separate mode must return Err"
+    );
 }
 
 #[test]
@@ -265,7 +318,11 @@ fn bench_files_separately_level_clamped_to_max() {
     config.set_bench_separately(true);
 
     let result = bench_files(&[&path], 999, 999, None, &config);
-    assert!(result.is_ok(), "over-max level in separate mode must succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "over-max level in separate mode must succeed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -278,7 +335,11 @@ fn bench_files_separately_last_below_first_clamped_ok() {
     config.set_bench_separately(true);
 
     let result = bench_files(&[&path], 5, 2, None, &config);
-    assert!(result.is_ok(), "clamped c_level_last in separate mode must succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "clamped c_level_last in separate mode must succeed: {:?}",
+        result.err()
+    );
 }
 
 // ── BenchConfig re-export ─────────────────────────────────────────────────────

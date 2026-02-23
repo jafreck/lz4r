@@ -19,8 +19,8 @@
 //   - DstFile::write: bytes written reach the file on disk
 
 use lz4::io::file_io::{
-    is_skippable_magic_number, open_dst_file, open_src_file, NULL_OUTPUT,
-    NUL_MARK, STDIN_MARK, STDOUT_MARK,
+    is_skippable_magic_number, open_dst_file, open_src_file, NULL_OUTPUT, NUL_MARK, STDIN_MARK,
+    STDOUT_MARK,
 };
 use lz4::io::prefs::{Prefs, DISPLAY_LEVEL};
 use std::io::{Read, Write};
@@ -170,8 +170,7 @@ fn open_src_file_real_file_readable() {
     let path = dir.path().join("source.bin");
     std::fs::write(&path, b"hello source").unwrap();
 
-    let mut src = open_src_file(path.to_str().unwrap())
-        .expect("should open a real file");
+    let mut src = open_src_file(path.to_str().unwrap()).expect("should open a real file");
     let mut buf = Vec::new();
     src.read_to_end(&mut buf).unwrap();
     assert_eq!(buf, b"hello source");
@@ -184,8 +183,7 @@ fn open_src_file_empty_file_returns_empty_read() {
     let path = dir.path().join("empty.bin");
     std::fs::write(&path, b"").unwrap();
 
-    let mut src = open_src_file(path.to_str().unwrap())
-        .expect("should open empty file");
+    let mut src = open_src_file(path.to_str().unwrap()).expect("should open empty file");
     let mut buf = Vec::new();
     src.read_to_end(&mut buf).unwrap();
     assert!(buf.is_empty());
@@ -199,8 +197,7 @@ fn open_src_file_large_file_readable() {
     let data: Vec<u8> = (0u8..=255).cycle().take(64 * 1024).collect();
     std::fs::write(&path, &data).unwrap();
 
-    let mut src = open_src_file(path.to_str().unwrap())
-        .expect("should open large file");
+    let mut src = open_src_file(path.to_str().unwrap()).expect("should open large file");
     let mut buf = Vec::new();
     src.read_to_end(&mut buf).unwrap();
     assert_eq!(buf, data);
@@ -252,7 +249,9 @@ fn open_dst_file_null_output_returns_sink() {
 fn open_dst_file_null_output_write_succeeds() {
     let prefs = Prefs::default();
     let mut dst = open_dst_file(NULL_OUTPUT, &prefs).expect("null output must succeed");
-    let written = dst.write(b"discard me").expect("write to null sink must succeed");
+    let written = dst
+        .write(b"discard me")
+        .expect("write to null sink must succeed");
     assert_eq!(written, b"discard me".len());
 }
 
@@ -276,8 +275,7 @@ fn open_dst_file_writes_data_to_disk() {
     let path = dir.path().join("output.bin");
     let prefs = Prefs::default();
     {
-        let mut dst = open_dst_file(path.to_str().unwrap(), &prefs)
-            .expect("should create file");
+        let mut dst = open_dst_file(path.to_str().unwrap(), &prefs).expect("should create file");
         dst.write_all(b"written data").unwrap();
         dst.flush().unwrap();
     }
@@ -316,7 +314,10 @@ fn open_dst_file_overwrite_false_nonexistent_ok() {
     let mut prefs = Prefs::default();
     prefs.overwrite = false;
     let result = open_dst_file(path.to_str().unwrap(), &prefs);
-    assert!(result.is_ok(), "non-existent file with overwrite=false must succeed");
+    assert!(
+        result.is_ok(),
+        "non-existent file with overwrite=false must succeed"
+    );
     reset_display();
 }
 
@@ -332,7 +333,10 @@ fn open_dst_file_overwrite_false_existing_low_display_returns_err() {
     let mut prefs = Prefs::default();
     prefs.overwrite = false;
     let result = open_dst_file(path.to_str().unwrap(), &prefs);
-    assert!(result.is_err(), "should refuse overwrite with display_level=0");
+    assert!(
+        result.is_err(),
+        "should refuse overwrite with display_level=0"
+    );
     assert_eq!(
         result.err().unwrap().kind(),
         std::io::ErrorKind::AlreadyExists,
@@ -352,7 +356,10 @@ fn open_dst_file_overwrite_false_existing_display_level_1_returns_err() {
     let mut prefs = Prefs::default();
     prefs.overwrite = false;
     let result = open_dst_file(path.to_str().unwrap(), &prefs);
-    assert!(result.is_err(), "should refuse overwrite with display_level=1");
+    assert!(
+        result.is_err(),
+        "should refuse overwrite with display_level=1"
+    );
     assert_eq!(
         result.err().unwrap().kind(),
         std::io::ErrorKind::AlreadyExists

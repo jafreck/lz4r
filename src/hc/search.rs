@@ -23,11 +23,9 @@
 //!   - [`insert_and_get_wider_match`] ← `LZ4HC_InsertAndGetWiderMatch`
 //!   - [`insert_and_find_best_match`] ← `LZ4HC_InsertAndFindBestMatch`
 
-use crate::block::types::{self as bt, LZ4_DISTANCE_MAX, MINMATCH};
-use super::types::{
-    DictCtxDirective, HcCCtxInternal, LZ4HC_MAXD_MASK, hash_ptr, count_back,
-};
 use super::lz4mid::Match;
+use super::types::{count_back, hash_ptr, DictCtxDirective, HcCCtxInternal, LZ4HC_MAXD_MASK};
+use crate::block::types::{self as bt, LZ4_DISTANCE_MAX, MINMATCH};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Chain delta accessor (DELTANEXTU16)
@@ -171,11 +169,7 @@ pub unsafe fn count_pattern(mut ip: *const u8, i_end: *const u8, pattern32: u32)
 /// # Safety
 /// `ip` must be within a valid readable range down to `i_low`.
 #[inline]
-pub unsafe fn reverse_count_pattern(
-    mut ip: *const u8,
-    i_low: *const u8,
-    pattern: u32,
-) -> usize {
+pub unsafe fn reverse_count_pattern(mut ip: *const u8, i_low: *const u8, pattern: u32) -> usize {
     let i_start = ip;
 
     // 4-byte step backward
@@ -282,8 +276,7 @@ pub unsafe fn insert_and_get_wider_match(
     let prefix_ptr = hc4.prefix_start;
     let prefix_idx = hc4.dict_limit;
     let ip_index = (ip.offset_from(prefix_ptr) as u32).wrapping_add(prefix_idx);
-    let within_start_distance =
-        hc4.low_limit.wrapping_add(LZ4_DISTANCE_MAX + 1) > ip_index;
+    let within_start_distance = hc4.low_limit.wrapping_add(LZ4_DISTANCE_MAX + 1) > ip_index;
     let lowest_match_index = if within_start_distance {
         hc4.low_limit
     } else {
@@ -320,7 +313,11 @@ pub unsafe fn insert_and_get_wider_match(
             debug_assert!(longest >= 1);
             // Quick 2-byte suffix check before full comparison
             if bt::read16(i_low_limit.add((longest - 1) as usize))
-                == bt::read16(match_ptr.sub(look_back_length as usize).add((longest - 1) as usize))
+                == bt::read16(
+                    match_ptr
+                        .sub(look_back_length as usize)
+                        .add((longest - 1) as usize),
+                )
             {
                 if bt::read32(match_ptr) == pattern {
                     let back = if look_back_length != 0 {
@@ -329,8 +326,7 @@ pub unsafe fn insert_and_get_wider_match(
                         0
                     };
                     match_length = MINMATCH as i32
-                        + bt::count(ip.add(MINMATCH), match_ptr.add(MINMATCH), i_high_limit)
-                            as i32;
+                        + bt::count(ip.add(MINMATCH), match_ptr.add(MINMATCH), i_high_limit) as i32;
                     match_length -= back;
                     if match_length > longest {
                         longest = match_length;
@@ -348,8 +344,7 @@ pub unsafe fn insert_and_get_wider_match(
                 if v_limit > i_high_limit {
                     v_limit = i_high_limit;
                 }
-                let mut mlt = bt::count(ip.add(MINMATCH), match_ptr.add(MINMATCH), v_limit)
-                    as i32
+                let mut mlt = bt::count(ip.add(MINMATCH), match_ptr.add(MINMATCH), v_limit) as i32
                     + MINMATCH as i32;
                 if ip.add(mlt as usize) == v_limit && v_limit < i_high_limit {
                     mlt += bt::count(ip.add(mlt as usize), prefix_ptr, i_high_limit) as i32;
@@ -379,8 +374,7 @@ pub unsafe fn insert_and_get_wider_match(
                 let mut accel: i32 = 1 << K_TRIGGER;
                 let mut pos: i32 = 0;
                 while pos < end {
-                    let candidate_dist =
-                        delta_next(&hc4.chain_table, match_index + pos as u32);
+                    let candidate_dist = delta_next(&hc4.chain_table, match_index + pos as u32);
                     step = accel >> K_TRIGGER;
                     accel += 1;
                     if candidate_dist > distance_to_next_match {
@@ -412,8 +406,7 @@ pub unsafe fn insert_and_get_wider_match(
                         && ((pattern & 0xFF) == (pattern >> 24))
                     {
                         repeat = RepeatState::Confirmed;
-                        src_pattern_length =
-                            count_pattern(ip.add(4), i_high_limit, pattern) + 4;
+                        src_pattern_length = count_pattern(ip.add(4), i_high_limit, pattern) + 4;
                     } else {
                         repeat = RepeatState::Not;
                     }
@@ -437,15 +430,13 @@ pub unsafe fn insert_and_get_wider_match(
                             count_pattern(match_ptr.add(4), i_limit, pattern) + 4;
 
                         if ext_dict && match_ptr.add(forward_pattern_length) == i_limit {
-                            let rotated =
-                                rotate_pattern(forward_pattern_length, pattern);
+                            let rotated = rotate_pattern(forward_pattern_length, pattern);
                             forward_pattern_length +=
                                 count_pattern(prefix_ptr, i_high_limit, rotated);
                         }
 
                         {
-                            let lowest_match_ptr =
-                                if ext_dict { dict_start } else { prefix_ptr };
+                            let lowest_match_ptr = if ext_dict { dict_start } else { prefix_ptr };
                             let mut back_length =
                                 reverse_count_pattern(match_ptr, lowest_match_ptr, pattern);
 
@@ -453,10 +444,8 @@ pub unsafe fn insert_and_get_wider_match(
                                 && match_ptr.sub(back_length) == prefix_ptr
                                 && dict_idx < prefix_idx
                             {
-                                let rotated = rotate_pattern(
-                                    (0usize).wrapping_sub(back_length),
-                                    pattern,
-                                );
+                                let rotated =
+                                    rotate_pattern((0usize).wrapping_sub(back_length), pattern);
                                 back_length += reverse_count_pattern(dict_end, dict_start, rotated);
                             }
 
@@ -543,10 +532,8 @@ pub unsafe fn insert_and_get_wider_match(
         } // end pattern-analysis block
 
         // ── Follow current chain ──────────────────────────────────────────
-        match_index = match_index.wrapping_sub(delta_next(
-            &hc4.chain_table,
-            match_index + match_chain_pos,
-        ));
+        match_index =
+            match_index.wrapping_sub(delta_next(&hc4.chain_table, match_index + match_chain_pos));
     } // 'chain_loop
 
     // ── Dict-ctx search  (usingDictCtxHc mode) ───────────────────────────
@@ -572,8 +559,7 @@ pub unsafe fn insert_and_get_wider_match(
                 if v_limit > i_high_limit {
                     v_limit = i_high_limit;
                 }
-                let mut mlt = bt::count(ip.add(MINMATCH), match_ptr.add(MINMATCH), v_limit)
-                    as i32
+                let mut mlt = bt::count(ip.add(MINMATCH), match_ptr.add(MINMATCH), v_limit) as i32
                     + MINMATCH as i32;
                 let back = if look_back_length != 0 {
                     count_back(ip, match_ptr, i_low_limit, dict_ctx.prefix_start)
@@ -626,13 +612,13 @@ pub unsafe fn insert_and_find_best_match(
     insert_and_get_wider_match(
         hc4,
         ip,
-        ip,            // i_low_limit == ip → no lookback
+        ip, // i_low_limit == ip → no lookback
         i_limit,
         MINMATCH as i32 - 1,
         max_nb_attempts,
         pattern_analysis,
-        false,         // chain_swap disabled
+        false, // chain_swap disabled
         dict,
-        false,         // favor_dec_speed = favorCompressionRatio
+        false, // favor_dec_speed = favorCompressionRatio
     )
 }

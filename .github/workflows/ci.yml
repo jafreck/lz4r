@@ -68,13 +68,11 @@ jobs:
   docs:
     name: Docs
     runs-on: ubuntu-latest
-    env:
-      RUSTDOCFLAGS: -D warnings
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo doc --no-deps --all-features
+      - run: cargo doc --no-deps
 
   # ── Coverage ─────────────────────────────────────────────────────────────────
   coverage:

@@ -11,8 +11,8 @@
 //   - Zero return from any block function is mapped to Err (not a valid output)
 
 use lz4::bench::compress_strategy::{
-    build_compression_parameters, build_compression_parameters_with_dict,
-    CompressionStrategy, NoStreamFast, NoStreamHC, StreamFast, StreamHC,
+    build_compression_parameters, build_compression_parameters_with_dict, CompressionStrategy,
+    NoStreamFast, NoStreamHC, StreamFast, StreamHC,
 };
 
 // ── Helper: decompress and verify ────────────────────────────────────────────
@@ -23,8 +23,7 @@ fn lz4_decompress(compressed: &[u8], original_len: usize) -> Vec<u8> {
     out
 }
 
-const SAMPLE: &[u8] =
-    b"hello world hello world hello world hello world \
+const SAMPLE: &[u8] = b"hello world hello world hello world hello world \
       this is a test of lz4 block compression round-trip!";
 
 const REPETITIVE: &[u8] = &[b'A'; 4096];
@@ -64,7 +63,10 @@ fn no_stream_fast_acceleration_increases_with_negative_level() {
     let mut s = NoStreamFast::new(-100);
     let mut dst = Vec::new();
     let n = s.compress_block(SAMPLE, &mut dst).unwrap();
-    assert!(n > 0, "compress_block should succeed for highly negative c_level");
+    assert!(
+        n > 0,
+        "compress_block should succeed for highly negative c_level"
+    );
 }
 
 #[test]
@@ -215,7 +217,10 @@ fn stream_hc_with_dict_succeeds() {
     let mut s = StreamHC::new(9, dict).unwrap();
     let mut dst = Vec::new();
     let n = s.compress_block(SAMPLE, &mut dst).unwrap();
-    assert!(n > 0, "HC stream compress with dict should return > 0 bytes");
+    assert!(
+        n > 0,
+        "HC stream compress with dict should return > 0 bytes"
+    );
 }
 
 #[test]

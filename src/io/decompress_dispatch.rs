@@ -69,10 +69,12 @@ extern "C" {
 use crate::io::decompress_frame::decompress_lz4f;
 use crate::io::decompress_legacy::decode_legacy_stream;
 use crate::io::decompress_resources::DecompressResources;
-use crate::io::file_io::{is_skippable_magic_number, open_src_file, NUL_MARK, STDIN_MARK, STDOUT_MARK};
+use crate::io::file_io::{
+    is_skippable_magic_number, open_src_file, NUL_MARK, STDIN_MARK, STDOUT_MARK,
+};
 use crate::io::prefs::{
-    display_level, final_time_display, LZ4IO_MAGICNUMBER, LZ4IO_SKIPPABLE0, LEGACY_MAGICNUMBER,
-    MAGICNUMBER_SIZE, DISPLAY_LEVEL, Prefs,
+    display_level, final_time_display, Prefs, DISPLAY_LEVEL, LEGACY_MAGICNUMBER, LZ4IO_MAGICNUMBER,
+    LZ4IO_SKIPPABLE0, MAGICNUMBER_SIZE,
 };
 use crate::io::sparse::{fwrite_sparse, fwrite_sparse_end, SPARSE_SEGMENT_SIZE};
 use crate::timefn::get_time;
@@ -357,12 +359,8 @@ fn decompress_src_file<W: Write>(
 
     // `--rm`: remove source file after successful decompression (lz4io.c:2430–2432).
     if prefs.remove_src_file {
-        fs::remove_file(src_path).map_err(|e| {
-            io::Error::new(
-                e.kind(),
-                format!("Remove error : {}: {}", src_path, e),
-            )
-        })?;
+        fs::remove_file(src_path)
+            .map_err(|e| io::Error::new(e.kind(), format!("Remove error : {}: {}", src_path, e)))?;
     }
 
     // Progress display (lz4io.c:2436–2437).
@@ -397,7 +395,10 @@ fn open_regular_dst(dst_path: &str, prefs: &Prefs) -> io::Result<File> {
             ));
         }
         // Interactive prompt (lz4io.c:422–436).
-        eprint!("{} already exists; do you want to overwrite (y/N) ? ", dst_path);
+        eprint!(
+            "{} already exists; do you want to overwrite (y/N) ? ",
+            dst_path
+        );
         let _ = io::stderr().flush();
         let mut line = String::new();
         io::stdin().read_line(&mut line)?;
@@ -543,11 +544,7 @@ pub fn decompress_filename(src: &str, dst: &str, prefs: &Prefs) -> io::Result<De
 /// missing and skipped files otherwise.
 ///
 /// Equivalent to `LZ4IO_decompressMultipleFilenames` (lz4io.c lines 2498–2550).
-pub fn decompress_multiple_filenames(
-    srcs: &[&str],
-    suffix: &str,
-    prefs: &Prefs,
-) -> io::Result<()> {
+pub fn decompress_multiple_filenames(srcs: &[&str], suffix: &str, prefs: &Prefs) -> io::Result<()> {
     let mut resources = DecompressResources::from_prefs(prefs)?;
     let time_start = get_time();
     // SAFETY: clock() is declared in the module-level extern "C" block.
@@ -661,8 +658,7 @@ mod tests {
         let mut src = Cursor::new(payload.as_ref());
         let mut dst = Vec::new();
 
-        let total = pass_through(&mut src, &mut dst, magic)
-            .expect("pass_through should succeed");
+        let total = pass_through(&mut src, &mut dst, magic).expect("pass_through should succeed");
 
         let mut expected = magic.to_vec();
         expected.extend_from_slice(payload);
@@ -676,8 +672,7 @@ mod tests {
         let mut src = Cursor::new(b"" as &[u8]);
         let mut dst = Vec::new();
 
-        let total = pass_through(&mut src, &mut dst, magic)
-            .expect("pass_through should succeed");
+        let total = pass_through(&mut src, &mut dst, magic).expect("pass_through should succeed");
 
         assert_eq!(dst, magic.as_ref());
         assert_eq!(total, MAGICNUMBER_SIZE as u64);
@@ -730,13 +725,8 @@ mod tests {
         let mut src = Cursor::new(frame_stream);
         let mut dst = Vec::new();
 
-        let bytes = decompress_loop(
-            &mut src,
-            &mut dst,
-            &prefs,
-            &mut resources,
-        )
-        .expect("frame decompress should succeed");
+        let bytes = decompress_loop(&mut src, &mut dst, &prefs, &mut resources)
+            .expect("frame decompress should succeed");
 
         assert_eq!(bytes as usize, original.len());
         assert_eq!(dst, original);
@@ -754,13 +744,8 @@ mod tests {
         let mut src = Cursor::new(legacy_stream);
         let mut dst = Vec::new();
 
-        let bytes = decompress_loop(
-            &mut src,
-            &mut dst,
-            &prefs,
-            &mut resources,
-        )
-        .expect("legacy decompress should succeed");
+        let bytes = decompress_loop(&mut src, &mut dst, &prefs, &mut resources)
+            .expect("legacy decompress should succeed");
 
         assert_eq!(bytes as usize, original.len());
         assert_eq!(dst.as_slice(), original.as_ref());
@@ -788,13 +773,8 @@ mod tests {
         let mut src = Cursor::new(stream);
         let mut dst = Vec::new();
 
-        let bytes = decompress_loop(
-            &mut src,
-            &mut dst,
-            &prefs,
-            &mut resources,
-        )
-        .expect("skippable + frame should succeed");
+        let bytes = decompress_loop(&mut src, &mut dst, &prefs, &mut resources)
+            .expect("skippable + frame should succeed");
 
         assert_eq!(bytes as usize, original.len());
         assert_eq!(dst.as_slice(), original.as_ref());
@@ -815,13 +795,8 @@ mod tests {
         let mut src = Cursor::new(stream);
         let mut dst = Vec::new();
 
-        let bytes = decompress_loop(
-            &mut src,
-            &mut dst,
-            &prefs,
-            &mut resources,
-        )
-        .expect("chained frames should succeed");
+        let bytes = decompress_loop(&mut src, &mut dst, &prefs, &mut resources)
+            .expect("chained frames should succeed");
 
         let mut expected = part1.to_vec();
         expected.extend_from_slice(part2);
@@ -838,13 +813,8 @@ mod tests {
         let mut src = Cursor::new(b"" as &[u8]);
         let mut dst = Vec::new();
 
-        let bytes = decompress_loop(
-            &mut src,
-            &mut dst,
-            &prefs,
-            &mut resources,
-        )
-        .expect("empty input should succeed");
+        let bytes = decompress_loop(&mut src, &mut dst, &prefs, &mut resources)
+            .expect("empty input should succeed");
 
         assert_eq!(bytes, 0);
         assert!(dst.is_empty());
@@ -862,12 +832,7 @@ mod tests {
         let mut src = Cursor::new(stream);
         let mut dst = Vec::new();
 
-        let result = decompress_loop(
-            &mut src,
-            &mut dst,
-            &prefs,
-            &mut resources,
-        );
+        let result = decompress_loop(&mut src, &mut dst, &prefs, &mut resources);
         assert!(result.is_err(), "unrecognized magic must return error");
     }
 
@@ -890,13 +855,8 @@ mod tests {
         let mut src = Cursor::new(stream.clone());
         let mut dst = Vec::new();
 
-        let bytes = decompress_loop(
-            &mut src,
-            &mut dst,
-            &prefs,
-            &mut resources,
-        )
-        .expect("pass-through should succeed");
+        let bytes = decompress_loop(&mut src, &mut dst, &prefs, &mut resources)
+            .expect("pass-through should succeed");
 
         // Should reproduce the full stream (magic + payload).
         assert_eq!(bytes as usize, stream.len());
@@ -916,12 +876,7 @@ mod tests {
         let mut src = Cursor::new(stream);
         let mut dst = Vec::new();
 
-        let result = decompress_loop(
-            &mut src,
-            &mut dst,
-            &prefs,
-            &mut resources,
-        );
+        let result = decompress_loop(&mut src, &mut dst, &prefs, &mut resources);
         assert!(result.is_err(), "corrupt frame must return error");
     }
 
@@ -1006,8 +961,7 @@ mod tests {
 
         let prefs = Prefs::default();
         let src_str = src.to_str().unwrap();
-        decompress_multiple_filenames(&[src_str], suffix, &prefs)
-            .expect("should succeed");
+        decompress_multiple_filenames(&[src_str], suffix, &prefs).expect("should succeed");
 
         let decompressed = fs::read(&expected_dst).unwrap();
         assert_eq!(decompressed.as_slice(), original.as_ref());
@@ -1023,6 +977,9 @@ mod tests {
         let src_str = src.to_str().unwrap();
         // Should return Err because the file was skipped.
         let result = decompress_multiple_filenames(&[src_str], ".lz4", &prefs);
-        assert!(result.is_err(), "wrong-extension file should cause a skip error");
+        assert!(
+            result.is_err(),
+            "wrong-extension file should cause a skip error"
+        );
     }
 }

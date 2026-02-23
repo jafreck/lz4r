@@ -29,13 +29,13 @@ use crate::frame::header::{
     lz4f_header_checksum, lz4f_optimal_bsid, write_le32, write_le64,
 };
 use crate::frame::types::{
-    BlockChecksum, BlockCompressMode, BlockMode, BlockSizeId, ContentChecksum, CtxType,
-    Lz4FError, Lz4FCCtx, Preferences, BF_SIZE, BH_SIZE, MAX_FH_SIZE,
+    BlockChecksum, BlockCompressMode, BlockMode, BlockSizeId, ContentChecksum, CtxType, Lz4FCCtx,
+    Lz4FError, Preferences, BF_SIZE, BH_SIZE, MAX_FH_SIZE,
 };
 use crate::hc::api::{
     attach_hc_dictionary, compress_hc_continue, compress_hc_ext_state_fast_reset,
-    favor_decompression_speed, init_stream_hc, load_dict_hc, reset_stream_hc_fast,
-    save_dict_hc, set_compression_level as hc_set_compression_level, Lz4StreamHc,
+    favor_decompression_speed, init_stream_hc, load_dict_hc, reset_stream_hc_fast, save_dict_hc,
+    set_compression_level as hc_set_compression_level, Lz4StreamHc,
 };
 use crate::hc::types::LZ4HC_CLEVEL_MIN;
 use crate::xxhash::{xxh32_oneshot, Xxh32State};
@@ -137,9 +137,7 @@ fn select_compress_mode(
 /// Returns `0` if no pointer has been written yet.
 fn read_inner_ptr(cctx: &Lz4FCCtx) -> usize {
     match cctx.lz4_ctx.as_ref() {
-        Some(v) if v.len() >= PTR_BYTES => {
-            usize::from_ne_bytes(v[..PTR_BYTES].try_into().unwrap())
-        }
+        Some(v) if v.len() >= PTR_BYTES => usize::from_ne_bytes(v[..PTR_BYTES].try_into().unwrap()),
         _ => 0,
     }
 }
@@ -222,7 +220,7 @@ unsafe fn cdict_ref(cctx: &Lz4FCCtx) -> *const Lz4FCDict {
 /// `ctx_ptr` must be a valid, exclusively accessible pointer to the inner
 /// stream; `cdict` (if non-null) must outlive this call.
 unsafe fn lz4f_init_stream(
-    ctx_ptr: usize,        // raw pointer to Lz4Stream or Lz4StreamHc
+    ctx_ptr: usize, // raw pointer to Lz4Stream or Lz4StreamHc
     cdict: *const Lz4FCDict,
     level: i32,
     block_mode: BlockMode,
@@ -305,7 +303,11 @@ unsafe fn lz4f_make_block(
     // If compressed output >= srcSize, we fall back to uncompressed storage.
     // Mirrors: compress(lz4ctx, src, cSizePtr+BHSize, srcSize, srcSize-1, level, cdict)
     let compress_dst: *mut u8 = dst.as_mut_ptr().add(BH_SIZE);
-    let compress_cap: i32 = if src_size > 0 { (src_size - 1) as i32 } else { 0 };
+    let compress_cap: i32 = if src_size > 0 {
+        (src_size - 1) as i32
+    } else {
+        0
+    };
 
     // Attempt compression — returns 0 when not compressible or on error.
     let c_size: usize = match mode {
@@ -343,7 +345,9 @@ unsafe fn lz4f_make_block(
             let stream = &mut *(ctx_ptr as *mut Lz4Stream);
             let dst_slice =
                 core::slice::from_raw_parts_mut(compress_dst, src_size.saturating_sub(1));
-            stream.compress_fast_continue(src, dst_slice, accel(level)).max(0) as usize
+            stream
+                .compress_fast_continue(src, dst_slice, accel(level))
+                .max(0) as usize
         }
 
         CompressMode::HcIndependent => {
@@ -351,7 +355,13 @@ unsafe fn lz4f_make_block(
             lz4f_init_stream(ctx_ptr, cdict, level, BlockMode::Independent);
             let stream = &mut *(ctx_ptr as *mut Lz4StreamHc);
             let result: i32 = if !cdict.is_null() {
-                compress_hc_continue(stream, src.as_ptr(), compress_dst, src_size as i32, compress_cap)
+                compress_hc_continue(
+                    stream,
+                    src.as_ptr(),
+                    compress_dst,
+                    src_size as i32,
+                    compress_cap,
+                )
             } else {
                 compress_hc_ext_state_fast_reset(
                     stream,
@@ -368,8 +378,14 @@ unsafe fn lz4f_make_block(
         CompressMode::HcLinked => {
             // HC linked: stream was initialised once at frame start; just continue.
             let stream = &mut *(ctx_ptr as *mut Lz4StreamHc);
-            compress_hc_continue(stream, src.as_ptr(), compress_dst, src_size as i32, compress_cap)
-                .max(0) as usize
+            compress_hc_continue(
+                stream,
+                src.as_ptr(),
+                compress_dst,
+                src_size as i32,
+                compress_cap,
+            )
+            .max(0) as usize
         }
     };
 
@@ -378,7 +394,11 @@ unsafe fn lz4f_make_block(
     if c_size == 0 || c_size >= src_size {
         // Not compressible — store raw
         final_c_size = src_size;
-        write_le32(dst, 0, final_c_size as u32 | crate::frame::types::LZ4F_BLOCKUNCOMPRESSED_FLAG);
+        write_le32(
+            dst,
+            0,
+            final_c_size as u32 | crate::frame::types::LZ4F_BLOCKUNCOMPRESSED_FLAG,
+        );
         dst[BH_SIZE..BH_SIZE + src_size].copy_from_slice(src);
     } else {
         final_c_size = c_size;
@@ -454,9 +474,7 @@ impl Drop for Lz4FCCtx {
 /// Mirrors `LZ4F_createCompressionContext` (lz4frame.c:617–627).
 ///
 /// Returns `Err(Lz4FError::AllocationFailed)` if `version != LZ4F_VERSION`.
-pub fn lz4f_create_compression_context(
-    version: u32,
-) -> Result<Box<Lz4FCCtx>, Lz4FError> {
+pub fn lz4f_create_compression_context(version: u32) -> Result<Box<Lz4FCCtx>, Lz4FError> {
     if version != LZ4F_VERSION {
         return Err(Lz4FError::AllocationFailed);
     }
@@ -521,7 +539,11 @@ pub fn lz4f_compress_begin_internal(
         };
         write_inner_ptr(cctx, raw_ptr);
         cctx.lz4_ctx_alloc = ctx_type_id;
-        cctx.lz4_ctx_type = if ctx_type_id == 1 { CtxType::Fast } else { CtxType::Hc };
+        cctx.lz4_ctx_type = if ctx_type_id == 1 {
+            CtxType::Fast
+        } else {
+            CtxType::Hc
+        };
     } else if cctx.lz4_ctx_type as u16 != ctx_type_id {
         // Already have enough space, just re-initialise to the correct type.
         let ptr = read_inner_ptr(cctx);
@@ -539,15 +561,18 @@ pub fn lz4f_compress_begin_internal(
                 set_hc_level(stream, cctx.prefs.compression_level);
             }
         }
-        cctx.lz4_ctx_type = if ctx_type_id == 1 { CtxType::Fast } else { CtxType::Hc };
+        cctx.lz4_ctx_type = if ctx_type_id == 1 {
+            CtxType::Fast
+        } else {
+            CtxType::Hc
+        };
     }
 
     // ── Buffer management ─────────────────────────────────────────────────────
     if cctx.prefs.frame_info.block_size_id == BlockSizeId::Default {
         cctx.prefs.frame_info.block_size_id = BlockSizeId::Max64Kb;
     }
-    cctx.max_block_size =
-        lz4f_get_block_size(cctx.prefs.frame_info.block_size_id).unwrap_or(KB64);
+    cctx.max_block_size = lz4f_get_block_size(cctx.prefs.frame_info.block_size_id).unwrap_or(KB64);
 
     let required_buff_size: usize = if prefs_val.auto_flush {
         if cctx.prefs.frame_info.block_mode == BlockMode::Linked {
@@ -580,7 +605,12 @@ pub fn lz4f_compress_begin_internal(
     if cctx.prefs.frame_info.block_mode == BlockMode::Linked {
         // Frame-level init for linked blocks only; independent blocks init per-block.
         unsafe {
-            lz4f_init_stream(ctx_ptr, cdict_raw, cctx.prefs.compression_level, BlockMode::Linked);
+            lz4f_init_stream(
+                ctx_ptr,
+                cdict_raw,
+                cctx.prefs.compression_level,
+                BlockMode::Linked,
+            );
         }
     }
     if cctx.prefs.compression_level >= LZ4HC_CLEVEL_MIN {
@@ -743,9 +773,7 @@ pub fn lz4f_compress_update_impl(
         return Err(Lz4FError::CompressionStateUninitialized);
     }
     // Capacity checks
-    if dst.len()
-        < lz4f_compress_bound_internal(src.len(), &cctx.prefs, cctx.tmp_in_size)
-    {
+    if dst.len() < lz4f_compress_bound_internal(src.len(), &cctx.prefs, cctx.tmp_in_size) {
         return Err(Lz4FError::DstMaxSizeTooSmall);
     }
     if block_compression == BlockCompressMode::Uncompressed && dst.len() < src.len() {
@@ -796,10 +824,8 @@ pub fn lz4f_compress_update_impl(
             // SAFETY: inner ctx is valid; tmp_buf and dst are separate allocations.
             let written = unsafe {
                 // Build a temporary slice view of the staging block.
-                let src_slice = core::slice::from_raw_parts(
-                    cctx.tmp_buf.as_ptr().add(tmp_in_off),
-                    block_size,
-                );
+                let src_slice =
+                    core::slice::from_raw_parts(cctx.tmp_buf.as_ptr().add(tmp_in_off), block_size);
                 lz4f_make_block(
                     &mut dst[dst_pos..],
                     src_slice,
@@ -1069,8 +1095,7 @@ pub fn lz4f_compress_frame_using_cdict(
 
     // Write header
     let cdict_opt = if cdict.is_null() { None } else { Some(cdict) };
-    let header_size =
-        lz4f_compress_begin_internal(cctx, dst, None, cdict_opt, Some(&local_prefs))?;
+    let header_size = lz4f_compress_begin_internal(cctx, dst, None, cdict_opt, Some(&local_prefs))?;
     let mut pos = header_size;
 
     // Compress
@@ -1149,7 +1174,10 @@ mod tests {
         let frame_bound = lz4f_compress_frame_bound(src.len(), None);
         let mut dst = vec![0u8; frame_bound];
         let written = lz4f_compress_frame(&mut dst, &src, None).expect("compress_frame");
-        assert!(written > 4, "compressed output must contain more than magic");
+        assert!(
+            written > 4,
+            "compressed output must contain more than magic"
+        );
     }
 
     /// compress_frame on empty input produces a minimal valid frame.
@@ -1220,9 +1248,8 @@ mod tests {
         // Feed in 1 KB chunks
         for chunk in src.chunks(1024) {
             let opts = CompressOptions { stable_src: false };
-            pos +=
-                lz4f_compress_update(&mut cctx, &mut out[pos..], chunk, Some(&opts))
-                    .expect("update");
+            pos += lz4f_compress_update(&mut cctx, &mut out[pos..], chunk, Some(&opts))
+                .expect("update");
         }
 
         pos += lz4f_compress_end(&mut cctx, &mut out[pos..], None).expect("end");
@@ -1230,7 +1257,10 @@ mod tests {
         // Frame must start with magic and have written some data.
         assert!(pos > 0, "streaming must produce output");
         let magic = u32::from_le_bytes(out[..4].try_into().unwrap());
-        assert_eq!(magic, LZ4F_MAGIC_NUMBER, "streaming frame must start with magic");
+        assert_eq!(
+            magic, LZ4F_MAGIC_NUMBER,
+            "streaming frame must start with magic"
+        );
     }
 
     /// Streaming with stable_src produces byte-identical output to one-shot.
@@ -1264,8 +1294,7 @@ mod tests {
         let mut streaming = vec![0u8; frame_bound];
         let mut pos = 0;
         let opts = CompressOptions { stable_src: true };
-        pos +=
-            lz4f_compress_begin(&mut cctx, &mut streaming[pos..], Some(&prefs)).expect("begin");
+        pos += lz4f_compress_begin(&mut cctx, &mut streaming[pos..], Some(&prefs)).expect("begin");
         pos += lz4f_compress_update(&mut cctx, &mut streaming[pos..], &src, Some(&opts))
             .expect("update");
         pos += lz4f_compress_end(&mut cctx, &mut streaming[pos..], Some(&opts)).expect("end");
@@ -1337,7 +1366,11 @@ mod tests {
     #[test]
     fn select_compress_mode_hc_linked() {
         assert_eq!(
-            select_compress_mode(BlockMode::Linked, LZ4HC_CLEVEL_MIN, BlockCompressMode::Compressed),
+            select_compress_mode(
+                BlockMode::Linked,
+                LZ4HC_CLEVEL_MIN,
+                BlockCompressMode::Compressed
+            ),
             CompressMode::HcLinked
         );
     }

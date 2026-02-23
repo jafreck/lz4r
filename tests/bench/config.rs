@@ -7,9 +7,8 @@
 //   - All BMK_set* setter functions update the corresponding field and return &mut Self
 
 use lz4::bench::config::{
-    BenchConfig, NBSECONDS, TIMELOOP_MICROSEC, TIMELOOP_NANOSEC,
-    ACTIVEPERIOD_NANOSEC, COOLPERIOD_SEC, DECOMP_MULT, KB, MB, GB,
-    LZ4_MAX_DICT_SIZE, MAX_MEMORY,
+    BenchConfig, ACTIVEPERIOD_NANOSEC, COOLPERIOD_SEC, DECOMP_MULT, GB, KB, LZ4_MAX_DICT_SIZE,
+    MAX_MEMORY, MB, NBSECONDS, TIMELOOP_MICROSEC, TIMELOOP_NANOSEC,
 };
 
 // ── Timing constant parity (bench.c lines 68–72) ─────────────────────────────

@@ -179,10 +179,7 @@ fn sequence_price_monotone_in_litlen() {
     let mut prev = sequence_price(0, mlen);
     for litlen in 1..200 {
         let cur = sequence_price(litlen, mlen);
-        assert!(
-            cur >= prev,
-            "sequence_price({litlen}, {mlen}) not monotone"
-        );
+        assert!(cur >= prev, "sequence_price({litlen}, {mlen}) not monotone");
         prev = cur;
     }
 }
@@ -202,7 +199,12 @@ fn lz4hc_optimal_default_all_zero() {
 
 #[test]
 fn lz4hc_optimal_clone_copy() {
-    let a = Lz4HcOptimal { price: 10, off: 5, mlen: 4, litlen: 3 };
+    let a = Lz4HcOptimal {
+        price: 10,
+        off: 5,
+        mlen: 4,
+        litlen: 3,
+    };
     let b = a; // Copy
     let c = a.clone(); // Clone
     assert_eq!(b.price, 10);
@@ -233,7 +235,7 @@ fn compress_hash_chain_tiny_input_all_literals() {
             output.as_mut_ptr(),
             &mut src_size,
             output.len() as i32,
-            4,   // max_nb_attempts (level 3 = 4)
+            4, // max_nb_attempts (level 3 = 4)
             LimitedOutputDirective::NotLimited,
             DictCtxDirective::NoDictCtx,
         );
@@ -301,7 +303,7 @@ fn compress_hash_chain_repeated_data_compresses() {
             output.as_mut_ptr(),
             &mut src_size,
             output.len() as i32,
-            8,   // max_nb_attempts
+            8, // max_nb_attempts
             LimitedOutputDirective::NotLimited,
             DictCtxDirective::NoDictCtx,
         );
@@ -388,10 +390,10 @@ fn compress_optimal_tiny_input_all_literals() {
             output.as_mut_ptr(),
             &mut src_size,
             output.len() as i32,
-            16,              // nb_searches
-            64,              // sufficient_len
+            16, // nb_searches
+            64, // sufficient_len
             LimitedOutputDirective::NotLimited,
-            true,            // full_update
+            true, // full_update
             DictCtxDirective::NoDictCtx,
             HcFavor::CompressionRatio,
         );
@@ -493,7 +495,10 @@ fn compress_optimal_favor_decompression_speed() {
         );
 
         assert!(n > 0, "expected compression to succeed");
-        assert!((n as usize) < input.len(), "expected output smaller than input");
+        assert!(
+            (n as usize) < input.len(),
+            "expected output smaller than input"
+        );
     }
 }
 
@@ -520,13 +525,17 @@ fn find_longer_match_no_match_on_unique_data() {
             ip,
             i_high,
             MINMATCH as i32 - 1, // min_len
-            4,                    // nb_searches
+            4,                   // nb_searches
             DictCtxDirective::NoDictCtx,
             HcFavor::CompressionRatio,
         );
 
         // No match found → len == 0
-        assert_eq!(m.len, 0, "expected no match on unique data, got len={}", m.len);
+        assert_eq!(
+            m.len, 0,
+            "expected no match on unique data, got len={}",
+            m.len
+        );
         let _ = &mut output_buf; // suppress unused warning
     }
 }

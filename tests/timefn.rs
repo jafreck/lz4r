@@ -7,7 +7,10 @@
 // - wait_for_next_tick() ≡ TIME_waitForNextTick()
 // - support_mt_measurements() ≡ TIME_support_MT_measurements() (always 1/true in Rust)
 
-use lz4::timefn::{clock_span_ns, get_time, span_ns, support_mt_measurements, wait_for_next_tick, DurationNs, TimeT};
+use lz4::timefn::{
+    clock_span_ns, get_time, span_ns, support_mt_measurements, wait_for_next_tick, DurationNs,
+    TimeT,
+};
 use std::thread;
 use std::time::Duration;
 
@@ -41,7 +44,7 @@ fn time_t_default_does_not_panic() {
 fn time_t_is_copy() {
     let t = get_time();
     let t2 = t; // Copy, not move
-    let _ = t;  // Original still usable
+    let _ = t; // Original still usable
     let _ = t2;
 }
 
@@ -90,7 +93,11 @@ fn span_ns_later_end_is_positive() {
     thread::sleep(Duration::from_millis(5));
     let end = get_time();
     let ns = span_ns(start, end);
-    assert!(ns > 0, "span_ns over a real sleep must be positive, got {}", ns);
+    assert!(
+        ns > 0,
+        "span_ns over a real sleep must be positive, got {}",
+        ns
+    );
 }
 
 /// span_ns result over a 5 ms sleep should be at least 1_000_000 ns (1 ms) —
@@ -173,9 +180,7 @@ fn clock_span_ns_consistent_with_span_ns() {
 fn wait_for_next_tick_terminates() {
     let handle = thread::spawn(wait_for_next_tick);
     // Give it up to 5 seconds; any real monotonic clock will advance far sooner.
-    handle
-        .join()
-        .expect("wait_for_next_tick should not panic");
+    handle.join().expect("wait_for_next_tick should not panic");
 }
 
 /// After wait_for_next_tick() returns, at least 1 ns should have elapsed

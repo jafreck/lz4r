@@ -9,7 +9,7 @@
 //   - decompress_frame_block returns Err on invalid input
 //   - skip_checksums flag is accepted and does not panic or error
 
-use lz4::bench::decompress_binding::{DecFunctionF, FrameDecompressor, decompress_frame_block};
+use lz4::bench::decompress_binding::{decompress_frame_block, DecFunctionF, FrameDecompressor};
 use std::io;
 
 // ── Helper ──────────────────────────────────────────────────────────────────────────────────
@@ -52,7 +52,11 @@ fn decompress_short_string_round_trip() {
     let mut dst = Vec::new();
     let n = decompress_frame_block(&mut dec, &frame, &mut dst, usize::MAX, false).unwrap();
 
-    assert_eq!(n, original.len(), "returned byte count must match decompressed length");
+    assert_eq!(
+        n,
+        original.len(),
+        "returned byte count must match decompressed length"
+    );
     assert_eq!(dst, original, "decompressed data must match original");
 }
 
@@ -124,7 +128,11 @@ fn returned_count_equals_bytes_appended() {
     let mut dst = Vec::new();
     let n = decompress_frame_block(&mut dec, &frame, &mut dst, usize::MAX, false).unwrap();
 
-    assert_eq!(n, dst.len(), "returned count must equal dst.len() when dst starts empty");
+    assert_eq!(
+        n,
+        dst.len(),
+        "returned count must equal dst.len() when dst starts empty"
+    );
 }
 
 // ── Appending to existing dst ─────────────────────────────────────────────────
@@ -141,9 +149,21 @@ fn decompress_appends_to_existing_dst() {
     let mut dst = prefix.to_vec();
     let n = decompress_frame_block(&mut dec, &frame, &mut dst, usize::MAX, false).unwrap();
 
-    assert_eq!(n, original.len(), "returned count must be the newly decompressed bytes only");
-    assert_eq!(&dst[..prefix.len()], prefix.as_ref(), "prefix must be preserved");
-    assert_eq!(&dst[prefix.len()..], original.as_ref(), "new bytes must follow prefix");
+    assert_eq!(
+        n,
+        original.len(),
+        "returned count must be the newly decompressed bytes only"
+    );
+    assert_eq!(
+        &dst[..prefix.len()],
+        prefix.as_ref(),
+        "prefix must be preserved"
+    );
+    assert_eq!(
+        &dst[prefix.len()..],
+        original.as_ref(),
+        "new bytes must follow prefix"
+    );
 }
 
 #[test]
@@ -167,7 +187,8 @@ fn invalid_frame_returns_error() {
     // C: LZ4F_decompress returned -1 on error; Rust must return io::Error.
     let mut dec = FrameDecompressor::new();
     let mut dst = Vec::new();
-    let result = decompress_frame_block(&mut dec, b"not valid lz4 data", &mut dst, usize::MAX, false);
+    let result =
+        decompress_frame_block(&mut dec, b"not valid lz4 data", &mut dst, usize::MAX, false);
     assert!(result.is_err(), "invalid input must return Err");
 }
 
@@ -216,7 +237,10 @@ fn skip_checksums_true_is_accepted_and_succeeds() {
     let mut dec = FrameDecompressor::new();
     let mut dst = Vec::new();
     let result = decompress_frame_block(&mut dec, &frame, &mut dst, usize::MAX, true);
-    assert!(result.is_ok(), "skip_checksums=true must not cause an error");
+    assert!(
+        result.is_ok(),
+        "skip_checksums=true must not cause an error"
+    );
 }
 
 #[test]
@@ -258,7 +282,9 @@ fn dec_function_f_stored_in_struct_field() {
     struct Holder {
         func: DecFunctionF,
     }
-    let holder = Holder { func: decompress_frame_block };
+    let holder = Holder {
+        func: decompress_frame_block,
+    };
 
     let frame = compress_frame(b"struct field test");
     let mut dec = FrameDecompressor::new();

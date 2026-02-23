@@ -8,7 +8,7 @@
 //! Corresponds to `LZ4HC_encodeSequence` in `lz4hc.c` (v1.10.0, lines 262–355).
 
 use crate::block::types::{
-    wild_copy8, write_le16, LimitedOutputDirective, LZ4_DISTANCE_MAX, LASTLITERALS, MINMATCH,
+    wild_copy8, write_le16, LimitedOutputDirective, LASTLITERALS, LZ4_DISTANCE_MAX, MINMATCH,
     ML_BITS, ML_MASK, RUN_MASK,
 };
 

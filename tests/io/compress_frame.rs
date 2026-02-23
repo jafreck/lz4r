@@ -38,8 +38,8 @@
 //   - compress_frame_chunk_empty_src: returns 0 bytes for empty input
 
 use lz4::io::compress_frame::{
-    compress_filename, compress_filename_ext, compress_multiple_filenames,
-    compress_frame_chunk, CfcParameters, CompressResources, CompressStats,
+    compress_filename, compress_filename_ext, compress_frame_chunk, compress_multiple_filenames,
+    CfcParameters, CompressResources, CompressStats,
 };
 use lz4::io::prefs::Prefs;
 
@@ -63,8 +63,7 @@ fn round_trip(src: &[u8], compression_level: i32) -> Vec<u8> {
     .expect("compress_filename must succeed");
 
     let compressed = std::fs::read(&dst_path).unwrap();
-    lz4::frame::decompress_frame_to_vec(&compressed)
-        .expect("decompression must succeed")
+    lz4::frame::decompress_frame_to_vec(&compressed).expect("decompression must succeed")
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -82,7 +81,10 @@ fn compress_stats_default_is_zero() {
 /// CompressStats fields bytes_in and bytes_out are independently addressable.
 #[test]
 fn compress_stats_fields_accessible() {
-    let s = CompressStats { bytes_in: 1234, bytes_out: 567 };
+    let s = CompressStats {
+        bytes_in: 1234,
+        bytes_out: 567,
+    };
     assert_eq!(s.bytes_in, 1234);
     assert_eq!(s.bytes_out, 567);
 }
@@ -90,8 +92,11 @@ fn compress_stats_fields_accessible() {
 /// CompressStats must implement Clone and Copy.
 #[test]
 fn compress_stats_clone_copy() {
-    let s = CompressStats { bytes_in: 10, bytes_out: 5 };
-    let s2 = s;         // Copy
+    let s = CompressStats {
+        bytes_in: 10,
+        bytes_out: 5,
+    };
+    let s2 = s; // Copy
     let s3 = s.clone(); // Clone
     assert_eq!(s2.bytes_in, 10);
     assert_eq!(s3.bytes_out, 5);
@@ -126,7 +131,10 @@ fn compress_resources_new_with_dict_creates_cdict() {
     prefs.dictionary_filename = Some(dict_path.to_str().unwrap().to_owned());
 
     let ress = CompressResources::new(&prefs).expect("new() with dict must succeed");
-    assert!(ress.cdict.is_some(), "cdict must be Some when dictionary is configured");
+    assert!(
+        ress.cdict.is_some(),
+        "cdict must be Some when dictionary is configured"
+    );
 }
 
 /// new() with use_dictionary=true but missing file returns Err.
@@ -137,7 +145,10 @@ fn compress_resources_new_bad_dict_returns_err() {
     prefs.dictionary_filename = Some("/nonexistent/path/to/dict.bin".to_owned());
 
     let result = CompressResources::new(&prefs);
-    assert!(result.is_err(), "must fail when dictionary file does not exist");
+    assert!(
+        result.is_err(),
+        "must fail when dictionary file does not exist"
+    );
 }
 
 /// cdict_ptr() returns null when no dictionary is set.
@@ -145,7 +156,10 @@ fn compress_resources_new_bad_dict_returns_err() {
 fn compress_resources_cdict_ptr_is_null_without_dict() {
     let prefs = Prefs::default();
     let ress = CompressResources::new(&prefs).unwrap();
-    assert!(ress.cdict_ptr().is_null(), "cdict_ptr must be null when cdict is None");
+    assert!(
+        ress.cdict_ptr().is_null(),
+        "cdict_ptr must be null when cdict is None"
+    );
 }
 
 /// cdict_ptr() returns a non-null pointer when a dictionary is set.
@@ -160,7 +174,10 @@ fn compress_resources_cdict_ptr_nonnull_with_dict() {
     prefs.dictionary_filename = Some(dict_path.to_str().unwrap().to_owned());
 
     let ress = CompressResources::new(&prefs).unwrap();
-    assert!(!ress.cdict_ptr().is_null(), "cdict_ptr must be non-null when cdict is Some");
+    assert!(
+        !ress.cdict_ptr().is_null(),
+        "cdict_ptr must be non-null when cdict is Some"
+    );
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -181,7 +198,11 @@ fn compress_filename_output_starts_with_lz4_magic() {
 
     let out = std::fs::read(&dst).unwrap();
     assert!(out.len() >= 4, "output too short");
-    assert_eq!(&out[..4], &[0x04, 0x22, 0x4D, 0x18], "LZ4 frame magic mismatch");
+    assert_eq!(
+        &out[..4],
+        &[0x04, 0x22, 0x4D, 0x18],
+        "LZ4 frame magic mismatch"
+    );
 }
 
 /// Small file: single-block path; round-trip recovers original.
@@ -215,7 +236,11 @@ fn compress_filename_empty_source_produces_valid_frame() {
 
     let out = std::fs::read(&dst).unwrap();
     assert!(out.len() >= 4, "must have at least 4-byte magic");
-    assert_eq!(&out[..4], &[0x04, 0x22, 0x4D, 0x18], "LZ4 frame magic mismatch");
+    assert_eq!(
+        &out[..4],
+        &[0x04, 0x22, 0x4D, 0x18],
+        "LZ4 frame magic mismatch"
+    );
 }
 
 /// Nonexistent source file → Err.
@@ -224,7 +249,12 @@ fn compress_filename_nonexistent_src_returns_err() {
     let dir = tempfile::tempdir().unwrap();
     let dst = dir.path().join("out.lz4");
     let prefs = Prefs::default();
-    let result = compress_filename("/nonexistent/__lz4test_missing__.bin", dst.to_str().unwrap(), 1, &prefs);
+    let result = compress_filename(
+        "/nonexistent/__lz4test_missing__.bin",
+        dst.to_str().unwrap(),
+        1,
+        &prefs,
+    );
     assert!(result.is_err(), "expected Err for nonexistent source");
 }
 
@@ -370,8 +400,8 @@ fn compress_filename_ext_nonexistent_src_returns_err() {
 #[test]
 fn compress_multiple_filenames_empty_list_returns_zero_missed() {
     let prefs = Prefs::default();
-    let missed = compress_multiple_filenames(&[], ".lz4", 1, &prefs)
-        .expect("empty list must return Ok");
+    let missed =
+        compress_multiple_filenames(&[], ".lz4", 1, &prefs).expect("empty list must return Ok");
     assert_eq!(missed, 0);
 }
 
@@ -394,8 +424,14 @@ fn compress_multiple_filenames_all_files_created_with_suffix() {
     .expect("must succeed");
 
     assert_eq!(missed, 0, "no files should be missed");
-    assert!(dir.path().join("a.txt.lz4").exists(), "a.txt.lz4 must exist");
-    assert!(dir.path().join("b.txt.lz4").exists(), "b.txt.lz4 must exist");
+    assert!(
+        dir.path().join("a.txt.lz4").exists(),
+        "a.txt.lz4 must exist"
+    );
+    assert!(
+        dir.path().join("b.txt.lz4").exists(),
+        "b.txt.lz4 must exist"
+    );
 }
 
 /// Custom suffix is appended to each source filename.
@@ -419,13 +455,9 @@ fn compress_multiple_filenames_custom_suffix_applied() {
 #[test]
 fn compress_multiple_filenames_missing_file_increments_missed() {
     let prefs = Prefs::default();
-    let missed = compress_multiple_filenames(
-        &["/nonexistent/__lz4_missing__.bin"],
-        ".lz4",
-        1,
-        &prefs,
-    )
-    .expect("should return Ok even when files are missing");
+    let missed =
+        compress_multiple_filenames(&["/nonexistent/__lz4_missing__.bin"], ".lz4", 1, &prefs)
+            .expect("should return Ok even when files are missing");
     assert_eq!(missed, 1, "one file must be missed");
 }
 
@@ -459,7 +491,10 @@ fn compress_multiple_filenames_mixed_good_and_bad() {
     )
     .expect("must return Ok");
     assert_eq!(missed, 1);
-    assert!(dir.path().join("good.bin.lz4").exists(), "good.bin.lz4 must exist");
+    assert!(
+        dir.path().join("good.bin.lz4").exists(),
+        "good.bin.lz4 must exist"
+    );
 }
 
 /// Output files produced by compress_multiple_filenames are valid LZ4 frames.
@@ -475,7 +510,11 @@ fn compress_multiple_filenames_outputs_are_valid_lz4_frames() {
     assert_eq!(missed, 0);
 
     let out = std::fs::read(dir.path().join("data.bin.lz4")).unwrap();
-    assert_eq!(&out[..4], &[0x04, 0x22, 0x4D, 0x18], "LZ4 frame magic mismatch");
+    assert_eq!(
+        &out[..4],
+        &[0x04, 0x22, 0x4D, 0x18],
+        "LZ4 frame magic mismatch"
+    );
 
     let decompressed = lz4::frame::decompress_frame_to_vec(&out).unwrap();
     assert_eq!(decompressed.as_slice(), content.as_slice());
@@ -497,7 +536,10 @@ fn compress_frame_chunk_basic_returns_nonzero() {
     let ress = CompressResources::new(&prefs).unwrap();
     let prefs_val: Preferences = ress.prepared_prefs;
 
-    let params = CfcParameters { prefs: &prefs_val, cdict: std::ptr::null() };
+    let params = CfcParameters {
+        prefs: &prefs_val,
+        cdict: std::ptr::null(),
+    };
 
     let src: Vec<u8> = b"abcdefghij".iter().cycle().take(4096).copied().collect();
     let mut dst = vec![0u8; lz4f_compress_frame_bound(src.len(), Some(&prefs_val))];
@@ -517,10 +559,23 @@ fn compress_frame_chunk_with_prefix_returns_output() {
     let ress = CompressResources::new(&prefs).unwrap();
     let prefs_val = ress.prepared_prefs;
 
-    let params = CfcParameters { prefs: &prefs_val, cdict: std::ptr::null() };
+    let params = CfcParameters {
+        prefs: &prefs_val,
+        cdict: std::ptr::null(),
+    };
 
-    let prefix: Vec<u8> = b"prefix dictionary data".iter().cycle().take(1024).copied().collect();
-    let src: Vec<u8> = b"source data to compress with prefix".iter().cycle().take(512).copied().collect();
+    let prefix: Vec<u8> = b"prefix dictionary data"
+        .iter()
+        .cycle()
+        .take(1024)
+        .copied()
+        .collect();
+    let src: Vec<u8> = b"source data to compress with prefix"
+        .iter()
+        .cycle()
+        .take(512)
+        .copied()
+        .collect();
     let mut dst = vec![0u8; lz4f_compress_frame_bound(src.len(), Some(&prefs_val))];
 
     let c_size = compress_frame_chunk(&params, &mut dst, &src, Some(&prefix))
@@ -537,7 +592,10 @@ fn compress_frame_chunk_empty_src_returns_zero() {
     let ress = CompressResources::new(&prefs).unwrap();
     let prefs_val = ress.prepared_prefs;
 
-    let params = CfcParameters { prefs: &prefs_val, cdict: std::ptr::null() };
+    let params = CfcParameters {
+        prefs: &prefs_val,
+        cdict: std::ptr::null(),
+    };
 
     let src: &[u8] = &[];
     let mut dst = vec![0u8; lz4f_compress_frame_bound(0, Some(&prefs_val)).max(256)];

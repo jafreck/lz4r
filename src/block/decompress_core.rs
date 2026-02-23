@@ -17,9 +17,8 @@
 use core::ptr;
 
 use super::types::{
-    read_le16, wild_copy8, write32, DictDirective, DEC64TABLE, INC32TABLE,
-    LASTLITERALS, MATCH_SAFEGUARD_DISTANCE, MFLIMIT, MINMATCH, ML_BITS, ML_MASK, RUN_MASK,
-    WILDCOPYLENGTH,
+    read_le16, wild_copy8, write32, DictDirective, DEC64TABLE, INC32TABLE, LASTLITERALS,
+    MATCH_SAFEGUARD_DISTANCE, MFLIMIT, MINMATCH, ML_BITS, ML_MASK, RUN_MASK, WILDCOPYLENGTH,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -68,7 +67,11 @@ const RVL_ERROR: usize = usize::MAX;
 /// `ip` must point into the same allocation as `ilimit`.
 /// All bytes in `[ip, ilimit]` must be readable.
 #[inline(always)]
-unsafe fn read_variable_length(ip: &mut *const u8, ilimit: *const u8, initial_check: bool) -> usize {
+unsafe fn read_variable_length(
+    ip: &mut *const u8,
+    ilimit: *const u8,
+    initial_check: bool,
+) -> usize {
     let mut s: usize;
     let mut length: usize = 0;
 
@@ -196,8 +199,16 @@ pub unsafe fn decompress_generic(
     // have enough remaining space for the two-stage fast-path copy.
     // shortiend = iend - 14 (maxLL) - 2 (offset field)
     // shortoend = oend - 14 (maxLL) - 18 (maxML)
-    let short_iend: *const u8 = if src_size >= 16 { iend.sub(14).sub(2) } else { src };
-    let short_oend: *mut u8 = if output_size >= 32 { oend.sub(14).sub(18) } else { dst };
+    let short_iend: *const u8 = if src_size >= 16 {
+        iend.sub(14).sub(2)
+    } else {
+        src
+    };
+    let short_oend: *mut u8 = if output_size >= 32 {
+        oend.sub(14).sub(18)
+    } else {
+        dst
+    };
 
     // ── Special cases ─────────────────────────────────────────────────────────
     // Equivalent to C assert(lowPrefix <= op).
@@ -208,7 +219,11 @@ pub unsafe fn decompress_generic(
             return Ok(0);
         }
         // Empty dst is only valid when the compressed block is a single 0-token.
-        return if src_size == 1 && *src == 0 { Ok(0) } else { output_error() };
+        return if src_size == 1 && *src == 0 {
+            Ok(0)
+        } else {
+            output_error()
+        };
     }
     if src_size == 0 {
         return output_error();
@@ -320,8 +335,7 @@ pub unsafe fn decompress_generic(
             // Check whether we are at the last sequence or near the buffer ends.
             // C: (cpy > oend-MFLIMIT) || (ip+length > iend-(2+1+LASTLITERALS))
             let near_out_end = cpy > oend.sub(MFLIMIT);
-            let near_in_end = ip.add(lit_length)
-                > iend.sub(2 + 1 + LASTLITERALS);
+            let near_in_end = ip.add(lit_length) > iend.sub(2 + 1 + LASTLITERALS);
 
             if near_out_end || near_in_end {
                 // Slow / last-sequence path.
@@ -424,9 +438,7 @@ pub unsafe fn decompress_generic(
         //
         // SAFETY: this is a pointer-arithmetic comparison; wrapping is intentional
         // (a bogus match_ptr far before the buffer will wrap and be < low_prefix).
-        if check_offset
-            && (match_ptr as usize).wrapping_add(dict_size) < low_prefix as usize
-        {
+        if check_offset && (match_ptr as usize).wrapping_add(dict_size) < low_prefix as usize {
             return output_error();
         }
 

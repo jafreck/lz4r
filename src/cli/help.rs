@@ -75,7 +75,12 @@ pub fn print_usage_advanced(program: &str) {
     let bits = (std::mem::size_of::<*const ()>() * 8) as u32;
     let mt = crate::cli::constants::IO_MT;
     let ver_num = crate::LZ4_VERSION_NUMBER;
-    let ver_str = format!("{}.{}.{}", ver_num / 10000, (ver_num / 100) % 100, ver_num % 100);
+    let ver_str = format!(
+        "{}.{}.{}",
+        ver_num / 10000,
+        (ver_num / 100) % 100,
+        ver_num % 100
+    );
     eprintln!(
         "*** {} v{} {}-bit {}, by {} ***",
         crate::cli::constants::COMPRESSOR_NAME,
@@ -113,7 +118,10 @@ pub fn print_usage_advanced(program: &str) {
     eprintln!("--list FILE : lists information about .lz4 files (useful for files compressed with --content-size flag)");
     eprintln!("--[no-]sparse  : sparse mode (default:enabled on file, disabled on stdout)");
     eprintln!("--favor-decSpeed: compressed files decompress faster, but are less compressed ");
-    eprintln!("--fast[=#]: switch to ultra fast compression level (default: {})", 1);
+    eprintln!(
+        "--fast[=#]: switch to ultra fast compression level (default: {})",
+        1
+    );
     eprintln!("--best  : same as -{}", LZ4HC_CLEVEL_MAX);
     eprintln!("Benchmark arguments : ");
     eprintln!(" -b#    : benchmark file(s), using # compression level (default : 1) ");
@@ -150,10 +158,7 @@ pub fn print_long_help(program: &str) {
         "          '{}', or '-' for standard output (pipe mode)",
         STDOUTMARK
     );
-    eprintln!(
-        "          '{}' to discard output (test mode) ",
-        NULL_OUTPUT
-    );
+    eprintln!("          '{}' to discard output (test mode) ", NULL_OUTPUT);
     eprintln!("[output] can be left empty. In this case, it receives the following value :");
     eprintln!("          - if stdout is not the console, then [output] = stdout ");
     eprintln!("          - if stdout is console : ");
@@ -199,10 +204,7 @@ pub fn print_long_help(program: &str) {
     eprintln!("    is equivalent to :");
     eprintln!("          {} -9f filename ", program);
     eprintln!();
-    eprintln!(
-        "{} can be used in 'pure pipe mode'. For example :",
-        program
-    );
+    eprintln!("{} can be used in 'pure pipe mode'. For example :", program);
     eprintln!("-------------------------------------");
     eprintln!("3 : compress data stream from 'generator', send result to 'consumer'");
     eprintln!("          generator | {} | consumer ", program);

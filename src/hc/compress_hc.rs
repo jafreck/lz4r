@@ -27,13 +27,14 @@
 //! See `lz4hc.c` in the LZ4 reference implementation for the authoritative
 //! algorithm description.
 
-use crate::block::types::{
-    self as bt, LimitedOutputDirective, LZ4_DISTANCE_MAX, LASTLITERALS, MFLIMIT, MINMATCH, ML_MASK, RUN_MASK,
-};
 use super::encode::encode_sequence;
 use super::lz4mid::Match;
 use super::search::{insert_and_find_best_match, insert_and_get_wider_match, HcFavor};
 use super::types::{DictCtxDirective, HcCCtxInternal, LZ4_OPT_NUM, OPTIMAL_ML};
+use crate::block::types::{
+    self as bt, LimitedOutputDirective, LASTLITERALS, LZ4_DISTANCE_MAX, MFLIMIT, MINMATCH, ML_MASK,
+    RUN_MASK,
+};
 
 /// Minimum source size below which no matches are searched; all bytes are
 /// emitted as literals.  Equals `MFLIMIT + 1 = 13` per the LZ4 spec.
@@ -104,7 +105,11 @@ pub unsafe fn compress_hash_chain(
     let mut op: *mut u8 = dest;
     let mut oend: *mut u8 = op.add(max_output_size as usize);
 
-    let nomatch = Match { len: 0, off: 0, back: 0 };
+    let nomatch = Match {
+        len: 0,
+        off: 0,
+        back: 0,
+    };
 
     // Saved state across search iterations within one outer-loop pass
     let mut start0: *const u8 = core::ptr::null();
@@ -122,10 +127,10 @@ pub unsafe fn compress_hash_chain(
     *src_size_ptr = 0;
 
     if limit == LimitedOutputDirective::FillOutput {
-            // The LZ4 frame format requires LASTLITERALS bytes of headroom at
-            // the end; shorten the effective output limit so encode_sequence
-            // never writes into that reserved region.  The limit is restored
-            // before writing the final literal run.
+        // The LZ4 frame format requires LASTLITERALS bytes of headroom at
+        // the end; shorten the effective output limit so encode_sequence
+        // never writes into that reserved region.  The limit is restored
+        // before writing the final literal run.
     }
 
     // Short inputs carry no matches; jump straight to the final literal run.
@@ -133,7 +138,12 @@ pub unsafe fn compress_hash_chain(
         // ── Main compression loop ─────────────────────────────────────────
         'compress_loop: while ip <= mflimit {
             m1 = insert_and_find_best_match(
-                ctx, ip, matchlimit, max_nb_attempts, pattern_analysis, dict,
+                ctx,
+                ip,
+                matchlimit,
+                max_nb_attempts,
+                pattern_analysis,
+                dict,
             );
             if m1.len < MINMATCH as i32 {
                 ip = ip.add(1);
@@ -161,14 +171,14 @@ pub unsafe fn compress_hash_chain(
                         m2 = insert_and_get_wider_match(
                             ctx,
                             start2,
-                            ip,          // i_low_limit
+                            ip, // i_low_limit
                             matchlimit,
                             m1.len,
                             max_nb_attempts,
                             pattern_analysis,
-                            false,       // chain_swap = 0
+                            false, // chain_swap = 0
                             dict,
-                            false,       // favorCompressionRatio
+                            false, // favorCompressionRatio
                         );
                         start2 = start2.offset(m2.back as isize);
                     } else {
@@ -179,8 +189,13 @@ pub unsafe fn compress_hash_chain(
                         // No better match → encode m1 immediately.
                         optr = op;
                         if encode_sequence(
-                            &mut ip, &mut op, &mut anchor,
-                            m1.len, m1.off, limit, oend,
+                            &mut ip,
+                            &mut op,
+                            &mut anchor,
+                            m1.len,
+                            m1.off,
+                            limit,
+                            oend,
                         )
                         .is_err()
                         {
@@ -232,14 +247,14 @@ pub unsafe fn compress_hash_chain(
                     m3 = insert_and_get_wider_match(
                         ctx,
                         start3,
-                        start2,      // i_low_limit
+                        start2, // i_low_limit
                         matchlimit,
                         m2.len,
                         max_nb_attempts,
                         pattern_analysis,
-                        false,       // chain_swap = 0
+                        false, // chain_swap = 0
                         dict,
-                        false,       // favorCompressionRatio
+                        false, // favorCompressionRatio
                     );
                     start3 = start3.offset(m3.back as isize);
                 } else {
@@ -252,11 +267,8 @@ pub unsafe fn compress_hash_chain(
                         m1.len = start2.offset_from(ip) as i32;
                     }
                     optr = op;
-                    if encode_sequence(
-                        &mut ip, &mut op, &mut anchor,
-                        m1.len, m1.off, limit, oend,
-                    )
-                    .is_err()
+                    if encode_sequence(&mut ip, &mut op, &mut anchor, m1.len, m1.off, limit, oend)
+                        .is_err()
                     {
                         overflow_m1 = m1;
                         overflow_occurred = true;
@@ -264,13 +276,10 @@ pub unsafe fn compress_hash_chain(
                     }
                     ip = start2;
                     optr = op;
-                    if encode_sequence(
-                        &mut ip, &mut op, &mut anchor,
-                        m2.len, m2.off, limit, oend,
-                    )
-                    .is_err()
+                    if encode_sequence(&mut ip, &mut op, &mut anchor, m2.len, m2.off, limit, oend)
+                        .is_err()
                     {
-                            overflow_m1 = m2; // m1 was already advanced to m2 position
+                        overflow_m1 = m2; // m1 was already advanced to m2 position
                         overflow_occurred = true;
                         break 'compress_loop;
                     }
@@ -281,8 +290,7 @@ pub unsafe fn compress_hash_chain(
                     if start3 >= ip.add(m1.len as usize) {
                         // Can write Seq1 immediately: Seq2 removed, Seq3 becomes Seq1.
                         if start2 < ip.add(m1.len as usize) {
-                            let correction =
-                                (ip.add(m1.len as usize)).offset_from(start2) as i32;
+                            let correction = (ip.add(m1.len as usize)).offset_from(start2) as i32;
                             start2 = start2.add(correction as usize);
                             m2.len -= correction;
                             if m2.len < MINMATCH as i32 {
@@ -292,8 +300,13 @@ pub unsafe fn compress_hash_chain(
                         }
                         optr = op;
                         if encode_sequence(
-                            &mut ip, &mut op, &mut anchor,
-                            m1.len, m1.off, limit, oend,
+                            &mut ip,
+                            &mut op,
+                            &mut anchor,
+                            m1.len,
+                            m1.off,
+                            limit,
+                            oend,
                         )
                         .is_err()
                         {
@@ -321,8 +334,7 @@ pub unsafe fn compress_hash_chain(
                         if m1.len > OPTIMAL_ML {
                             m1.len = OPTIMAL_ML;
                         }
-                        let ml_limit =
-                            (start2.offset_from(ip) as i32) + m2.len - MINMATCH as i32;
+                        let ml_limit = (start2.offset_from(ip) as i32) + m2.len - MINMATCH as i32;
                         if m1.len > ml_limit {
                             m1.len = ml_limit;
                         }
@@ -336,11 +348,8 @@ pub unsafe fn compress_hash_chain(
                     }
                 }
                 optr = op;
-                if encode_sequence(
-                    &mut ip, &mut op, &mut anchor,
-                    m1.len, m1.off, limit, oend,
-                )
-                .is_err()
+                if encode_sequence(&mut ip, &mut op, &mut anchor, m1.len, m1.off, limit, oend)
+                    .is_err()
                 {
                     overflow_m1 = m1;
                     overflow_occurred = true;
@@ -371,26 +380,26 @@ pub unsafe fn compress_hash_chain(
 
                 op = optr; // restore correct out pointer
                 if op.add(ll_total_cost) <= max_lit_pos {
-                    let bytes_left_for_ml =
-                        max_lit_pos.offset_from(op.add(ll_total_cost)) as usize;
-                    let max_ml_size =
-                        MINMATCH + (ML_MASK as usize - 1) + bytes_left_for_ml * 255;
+                    let bytes_left_for_ml = max_lit_pos.offset_from(op.add(ll_total_cost)) as usize;
+                    let max_ml_size = MINMATCH + (ML_MASK as usize - 1) + bytes_left_for_ml * 255;
                     debug_assert!(m1.len >= 0);
                     if m1.len as usize > max_ml_size {
                         m1.len = max_ml_size as i32;
                     }
                     // (oend + LASTLITERALS) - (op + ll_total_cost + 2) - 1 + m1.len >= MFLIMIT
-                    let room = oend
-                        .add(LASTLITERALS)
-                        .offset_from(op.add(ll_total_cost + 2))
-                        as i32
-                        - 1
-                        + m1.len;
+                    let room =
+                        oend.add(LASTLITERALS)
+                            .offset_from(op.add(ll_total_cost + 2)) as i32
+                            - 1
+                            + m1.len;
                     if room >= MFLIMIT as i32 {
                         // Best-effort encode; ignore error (notLimited mode).
                         let _ = encode_sequence(
-                            &mut ip, &mut op, &mut anchor,
-                            m1.len, m1.off,
+                            &mut ip,
+                            &mut op,
+                            &mut anchor,
+                            m1.len,
+                            m1.off,
                             LimitedOutputDirective::NotLimited,
                             oend,
                         );
@@ -518,16 +527,20 @@ pub unsafe fn find_longer_match(
     dict: DictCtxDirective,
     favor_dec_speed: HcFavor,
 ) -> Match {
-    let match0 = Match { len: 0, off: 0, back: 0 };
+    let match0 = Match {
+        len: 0,
+        off: 0,
+        back: 0,
+    };
     let mut md = insert_and_get_wider_match(
         ctx,
         ip,
-        ip,            // i_low_limit = ip → no backward extension
+        ip, // i_low_limit = ip → no backward extension
         i_high_limit,
         min_len,
         nb_searches,
-        true,          // patternAnalysis = 1
-        true,          // chainSwap = 1
+        true, // patternAnalysis = 1
+        true, // chainSwap = 1
         dict,
         favor_dec_speed == HcFavor::DecompressionSpeed,
     );
@@ -640,7 +653,13 @@ pub unsafe fn compress_optimal(
         let mut last_match_pos: usize = 0;
 
         let first_match = find_longer_match(
-            ctx, ip, matchlimit, MINMATCH as i32 - 1, nb_searches, dict, favor_dec_speed,
+            ctx,
+            ip,
+            matchlimit,
+            MINMATCH as i32 - 1,
+            nb_searches,
+            dict,
+            favor_dec_speed,
         );
         if first_match.len == 0 {
             ip = ip.add(1);
@@ -652,8 +671,13 @@ pub unsafe fn compress_optimal(
             let first_ml = first_match.len;
             op_saved = op;
             if encode_sequence(
-                &mut ip, &mut op, &mut anchor,
-                first_ml, first_match.off, limit, oend,
+                &mut ip,
+                &mut op,
+                &mut anchor,
+                first_ml,
+                first_match.off,
+                limit,
+                oend,
             )
             .is_err()
             {
@@ -731,14 +755,24 @@ pub unsafe fn compress_optimal(
 
                 let new_match = if full_update {
                     find_longer_match(
-                        ctx, cur_ptr, matchlimit,
-                        MINMATCH as i32 - 1, nb_searches, dict, favor_dec_speed,
+                        ctx,
+                        cur_ptr,
+                        matchlimit,
+                        MINMATCH as i32 - 1,
+                        nb_searches,
+                        dict,
+                        favor_dec_speed,
                     )
                 } else {
                     // Only test matches of minimum length (slightly faster).
                     find_longer_match(
-                        ctx, cur_ptr, matchlimit,
-                        (last_match_pos - cur) as i32, nb_searches, dict, favor_dec_speed,
+                        ctx,
+                        cur_ptr,
+                        matchlimit,
+                        (last_match_pos - cur) as i32,
+                        nb_searches,
+                        dict,
+                        favor_dec_speed,
                     )
                 };
 
@@ -764,8 +798,7 @@ pub unsafe fn compress_optimal(
                 {
                     let base_litlen = opt[cur].litlen;
                     for litlen in 1..MINMATCH {
-                        let price = opt[cur].price
-                            - literals_price(base_litlen)
+                        let price = opt[cur].price - literals_price(base_litlen)
                             + literals_price(base_litlen + litlen as i32);
                         let pos = cur + litlen;
                         if price < opt[pos].price {
@@ -879,11 +912,7 @@ pub unsafe fn compress_optimal(
                 debug_assert!(ml >= MINMATCH as i32);
                 debug_assert!(offset >= 1 && offset <= LZ4_DISTANCE_MAX as i32);
                 op_saved = op;
-                if encode_sequence(
-                    &mut ip, &mut op, &mut anchor,
-                    ml, offset, limit, oend,
-                )
-                .is_err()
+                if encode_sequence(&mut ip, &mut op, &mut anchor, ml, offset, limit, oend).is_err()
                 {
                     ovml = ml;
                     ovoff = offset;
@@ -904,10 +933,8 @@ pub unsafe fn compress_optimal(
 
             op = op_saved; // restore correct out pointer
             if op.add(ll_total_cost) <= max_lit_pos {
-                let bytes_left_for_ml =
-                    max_lit_pos.offset_from(op.add(ll_total_cost)) as usize;
-                let max_ml_size =
-                    MINMATCH + (ML_MASK as usize - 1) + bytes_left_for_ml * 255;
+                let bytes_left_for_ml = max_lit_pos.offset_from(op.add(ll_total_cost)) as usize;
+                let max_ml_size = MINMATCH + (ML_MASK as usize - 1) + bytes_left_for_ml * 255;
                 debug_assert!(ovml >= 0);
                 if ovml as usize > max_ml_size {
                     ovml = max_ml_size as i32;
@@ -915,15 +942,17 @@ pub unsafe fn compress_optimal(
                 // (oend + LASTLITERALS) - (op + ll_total_cost + 2) - 1 + ovml >= MFLIMIT
                 let room = oend
                     .add(LASTLITERALS)
-                    .offset_from(op.add(ll_total_cost + 2))
-                    as i32
+                    .offset_from(op.add(ll_total_cost + 2)) as i32
                     - 1
                     + ovml;
                 if room >= MFLIMIT as i32 {
                     // Best-effort encode; ignore result (notLimited mode).
                     let _ = encode_sequence(
-                        &mut ip, &mut op, &mut anchor,
-                        ovml, ovoff,
+                        &mut ip,
+                        &mut op,
+                        &mut anchor,
+                        ovml,
+                        ovoff,
                         LimitedOutputDirective::NotLimited,
                         oend,
                     );

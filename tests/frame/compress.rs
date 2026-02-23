@@ -9,11 +9,10 @@
 //   - Constants: `LZ4F_MAGIC_NUMBER`, `LZ4F_VERSION`
 
 use lz4::frame::compress::{
-    lz4f_compress_begin, lz4f_compress_begin_using_dict, lz4f_compress_bound,
-    lz4f_compress_end, lz4f_compress_frame, lz4f_compress_frame_using_cdict,
-    lz4f_compress_update, lz4f_create_compression_context, lz4f_flush,
-    lz4f_free_compression_context, lz4f_uncompressed_update, CompressOptions,
-    LZ4F_MAGIC_NUMBER, LZ4F_VERSION,
+    lz4f_compress_begin, lz4f_compress_begin_using_dict, lz4f_compress_bound, lz4f_compress_end,
+    lz4f_compress_frame, lz4f_compress_frame_using_cdict, lz4f_compress_update,
+    lz4f_create_compression_context, lz4f_flush, lz4f_free_compression_context,
+    lz4f_uncompressed_update, CompressOptions, LZ4F_MAGIC_NUMBER, LZ4F_VERSION,
 };
 use lz4::frame::header::lz4f_compress_frame_bound;
 use lz4::frame::types::{
@@ -197,7 +196,10 @@ fn compress_begin_return_value_in_header_range() {
     let n = lz4f_compress_begin(&mut cctx, &mut dst, None).expect("begin");
     // Minimum header: magic(4) + FLG(1) + BD(1) + HC(1) = 7
     // Maximum header: 19 bytes
-    assert!(n >= 7 && n <= MAX_FH_SIZE, "header size must be in [7, 19], got {n}");
+    assert!(
+        n >= 7 && n <= MAX_FH_SIZE,
+        "header size must be in [7, 19], got {n}"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -213,8 +215,15 @@ fn compress_begin_using_empty_dict_behaves_like_begin() {
     let mut dst2 = vec![0u8; MAX_FH_SIZE + 64];
     let n1 = lz4f_compress_begin(&mut cctx1, &mut dst1, None).expect("begin");
     let n2 = lz4f_compress_begin_using_dict(&mut cctx2, &mut dst2, &[], None).expect("begin_dict");
-    assert_eq!(n1, n2, "empty dict header size must match no-dict header size");
-    assert_eq!(&dst1[..n1], &dst2[..n2], "empty dict header bytes must match");
+    assert_eq!(
+        n1, n2,
+        "empty dict header size must match no-dict header size"
+    );
+    assert_eq!(
+        &dst1[..n1],
+        &dst2[..n2],
+        "empty dict header bytes must match"
+    );
 }
 
 /// compress_begin_using_dict with a non-empty dict succeeds.
@@ -336,7 +345,10 @@ fn compress_update_dst_too_small_returns_err() {
 /// Parity: compress_update with 0-byte src may return 0 bytes written.
 #[test]
 fn compress_update_empty_src_writes_zero() {
-    let prefs = Preferences { auto_flush: true, ..Default::default() };
+    let prefs = Preferences {
+        auto_flush: true,
+        ..Default::default()
+    };
     let frame_bound = lz4f_compress_frame_bound(0, Some(&prefs));
     let mut dst = vec![0u8; frame_bound + 64];
     let mut cctx = Lz4FCCtx::new(LZ4F_VERSION);
@@ -344,7 +356,10 @@ fn compress_update_empty_src_writes_zero() {
     let written = lz4f_compress_update(&mut cctx, &mut dst[pos..], &[], None).unwrap();
     // Empty src → nothing to compress; auto_flush → 0-byte block if flushed.
     // Either 0 bytes (nothing) or a zero-length block (BH_SIZE) is valid.
-    assert!(written <= 8, "updating with empty src must not emit large output, got {written}");
+    assert!(
+        written <= 8,
+        "updating with empty src must not emit large output, got {written}"
+    );
 }
 
 /// Parity: streaming many small chunks accumulates into a valid frame.
@@ -475,7 +490,10 @@ fn uncompressed_update_output_larger_than_compressed() {
 /// Parity: flush on empty buffer returns 0 bytes written.
 #[test]
 fn flush_empty_buffer_returns_zero() {
-    let prefs = Preferences { auto_flush: false, ..Default::default() };
+    let prefs = Preferences {
+        auto_flush: false,
+        ..Default::default()
+    };
     let frame_bound = lz4f_compress_frame_bound(0, Some(&prefs));
     let mut dst = vec![0u8; frame_bound + 64];
     let mut cctx = Lz4FCCtx::new(LZ4F_VERSION);
@@ -504,7 +522,10 @@ fn flush_emits_buffered_data() {
     let pos = lz4f_compress_begin(&mut cctx, &mut dst, Some(&prefs)).unwrap();
     // Update: data is smaller than block_size → gets buffered, returns 0.
     let update_written = lz4f_compress_update(&mut cctx, &mut dst[pos..], &src, None).unwrap();
-    assert_eq!(update_written, 0, "sub-block data must be buffered (not emitted)");
+    assert_eq!(
+        update_written, 0,
+        "sub-block data must be buffered (not emitted)"
+    );
     // Now flush: must emit the buffered block.
     let flush_written = lz4f_flush(&mut cctx, &mut dst[pos..], None).unwrap();
     assert!(flush_written > 0, "flush must emit the buffered block");
@@ -517,13 +538,19 @@ fn flush_emits_buffered_data() {
 /// Parity: compress_end writes at least 4 bytes (end-mark).
 #[test]
 fn compress_end_writes_at_least_4_bytes() {
-    let prefs = Preferences { auto_flush: true, ..Default::default() };
+    let prefs = Preferences {
+        auto_flush: true,
+        ..Default::default()
+    };
     let frame_bound = lz4f_compress_frame_bound(0, Some(&prefs));
     let mut dst = vec![0u8; frame_bound + 64];
     let mut cctx = Lz4FCCtx::new(LZ4F_VERSION);
     let pos = lz4f_compress_begin(&mut cctx, &mut dst, Some(&prefs)).unwrap();
     let end_written = lz4f_compress_end(&mut cctx, &mut dst[pos..], None).unwrap();
-    assert!(end_written >= 4, "end must write at least 4 bytes (end-mark), got {end_written}");
+    assert!(
+        end_written >= 4,
+        "end must write at least 4 bytes (end-mark), got {end_written}"
+    );
 }
 
 /// Parity: compress_end writes 4-byte zero end-mark (lz4frame.c:998).
@@ -544,7 +571,11 @@ fn compress_end_end_mark_is_four_zero_bytes() {
     let end_written = lz4f_compress_end(&mut cctx, &mut dst[pos..], None).unwrap();
     // Without content checksum, end is exactly 4 zero bytes.
     assert_eq!(end_written, 4);
-    assert_eq!(&dst[pos..pos + 4], &[0u8; 4], "end-mark must be 4 zero bytes");
+    assert_eq!(
+        &dst[pos..pos + 4],
+        &[0u8; 4],
+        "end-mark must be 4 zero bytes"
+    );
 }
 
 /// Parity: compress_end with content checksum writes 8 bytes (end-mark + checksum).
@@ -563,7 +594,10 @@ fn compress_end_with_content_checksum_writes_8_bytes() {
     let mut cctx = Lz4FCCtx::new(LZ4F_VERSION);
     let pos = lz4f_compress_begin(&mut cctx, &mut dst, Some(&prefs)).unwrap();
     let end_written = lz4f_compress_end(&mut cctx, &mut dst[pos..], None).unwrap();
-    assert_eq!(end_written, 8, "end with content checksum must write 8 bytes");
+    assert_eq!(
+        end_written, 8,
+        "end with content checksum must write 8 bytes"
+    );
     // End-mark is still 4 zero bytes.
     assert_eq!(&dst[pos..pos + 4], &[0u8; 4]);
 }
@@ -571,7 +605,10 @@ fn compress_end_with_content_checksum_writes_8_bytes() {
 /// Parity: context is re-usable after compress_end (c_stage reset to 0).
 #[test]
 fn compress_end_context_is_reusable() {
-    let prefs = Preferences { auto_flush: true, ..Default::default() };
+    let prefs = Preferences {
+        auto_flush: true,
+        ..Default::default()
+    };
     let frame_bound = lz4f_compress_frame_bound(16, Some(&prefs));
     let mut cctx = Lz4FCCtx::new(LZ4F_VERSION);
     for _ in 0..3 {
@@ -636,7 +673,10 @@ fn compress_frame_empty_src_produces_valid_frame() {
     let mut dst = default_dst(0);
     let written = lz4f_compress_frame(&mut dst, &[], None).expect("compress_frame empty");
     // magic(4) + FLG(1) + BD(1) + HC(1) + end-mark(4) = 11 bytes minimum
-    assert!(written >= 11, "empty frame must be at least 11 bytes, got {written}");
+    assert!(
+        written >= 11,
+        "empty frame must be at least 11 bytes, got {written}"
+    );
     let magic = u32::from_le_bytes(dst[..4].try_into().unwrap());
     assert_eq!(magic, LZ4F_MAGIC_NUMBER);
 }
@@ -739,12 +779,18 @@ fn compress_frame_various_block_sizes_succeed() {
         BlockSizeId::Max4Mb,
     ] {
         let prefs = Preferences {
-            frame_info: FrameInfo { block_size_id: bsid, ..Default::default() },
+            frame_info: FrameInfo {
+                block_size_id: bsid,
+                ..Default::default()
+            },
             ..Default::default()
         };
         let mut dst = vec![0u8; lz4f_compress_frame_bound(src.len(), Some(&prefs))];
         let written = lz4f_compress_frame(&mut dst, &src, Some(&prefs)).unwrap();
-        assert!(written > 0, "compress_frame must succeed for block_size_id={bsid:?}");
+        assert!(
+            written > 0,
+            "compress_frame must succeed for block_size_id={bsid:?}"
+        );
         let magic = u32::from_le_bytes(dst[..4].try_into().unwrap());
         assert_eq!(magic, LZ4F_MAGIC_NUMBER);
     }
@@ -793,7 +839,10 @@ fn compress_frame_using_null_cdict_matches_compress_frame() {
     )
     .unwrap();
 
-    assert_eq!(n_frame, n_cdict, "null-cdict frame must equal no-cdict frame size");
+    assert_eq!(
+        n_frame, n_cdict,
+        "null-cdict frame must equal no-cdict frame size"
+    );
     assert_eq!(
         &dst_frame[..n_frame],
         &dst_cdict[..n_cdict],
@@ -833,7 +882,11 @@ fn streaming_single_update_matches_one_shot() {
     pos += lz4f_compress_end(&mut cctx, &mut streaming[pos..], Some(&opts)).unwrap();
 
     assert_eq!(pos, n_one_shot, "streaming size must match one-shot");
-    assert_eq!(&streaming[..pos], &one_shot[..n_one_shot], "streaming bytes must match one-shot");
+    assert_eq!(
+        &streaming[..pos],
+        &one_shot[..n_one_shot],
+        "streaming bytes must match one-shot"
+    );
 }
 
 /// Parity: total frame size from streaming must not exceed compress_frame_bound.
@@ -857,7 +910,10 @@ fn streaming_total_within_frame_bound() {
         pos += lz4f_compress_update(&mut cctx, &mut dst[pos..], chunk, None).unwrap();
     }
     pos += lz4f_compress_end(&mut cctx, &mut dst[pos..], None).unwrap();
-    assert!(pos <= bound, "total frame size {pos} must be within bound {bound}");
+    assert!(
+        pos <= bound,
+        "total frame size {pos} must be within bound {bound}"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

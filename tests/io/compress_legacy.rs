@@ -24,8 +24,10 @@
 //   - multiple_files_one_bad: Err returned, good files still written
 //   - multiple_files_empty_list: Ok(())
 
-use lz4::io::compress_legacy::{compress_filename_legacy, compress_multiple_filenames_legacy, LegacyResult};
-use lz4::io::prefs::{Prefs, LEGACY_MAGICNUMBER, LEGACY_BLOCKSIZE, MAGICNUMBER_SIZE};
+use lz4::io::compress_legacy::{
+    compress_filename_legacy, compress_multiple_filenames_legacy, LegacyResult,
+};
+use lz4::io::prefs::{Prefs, LEGACY_BLOCKSIZE, LEGACY_MAGICNUMBER, MAGICNUMBER_SIZE};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -40,13 +42,9 @@ fn compress_to_bytes(data: &[u8], clevel: i32) -> (Vec<u8>, LegacyResult) {
     std::fs::write(&src, data).unwrap();
 
     let prefs = Prefs::default();
-    let result = compress_filename_legacy(
-        src.to_str().unwrap(),
-        dst.to_str().unwrap(),
-        clevel,
-        &prefs,
-    )
-    .expect("compression must succeed");
+    let result =
+        compress_filename_legacy(src.to_str().unwrap(), dst.to_str().unwrap(), clevel, &prefs)
+            .expect("compression must succeed");
 
     let bytes = std::fs::read(&dst).unwrap();
     (bytes, result)
@@ -153,7 +151,11 @@ fn bytes_written_matches_file_size() {
 fn empty_input_produces_magic_only() {
     let (out, result) = compress_to_bytes(b"", 1);
     assert_eq!(result.bytes_read, 0, "bytes_read must be 0 for empty input");
-    assert_eq!(out.len(), MAGICNUMBER_SIZE, "output must contain only the magic number");
+    assert_eq!(
+        out.len(),
+        MAGICNUMBER_SIZE,
+        "output must contain only the magic number"
+    );
     let magic = u32::from_le_bytes(out[0..4].try_into().unwrap());
     assert_eq!(magic, LEGACY_MAGICNUMBER);
 }
@@ -201,8 +203,7 @@ fn round_trip_fast_mode_small_input() {
     assert_eq!(blocks.len(), 1, "single-block expected for small input");
 
     let (_sz, block_data) = &blocks[0];
-    let decompressed =
-        lz4::block::decompress_block_to_vec(block_data, original.len() * 4);
+    let decompressed = lz4::block::decompress_block_to_vec(block_data, original.len() * 4);
     assert_eq!(&decompressed[..original.len()], original);
 }
 
@@ -237,8 +238,7 @@ fn round_trip_hc_mode_small_input() {
     assert_eq!(blocks.len(), 1);
 
     let (_sz, block_data) = &blocks[0];
-    let decompressed =
-        lz4::block::decompress_block_to_vec(block_data, original.len() * 4);
+    let decompressed = lz4::block::decompress_block_to_vec(block_data, original.len() * 4);
     assert_eq!(&decompressed[..original.len()], original);
 }
 
@@ -383,8 +383,14 @@ fn compress_multiple_all_files_created() {
     let srcs = [src1.to_str().unwrap(), src2.to_str().unwrap()];
     let result = compress_multiple_filenames_legacy(&srcs, ".lz4", 1, &prefs);
     assert!(result.is_ok());
-    assert!(dir.path().join("a.txt.lz4").exists(), "a.txt.lz4 must exist");
-    assert!(dir.path().join("b.txt.lz4").exists(), "b.txt.lz4 must exist");
+    assert!(
+        dir.path().join("a.txt.lz4").exists(),
+        "a.txt.lz4 must exist"
+    );
+    assert!(
+        dir.path().join("b.txt.lz4").exists(),
+        "b.txt.lz4 must exist"
+    );
 }
 
 /// Output files must contain valid LZ4 legacy compressed data.
@@ -415,9 +421,15 @@ fn compress_multiple_one_bad_src_returns_err_and_others_succeed() {
     let srcs = [good.to_str().unwrap(), "/nonexistent/bad.txt"];
     let result = compress_multiple_filenames_legacy(&srcs, ".lz4", 1, &prefs);
     // One file failed → should return Err
-    assert!(result.is_err(), "expected Err when one file cannot be compressed");
+    assert!(
+        result.is_err(),
+        "expected Err when one file cannot be compressed"
+    );
     // The good file's output should still have been created
-    assert!(dir.path().join("good.txt.lz4").exists(), "good.txt.lz4 must still be created");
+    assert!(
+        dir.path().join("good.txt.lz4").exists(),
+        "good.txt.lz4 must still be created"
+    );
 }
 
 /// All-bad source files return Err with an informative error message.
@@ -468,7 +480,10 @@ fn legacy_result_default_is_zero() {
 /// LegacyResult must implement Clone and Copy.
 #[test]
 fn legacy_result_clone_copy() {
-    let r = LegacyResult { bytes_read: 100, bytes_written: 50 };
+    let r = LegacyResult {
+        bytes_read: 100,
+        bytes_written: 50,
+    };
     let r2 = r; // Copy
     let r3 = r.clone(); // Clone
     assert_eq!(r2.bytes_read, 100);

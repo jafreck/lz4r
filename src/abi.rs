@@ -18,7 +18,11 @@ use crate::hc::api::compress_hc as hc_compress_hc;
 /// Return 0 when an i32 is non-positive (error sentinel matching the C API).
 #[inline(always)]
 fn ok_or_zero(n: i32) -> c_int {
-    if n > 0 { n } else { 0 }
+    if n > 0 {
+        n
+    } else {
+        0
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

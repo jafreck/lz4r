@@ -11,9 +11,9 @@
 //! The most commonly needed symbols are re-exported at the `util` module level.
 
 pub mod cores;
-pub mod file_status;
-pub mod file_size;
 pub mod file_list;
+pub mod file_size;
+pub mod file_status;
 
 // ── Re-exports at `util::` level ─────────────────────────────────────────────
 // Commonly used symbols are re-exported here so callers can write

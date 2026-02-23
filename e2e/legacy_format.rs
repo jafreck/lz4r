@@ -4,11 +4,11 @@
 //! and magic-number auto-detection in `decompress_filename`.
 //! Legacy format uses magic number `0x184C2102`.
 
+use lz4::io::prefs::{set_notification_level, Prefs};
 use lz4::io::{
     compress_filename, compress_filename_legacy, compress_multiple_filenames_legacy,
     decompress_filename, LEGACY_MAGICNUMBER,
 };
-use lz4::io::prefs::{Prefs, set_notification_level};
 use std::fs;
 use tempfile::TempDir;
 
@@ -61,7 +61,10 @@ fn test_legacy_roundtrip() {
     .expect("decompress_filename should succeed on legacy-compressed file");
 
     let recovered = fs::read(&out_path).unwrap();
-    assert_eq!(recovered, original, "decompressed content must match original");
+    assert_eq!(
+        recovered, original,
+        "decompressed content must match original"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -91,12 +94,7 @@ fn test_legacy_magic_number() {
     assert!(compressed.len() >= 4, "output must have at least 4 bytes");
 
     // LEGACY_MAGICNUMBER = 0x184C2102 → LE bytes [0x02, 0x21, 0x4C, 0x18]
-    let magic = u32::from_le_bytes([
-        compressed[0],
-        compressed[1],
-        compressed[2],
-        compressed[3],
-    ]);
+    let magic = u32::from_le_bytes([compressed[0], compressed[1], compressed[2], compressed[3]]);
     assert_eq!(
         magic, LEGACY_MAGICNUMBER,
         "first 4 bytes must be the legacy magic number 0x{:08X}",
@@ -217,10 +215,7 @@ fn test_legacy_vs_frame_format_roundtrip() {
     let src_path = dir.path().join("data.bin");
 
     // 8 KB of mixed data
-    let original: Vec<u8> = (0u8..=255)
-        .cycle()
-        .take(8 * 1024)
-        .collect();
+    let original: Vec<u8> = (0u8..=255).cycle().take(8 * 1024).collect();
     fs::write(&src_path, &original).unwrap();
 
     let prefs = silent_prefs();
@@ -304,7 +299,10 @@ fn test_legacy_empty_file() {
         "compressing an empty file must not fail: {:?}",
         result
     );
-    assert!(lz4_path.exists(), "output file must exist even for empty input");
+    assert!(
+        lz4_path.exists(),
+        "output file must exist even for empty input"
+    );
 
     // The output must contain at least the 4-byte magic header
     let compressed = fs::read(&lz4_path).unwrap();
@@ -312,11 +310,9 @@ fn test_legacy_empty_file() {
         compressed.len() >= 4,
         "output must contain at least the magic number header"
     );
-    let magic = u32::from_le_bytes([
-        compressed[0],
-        compressed[1],
-        compressed[2],
-        compressed[3],
-    ]);
-    assert_eq!(magic, LEGACY_MAGICNUMBER, "magic must be present even for empty file");
+    let magic = u32::from_le_bytes([compressed[0], compressed[1], compressed[2], compressed[3]]);
+    assert_eq!(
+        magic, LEGACY_MAGICNUMBER,
+        "magic must be present even for empty file"
+    );
 }

@@ -328,22 +328,43 @@ fn error_name_all_variants_parity() {
         ("ERROR_maxBlockSize_invalid", Lz4FError::MaxBlockSizeInvalid),
         ("ERROR_blockMode_invalid", Lz4FError::BlockModeInvalid),
         ("ERROR_parameter_invalid", Lz4FError::ParameterInvalid),
-        ("ERROR_compressionLevel_invalid", Lz4FError::CompressionLevelInvalid),
+        (
+            "ERROR_compressionLevel_invalid",
+            Lz4FError::CompressionLevelInvalid,
+        ),
         ("ERROR_headerVersion_wrong", Lz4FError::HeaderVersionWrong),
-        ("ERROR_blockChecksum_invalid", Lz4FError::BlockChecksumInvalid),
+        (
+            "ERROR_blockChecksum_invalid",
+            Lz4FError::BlockChecksumInvalid,
+        ),
         ("ERROR_reservedFlag_set", Lz4FError::ReservedFlagSet),
         ("ERROR_allocation_failed", Lz4FError::AllocationFailed),
         ("ERROR_srcSize_tooLarge", Lz4FError::SrcSizeTooLarge),
         ("ERROR_dstMaxSize_tooSmall", Lz4FError::DstMaxSizeTooSmall),
-        ("ERROR_frameHeader_incomplete", Lz4FError::FrameHeaderIncomplete),
+        (
+            "ERROR_frameHeader_incomplete",
+            Lz4FError::FrameHeaderIncomplete,
+        ),
         ("ERROR_frameType_unknown", Lz4FError::FrameTypeUnknown),
         ("ERROR_frameSize_wrong", Lz4FError::FrameSizeWrong),
         ("ERROR_srcPtr_wrong", Lz4FError::SrcPtrWrong),
         ("ERROR_decompressionFailed", Lz4FError::DecompressionFailed),
-        ("ERROR_headerChecksum_invalid", Lz4FError::HeaderChecksumInvalid),
-        ("ERROR_contentChecksum_invalid", Lz4FError::ContentChecksumInvalid),
-        ("ERROR_frameDecoding_alreadyStarted", Lz4FError::FrameDecodingAlreadyStarted),
-        ("ERROR_compressionState_uninitialized", Lz4FError::CompressionStateUninitialized),
+        (
+            "ERROR_headerChecksum_invalid",
+            Lz4FError::HeaderChecksumInvalid,
+        ),
+        (
+            "ERROR_contentChecksum_invalid",
+            Lz4FError::ContentChecksumInvalid,
+        ),
+        (
+            "ERROR_frameDecoding_alreadyStarted",
+            Lz4FError::FrameDecodingAlreadyStarted,
+        ),
+        (
+            "ERROR_compressionState_uninitialized",
+            Lz4FError::CompressionStateUninitialized,
+        ),
         ("ERROR_parameter_null", Lz4FError::ParameterNull),
         ("ERROR_io_write", Lz4FError::IoWrite),
         ("ERROR_io_read", Lz4FError::IoRead),
@@ -560,7 +581,10 @@ fn get_error_name_non_error_returns_unspecified() {
     // Non-error codes produce "Unspecified error code" (same as C)
     assert_eq!(lz4f_get_error_name(0), "Unspecified error code");
     assert_eq!(lz4f_get_error_name(42), "Unspecified error code");
-    assert_eq!(lz4f_get_error_name(usize::MAX - 23), "Unspecified error code");
+    assert_eq!(
+        lz4f_get_error_name(usize::MAX - 23),
+        "Unspecified error code"
+    );
 }
 
 #[test]
@@ -584,7 +608,10 @@ fn get_error_name_io_write() {
 #[test]
 fn get_error_name_allocation_failed() {
     // Index 9 = AllocationFailed: raw code = usize::MAX - 8
-    assert_eq!(lz4f_get_error_name(usize::MAX - 8), "ERROR_allocation_failed");
+    assert_eq!(
+        lz4f_get_error_name(usize::MAX - 8),
+        "ERROR_allocation_failed"
+    );
 }
 
 #[test]

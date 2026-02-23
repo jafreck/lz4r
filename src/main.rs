@@ -39,22 +39,22 @@ use lz4::io::{
 /// Returns the process exit code (0 = success, non-zero = error).
 fn run(args: ParsedArgs) -> i32 {
     // Unpack all relevant fields from ParsedArgs.
-    let mut prefs          = args.prefs;
-    let mut op_mode        = args.op_mode;
-    let c_level            = args.c_level;
-    let c_level_last       = args.c_level_last;
-    let legacy_format      = args.legacy_format;
-    let force_stdout       = args.force_stdout;
-    let main_pause         = args.main_pause;
+    let mut prefs = args.prefs;
+    let mut op_mode = args.op_mode;
+    let c_level = args.c_level;
+    let c_level_last = args.c_level_last;
+    let legacy_format = args.legacy_format;
+    let force_stdout = args.force_stdout;
+    let main_pause = args.main_pause;
     let mut multiple_inputs = args.multiple_inputs;
-    let nb_workers         = args.nb_workers;
-    let mut input_filename : Option<String> = args.input_filename;
+    let nb_workers = args.nb_workers;
+    let mut input_filename: Option<String> = args.input_filename;
     let mut output_filename: Option<String> = args.output_filename;
-    let dictionary_filename                 = args.dictionary_filename;
-    let mut in_file_names  : Vec<String>    = args.in_file_names;
-    let block_size         = args.block_size;
-    let mut bench_config   = args.bench_config;
-    let exe_name           = args.exe_name;
+    let dictionary_filename = args.dictionary_filename;
+    let mut in_file_names: Vec<String> = args.in_file_names;
+    let block_size = args.block_size;
+    let mut bench_config = args.bench_config;
+    let exe_name = args.exe_name;
 
     // feature-gated field
     #[cfg(feature = "recursive")]
@@ -99,7 +99,10 @@ fn run(args: ParsedArgs) -> i32 {
         #[cfg(feature = "recursive")]
         if recursive {
             use std::path::Path;
-            let paths: Vec<&Path> = in_file_names.iter().map(|s| Path::new(s.as_str())).collect();
+            let paths: Vec<&Path> = in_file_names
+                .iter()
+                .map(|s| Path::new(s.as_str()))
+                .collect();
             match lz4::util::create_file_list(&paths) {
                 Ok(list) => {
                     for (u, p) in list.iter().enumerate() {
@@ -202,8 +205,7 @@ fn run(args: ParsedArgs) -> i32 {
 
     // When output_filename is still None (only in multiple-input compress/decompress),
     // substitute the C dummy sentinel (mirrors C line 813).
-    let output_filename: String =
-        output_filename.unwrap_or_else(|| "*\\dummy^!//".to_owned());
+    let output_filename: String = output_filename.unwrap_or_else(|| "*\\dummy^!//".to_owned());
 
     // ── Refuse console output (lz4cli.c lines 815–820) ────────────────────
     if output_filename == STDOUT_MARK

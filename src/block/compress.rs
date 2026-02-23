@@ -32,8 +32,8 @@ use super::types::{
     clear_hash, count, get_index_on_hash, get_position, get_position_on_hash, hash_position,
     prepare_table, put_index_on_hash, put_position, put_position_on_hash, read32, wild_copy8,
     write32, write_le16, DictDirective, DictIssueDirective, LimitedOutputDirective,
-    StreamStateInternal, TableType, LZ4_64KLIMIT, LZ4_DISTANCE_ABSOLUTE_MAX, LZ4_DISTANCE_MAX,
-    LZ4_MIN_LENGTH, LZ4_SKIP_TRIGGER, LASTLITERALS, MFLIMIT, MINMATCH, ML_BITS, ML_MASK,
+    StreamStateInternal, TableType, LASTLITERALS, LZ4_64KLIMIT, LZ4_DISTANCE_ABSOLUTE_MAX,
+    LZ4_DISTANCE_MAX, LZ4_MIN_LENGTH, LZ4_SKIP_TRIGGER, MFLIMIT, MINMATCH, ML_BITS, ML_MASK,
     RUN_MASK,
 };
 
@@ -121,11 +121,12 @@ pub unsafe fn compress_generic_validated(
     let base: *const u8 = source.wrapping_sub(start_index as usize);
 
     let dict_ctx = cctx_ref.dict_ctx as *const StreamStateInternal;
-    let dictionary: *const u8 = if dict_directive == DictDirective::UsingDictCtx && !dict_ctx.is_null() {
-        (*dict_ctx).dictionary
-    } else {
-        cctx_ref.dictionary
-    };
+    let dictionary: *const u8 =
+        if dict_directive == DictDirective::UsingDictCtx && !dict_ctx.is_null() {
+            (*dict_ctx).dictionary
+        } else {
+            cctx_ref.dictionary
+        };
     let dict_size: u32 = if dict_directive == DictDirective::UsingDictCtx && !dict_ctx.is_null() {
         (*dict_ctx).dict_size
     } else {
@@ -334,8 +335,7 @@ pub unsafe fn compress_generic_validated(
                     put_index_on_hash(current, h, cctx_ref.hash_table.as_mut_ptr(), table_type);
 
                     // Reject: match outside dictSmall valid range
-                    if dict_issue == DictIssueDirective::DictSmall
-                        && match_index < prefix_idx_limit
+                    if dict_issue == DictIssueDirective::DictSmall && match_index < prefix_idx_limit
                     {
                         continue;
                     }
@@ -365,8 +365,7 @@ pub unsafe fn compress_generic_validated(
                 loop {
                     ip = ip.sub(1);
                     match_ptr = match_ptr.sub(1);
-                    if !(ip > anchor && match_ptr > low_limit && *ip.sub(1) == *match_ptr.sub(1))
-                    {
+                    if !(ip > anchor && match_ptr > low_limit && *ip.sub(1) == *match_ptr.sub(1)) {
                         break;
                     }
                 }
@@ -449,8 +448,7 @@ pub unsafe fn compress_generic_validated(
                     } else {
                         limit_ptr
                     };
-                    match_code =
-                        count(ip.add(MINMATCH), match_ptr.add(MINMATCH), limit_ptr);
+                    match_code = count(ip.add(MINMATCH), match_ptr.add(MINMATCH), limit_ptr);
                     ip = ip.add(match_code as usize + MINMATCH);
                     if ip == limit_ptr {
                         // The dict match extends all the way to the source; continue counting there.
@@ -459,8 +457,7 @@ pub unsafe fn compress_generic_validated(
                         ip = ip.add(more as usize);
                     }
                 } else {
-                    match_code =
-                        count(ip.add(MINMATCH), match_ptr.add(MINMATCH), matchlimit);
+                    match_code = count(ip.add(MINMATCH), match_ptr.add(MINMATCH), matchlimit);
                     ip = ip.add(match_code as usize + MINMATCH);
                 }
 
@@ -483,11 +480,7 @@ pub unsafe fn compress_generic_validated(
                                 let mut ptr = ip;
                                 while (ptr as usize) <= (filled_ip as usize) {
                                     let h = hash_position(ptr, table_type);
-                                    clear_hash(
-                                        h,
-                                        cctx_ref.hash_table.as_mut_ptr(),
-                                        table_type,
-                                    );
+                                    clear_hash(h, cctx_ref.hash_table.as_mut_ptr(), table_type);
                                     ptr = ptr.add(1);
                                 }
                             }
@@ -535,12 +528,7 @@ pub unsafe fn compress_generic_validated(
                         );
                     } else {
                         let idx = (ip.sub(2) as usize - base as usize) as u32;
-                        put_index_on_hash(
-                            idx,
-                            h,
-                            cctx_ref.hash_table.as_mut_ptr(),
-                            table_type,
-                        );
+                        put_index_on_hash(idx, h, cctx_ref.hash_table.as_mut_ptr(), table_type);
                     }
                 }
 
@@ -611,14 +599,13 @@ pub unsafe fn compress_generic_validated(
                         true
                     };
                     // Validate: distance check (byU16 with max-distance == absolute-max always passes)
-                    let dist_ok =
-                        if table_type == TableType::ByU16
-                            && LZ4_DISTANCE_MAX == LZ4_DISTANCE_ABSOLUTE_MAX
-                        {
-                            true
-                        } else {
-                            m_index.wrapping_add(LZ4_DISTANCE_MAX) >= current
-                        };
+                    let dist_ok = if table_type == TableType::ByU16
+                        && LZ4_DISTANCE_MAX == LZ4_DISTANCE_ABSOLUTE_MAX
+                    {
+                        true
+                    } else {
+                        m_index.wrapping_add(LZ4_DISTANCE_MAX) >= current
+                    };
 
                     if dict_ok && dist_ok && read32(match_ptr) == read32(ip) {
                         // Immediate match: emit a 0-literal sequence
@@ -772,7 +759,9 @@ pub unsafe fn compress_fast_ext_state(
     // Re-initialize state (equivalent to LZ4_initStream)
     *state = StreamStateInternal::new();
 
-    let acceleration = acceleration.max(LZ4_ACCELERATION_DEFAULT).min(LZ4_ACCELERATION_MAX);
+    let acceleration = acceleration
+        .max(LZ4_ACCELERATION_DEFAULT)
+        .min(LZ4_ACCELERATION_MAX);
 
     if dst_capacity >= compress_bound(src_len) {
         // Unlimited output: select table type based on input size
@@ -858,7 +847,9 @@ pub unsafe fn compress_fast_ext_state_fast_reset(
     dst_capacity: i32,
     acceleration: i32,
 ) -> Result<usize, Lz4Error> {
-    let acceleration = acceleration.max(LZ4_ACCELERATION_DEFAULT).min(LZ4_ACCELERATION_MAX);
+    let acceleration = acceleration
+        .max(LZ4_ACCELERATION_DEFAULT)
+        .min(LZ4_ACCELERATION_MAX);
 
     if dst_capacity >= compress_bound(src_len) {
         if (src_len as usize) < LZ4_64KLIMIT {
@@ -948,11 +939,7 @@ pub unsafe fn compress_fast_ext_state_fast_reset(
 /// Equivalent to `LZ4_compress_fast`.
 ///
 /// Returns the number of bytes written to `dst`, or `Err(Lz4Error::OutputTooSmall)`.
-pub fn compress_fast(
-    src: &[u8],
-    dst: &mut [u8],
-    acceleration: i32,
-) -> Result<usize, Lz4Error> {
+pub fn compress_fast(src: &[u8], dst: &mut [u8], acceleration: i32) -> Result<usize, Lz4Error> {
     let src_len = src.len();
     if src_len > LZ4_MAX_INPUT_SIZE as usize {
         return Err(Lz4Error::InputTooLarge);
@@ -1008,10 +995,7 @@ pub unsafe fn compress_dest_size_raw(
 /// were consumed and the compressed length.
 ///
 /// Equivalent to `LZ4_compress_destSize`.
-pub fn compress_dest_size(
-    src: &[u8],
-    dst: &mut [u8],
-) -> Result<(usize, usize), Lz4Error> {
+pub fn compress_dest_size(src: &[u8], dst: &mut [u8]) -> Result<(usize, usize), Lz4Error> {
     let mut src_consumed = src.len() as i32;
     let compressed = unsafe {
         compress_dest_size_raw(
@@ -1061,7 +1045,14 @@ unsafe fn compress_dest_size_ext_state_internal(
     let src_size = *src_size_ptr;
     if target_dst_size >= compress_bound(src_size) {
         // Guaranteed success — use normal compression path
-        compress_fast_ext_state(state, src, src_size as i32, dst, target_dst_size, acceleration)
+        compress_fast_ext_state(
+            state,
+            src,
+            src_size as i32,
+            dst,
+            target_dst_size,
+            acceleration,
+        )
     } else if (src_size as usize) < LZ4_64KLIMIT {
         compress_generic(
             &mut (*state),

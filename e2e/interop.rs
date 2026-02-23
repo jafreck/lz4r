@@ -8,8 +8,7 @@
 extern crate lz4;
 
 use lz4::frame::{
-    compress_frame_to_vec, decompress_frame_to_vec,
-    lz4f_compress_frame, lz4f_compress_frame_bound,
+    compress_frame_to_vec, decompress_frame_to_vec, lz4f_compress_frame, lz4f_compress_frame_bound,
     ContentChecksum, FrameInfo, Preferences,
 };
 use std::io::Write;
@@ -46,7 +45,8 @@ fn rust_lz4() -> &'static str {
 /// Load the 64 KiB enwik8 fixture.
 fn fixture() -> Vec<u8> {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/enwik8_64k.bin");
-    std::fs::read(path).expect("tests/fixtures/enwik8_64k.bin must exist — run the fixture setup step")
+    std::fs::read(path)
+        .expect("tests/fixtures/enwik8_64k.bin must exist — run the fixture setup step")
 }
 
 /// Write `data` into a new temporary file and return it (keeps the file alive).
@@ -75,7 +75,10 @@ fn rust_frame_compress_c_decompress() {
 
     // Compress with Rust.
     let compressed = compress_frame_to_vec(&original);
-    assert!(!compressed.is_empty(), "rust compression produced empty output");
+    assert!(
+        !compressed.is_empty(),
+        "rust compression produced empty output"
+    );
 
     // Write compressed bytes to a temp file.
     let compressed_file = write_tmp(&compressed);
@@ -83,16 +86,22 @@ fn rust_frame_compress_c_decompress() {
 
     // Decompress with C lz4.
     let status = Command::new(&lz4_bin)
-        .args(["-d", "-f",
-               compressed_file.path().to_str().unwrap(),
-               output_file.path().to_str().unwrap()])
+        .args([
+            "-d",
+            "-f",
+            compressed_file.path().to_str().unwrap(),
+            output_file.path().to_str().unwrap(),
+        ])
         .status()
         .expect("spawn system lz4");
 
     assert!(status.success(), "system lz4 -d failed: {:?}", status);
 
     let decompressed = std::fs::read(output_file.path()).expect("read decompressed output");
-    assert_eq!(decompressed, original, "C-decompressed bytes differ from original");
+    assert_eq!(
+        decompressed, original,
+        "C-decompressed bytes differ from original"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -115,9 +124,11 @@ fn c_frame_compress_rust_decompress() {
 
     // Compress with C lz4.
     let status = Command::new(&lz4_bin)
-        .args(["-f",
-               input_file.path().to_str().unwrap(),
-               compressed_file.path().to_str().unwrap()])
+        .args([
+            "-f",
+            input_file.path().to_str().unwrap(),
+            compressed_file.path().to_str().unwrap(),
+        ])
         .status()
         .expect("spawn system lz4");
 
@@ -126,10 +137,13 @@ fn c_frame_compress_rust_decompress() {
     let compressed = std::fs::read(compressed_file.path()).expect("read compressed file");
 
     // Decompress with Rust.
-    let decompressed = decompress_frame_to_vec(&compressed)
-        .expect("rust frame decompression failed");
+    let decompressed =
+        decompress_frame_to_vec(&compressed).expect("rust frame decompression failed");
 
-    assert_eq!(decompressed, original, "Rust-decompressed bytes differ from original");
+    assert_eq!(
+        decompressed, original,
+        "Rust-decompressed bytes differ from original"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -153,9 +167,11 @@ fn rust_cli_compress_c_decompress() {
 
     // Compress with our Rust lz4 binary.
     let status = Command::new(rust_lz4())
-        .args(["-f",
-               input_file.path().to_str().unwrap(),
-               compressed_file.path().to_str().unwrap()])
+        .args([
+            "-f",
+            input_file.path().to_str().unwrap(),
+            compressed_file.path().to_str().unwrap(),
+        ])
         .status()
         .expect("spawn rust lz4");
 
@@ -163,16 +179,22 @@ fn rust_cli_compress_c_decompress() {
 
     // Decompress with the system C lz4.
     let status = Command::new(&lz4_bin)
-        .args(["-d", "-f",
-               compressed_file.path().to_str().unwrap(),
-               output_file.path().to_str().unwrap()])
+        .args([
+            "-d",
+            "-f",
+            compressed_file.path().to_str().unwrap(),
+            output_file.path().to_str().unwrap(),
+        ])
         .status()
         .expect("spawn system lz4");
 
     assert!(status.success(), "system lz4 -d failed: {:?}", status);
 
     let decompressed = std::fs::read(output_file.path()).expect("read decompressed file");
-    assert_eq!(decompressed, original, "C-decompressed Rust-compressed bytes differ");
+    assert_eq!(
+        decompressed, original,
+        "C-decompressed Rust-compressed bytes differ"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -196,9 +218,11 @@ fn c_compress_rust_cli_decompress() {
 
     // Compress with the system C lz4.
     let status = Command::new(&lz4_bin)
-        .args(["-f",
-               input_file.path().to_str().unwrap(),
-               compressed_file.path().to_str().unwrap()])
+        .args([
+            "-f",
+            input_file.path().to_str().unwrap(),
+            compressed_file.path().to_str().unwrap(),
+        ])
         .status()
         .expect("spawn system lz4");
 
@@ -206,16 +230,22 @@ fn c_compress_rust_cli_decompress() {
 
     // Decompress with our Rust lz4 binary.
     let status = Command::new(rust_lz4())
-        .args(["-d", "-f",
-               compressed_file.path().to_str().unwrap(),
-               output_file.path().to_str().unwrap()])
+        .args([
+            "-d",
+            "-f",
+            compressed_file.path().to_str().unwrap(),
+            output_file.path().to_str().unwrap(),
+        ])
         .status()
         .expect("spawn rust lz4");
 
     assert!(status.success(), "rust lz4 -d failed: {:?}", status);
 
     let decompressed = std::fs::read(output_file.path()).expect("read decompressed file");
-    assert_eq!(decompressed, original, "Rust-decompressed C-compressed bytes differ");
+    assert_eq!(
+        decompressed, original,
+        "Rust-decompressed C-compressed bytes differ"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -252,7 +282,10 @@ fn frame_content_checksum_bit_flip() {
     // 7-byte minimum frame header to avoid corrupting the header in a way that
     // is detected before the checksum is read — we want checksum detection).
     let flip_pos = compressed_size / 2;
-    assert!(flip_pos > 7, "compressed output too small for mid-payload flip");
+    assert!(
+        flip_pos > 7,
+        "compressed output too small for mid-payload flip"
+    );
     compressed[flip_pos] ^= 0xFF;
 
     let corrupted_file = write_tmp(&compressed);
@@ -260,9 +293,12 @@ fn frame_content_checksum_bit_flip() {
 
     // The system lz4 should detect the corruption and exit non-zero.
     let status = Command::new(&lz4_bin)
-        .args(["-d", "-f",
-               corrupted_file.path().to_str().unwrap(),
-               output_file.path().to_str().unwrap()])
+        .args([
+            "-d",
+            "-f",
+            corrupted_file.path().to_str().unwrap(),
+            output_file.path().to_str().unwrap(),
+        ])
         .status()
         .expect("spawn system lz4");
 
@@ -290,16 +326,22 @@ fn synthetic_corpus_roundtrip() {
 
     // Step 1: Rust compress.
     let compressed = compress_frame_to_vec(&original);
-    assert!(!compressed.is_empty(), "rust compression produced empty output");
+    assert!(
+        !compressed.is_empty(),
+        "rust compression produced empty output"
+    );
 
     // Step 2: C decompress → temp file.
     let compressed_file = write_tmp(&compressed);
     let c_decompressed_file = NamedTempFile::new().expect("create c-decompressed temp file");
 
     let status = Command::new(&lz4_bin)
-        .args(["-d", "-f",
-               compressed_file.path().to_str().unwrap(),
-               c_decompressed_file.path().to_str().unwrap()])
+        .args([
+            "-d",
+            "-f",
+            compressed_file.path().to_str().unwrap(),
+            c_decompressed_file.path().to_str().unwrap(),
+        ])
         .status()
         .expect("spawn system lz4");
 
@@ -309,20 +351,27 @@ fn synthetic_corpus_roundtrip() {
     let re_compressed_file = NamedTempFile::new().expect("create re-compressed temp file");
 
     let status = Command::new(&lz4_bin)
-        .args(["-f",
-               c_decompressed_file.path().to_str().unwrap(),
-               re_compressed_file.path().to_str().unwrap()])
+        .args([
+            "-f",
+            c_decompressed_file.path().to_str().unwrap(),
+            re_compressed_file.path().to_str().unwrap(),
+        ])
         .status()
         .expect("spawn system lz4");
 
-    assert!(status.success(), "system lz4 re-compress failed: {:?}", status);
+    assert!(
+        status.success(),
+        "system lz4 re-compress failed: {:?}",
+        status
+    );
 
     // Step 4: Rust decompress the C re-compressed data.
-    let re_compressed = std::fs::read(re_compressed_file.path())
-        .expect("read re-compressed file");
+    let re_compressed = std::fs::read(re_compressed_file.path()).expect("read re-compressed file");
     let final_output = decompress_frame_to_vec(&re_compressed)
         .expect("rust decompression of C-compressed data failed");
 
-    assert_eq!(final_output, original,
-        "full Rust→C→Rust roundtrip produced different bytes");
+    assert_eq!(
+        final_output, original,
+        "full Rust→C→Rust roundtrip produced different bytes"
+    );
 }

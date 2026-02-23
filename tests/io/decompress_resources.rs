@@ -15,7 +15,7 @@ use lz4::io::decompress_resources::{
     load_dict_file, BufferPool, DecompressResources, INBUFF_SIZE, LZ4IO_D_BUFFER_SIZE,
     OUTBUFF_SIZE, PBUFFERS_NB,
 };
-use lz4::io::prefs::{LZ4_MAX_DICT_SIZE, MB, Prefs};
+use lz4::io::prefs::{Prefs, LZ4_MAX_DICT_SIZE, MB};
 use std::io::Write;
 
 // ─────────────────────────────────────────────────────────────────────────────

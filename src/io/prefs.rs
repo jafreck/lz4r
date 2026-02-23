@@ -112,8 +112,14 @@ pub fn cpu_load_sec(cpu_start: libc::clock_t) -> f64 {
             let u = user.assume_init();
             // The high 32-bit word should never be set for realistic process
             // lifetimes; assert in debug builds to catch unexpected overflow.
-            debug_assert_eq!(k.dwHighDateTime, 0, "kernel time dwHighDateTime unexpected non-zero");
-            debug_assert_eq!(u.dwHighDateTime, 0, "user time dwHighDateTime unexpected non-zero");
+            debug_assert_eq!(
+                k.dwHighDateTime, 0,
+                "kernel time dwHighDateTime unexpected non-zero"
+            );
+            debug_assert_eq!(
+                u.dwHighDateTime, 0,
+                "user time dwHighDateTime unexpected non-zero"
+            );
             ((k.dwLowDateTime as f64) + (u.dwLowDateTime as f64)) * 100.0 / 1_000_000_000.0
         }
     }
@@ -133,10 +139,7 @@ pub fn final_time_display(time_start: TimeT, cpu_start: libc::clock_t, size: u64
     #[cfg(feature = "multithread")]
     {
         if !crate::timefn::support_mt_measurements() {
-            display_level(
-                5,
-                "time measurements not compatible with multithreading \n",
-            );
+            display_level(5, "time measurements not compatible with multithreading \n");
             return;
         }
     }
@@ -274,9 +277,7 @@ impl Prefs {
     /// Sets the number of worker threads, clamped to `[1, NB_WORKERS_MAX]`.
     /// Returns the actual value stored.
     pub fn set_nb_workers(&mut self, nb_workers: i32) -> i32 {
-        let clamped = nb_workers
-            .max(1)
-            .min(crate::config::NB_WORKERS_MAX as i32);
+        let clamped = nb_workers.max(1).min(crate::config::NB_WORKERS_MAX as i32);
         self.nb_workers = clamped;
         clamped
     }
@@ -334,7 +335,10 @@ impl Prefs {
         // Count bit-pair positions to find the closest standard block-size ID.
         let mut bsid: u32 = 0;
         let mut bs = block_size - 1;
-        while { bs >>= 2; bs != 0 } {
+        while {
+            bs >>= 2;
+            bs != 0
+        } {
             bsid += 1;
         }
         if bsid < 7 {

@@ -15,8 +15,12 @@ use crate::frame::compress::{
     lz4f_compress_begin, lz4f_compress_bound, lz4f_compress_end, lz4f_compress_update,
     lz4f_create_compression_context,
 };
-use crate::frame::decompress::{lz4f_create_decompression_context, lz4f_decompress, lz4f_get_frame_info, Lz4FDCtx};
-use crate::frame::types::{BlockSizeId, Lz4FError, Lz4FCCtx, Preferences, LZ4F_VERSION, MAX_FH_SIZE};
+use crate::frame::decompress::{
+    lz4f_create_decompression_context, lz4f_decompress, lz4f_get_frame_info, Lz4FDCtx,
+};
+use crate::frame::types::{
+    BlockSizeId, Lz4FCCtx, Lz4FError, Preferences, LZ4F_VERSION, MAX_FH_SIZE,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal helpers
@@ -261,16 +265,12 @@ impl<W: Write> Write for Lz4WriteFile<W> {
         while remain > 0 {
             let chunk = remain.min(self.max_write_size);
 
-            let compressed = lz4f_compress_update(
-                &mut self.cctx,
-                &mut self.dst_buf,
-                &buf[p..p + chunk],
-                None,
-            )
-            .map_err(|e| {
-                self.errored = true;
-                io::Error::new(io::ErrorKind::Other, e.to_string())
-            })?;
+            let compressed =
+                lz4f_compress_update(&mut self.cctx, &mut self.dst_buf, &buf[p..p + chunk], None)
+                    .map_err(|e| {
+                    self.errored = true;
+                    io::Error::new(io::ErrorKind::Other, e.to_string())
+                })?;
 
             self.inner
                 .as_mut()
@@ -339,13 +339,13 @@ pub fn lz4_read_frame<R: Read>(reader: R, writer: &mut impl Write) -> Result<(),
     let mut lz4r = Lz4ReadFile::open(reader)?;
     let mut tmp = [0u8; 64 * 1024];
     loop {
-        let n = lz4r
-            .read(&mut tmp)
-            .map_err(|_| Lz4FError::IoRead)?;
+        let n = lz4r.read(&mut tmp).map_err(|_| Lz4FError::IoRead)?;
         if n == 0 {
             break;
         }
-        writer.write_all(&tmp[..n]).map_err(|_| Lz4FError::IoWrite)?;
+        writer
+            .write_all(&tmp[..n])
+            .map_err(|_| Lz4FError::IoWrite)?;
     }
     Ok(())
 }
@@ -390,7 +390,12 @@ mod tests {
     /// Round-trip using the streaming Write/Read trait implementations.
     #[test]
     fn streaming_write_read() {
-        let original: Vec<u8> = b"streaming test data".iter().cycle().take(4096).cloned().collect();
+        let original: Vec<u8> = b"streaming test data"
+            .iter()
+            .cycle()
+            .take(4096)
+            .cloned()
+            .collect();
 
         let mut lz4w = Lz4WriteFile::open(Vec::new(), None).unwrap();
         // Write in small chunks to exercise the chunking loop.
@@ -404,7 +409,9 @@ mod tests {
         let mut tmp = [0u8; 512];
         loop {
             let n = lz4r.read(&mut tmp).unwrap();
-            if n == 0 { break; }
+            if n == 0 {
+                break;
+            }
             recovered.extend_from_slice(&tmp[..n]);
         }
 

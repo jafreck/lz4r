@@ -9,7 +9,7 @@
 //! - Ring buffer size calculation
 
 use lz4::block::decompress_api::{
-    decompress_safe, decompress_safe_continue, decoder_ring_buffer_size, set_stream_decode,
+    decoder_ring_buffer_size, decompress_safe, decompress_safe_continue, set_stream_decode,
     Lz4StreamDecode,
 };
 use lz4::block::stream::Lz4Stream;
@@ -42,8 +42,8 @@ fn test_single_chunk_streaming() {
 
     // Decompress with standard one-shot API
     let mut decompressed = vec![0u8; src.len()];
-    let decompressed_size = decompress_safe(&compressed, &mut decompressed)
-        .expect("Single-chunk decompression failed");
+    let decompressed_size =
+        decompress_safe(&compressed, &mut decompressed).expect("Single-chunk decompression failed");
     assert_eq!(decompressed_size, src.len());
     assert_eq!(&decompressed[..], &src[..], "Data mismatch after roundtrip");
 }
@@ -143,19 +143,11 @@ fn test_stream_reset_between_messages() {
     // Decompress each independently
     let mut decompressed1 = vec![0u8; message1.len()];
     decompress_safe(&compressed1, &mut decompressed1).expect("Failed to decompress message1");
-    assert_eq!(
-        &decompressed1[..],
-        &message1[..],
-        "First message mismatch"
-    );
+    assert_eq!(&decompressed1[..], &message1[..], "First message mismatch");
 
     let mut decompressed2 = vec![0u8; message2.len()];
     decompress_safe(&compressed2, &mut decompressed2).expect("Failed to decompress message2");
-    assert_eq!(
-        &decompressed2[..],
-        &message2[..],
-        "Second message mismatch"
-    );
+    assert_eq!(&decompressed2[..], &message2[..], "Second message mismatch");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -168,8 +160,8 @@ fn test_set_stream_decode_no_dict() {
 
     // Compress with default API
     let mut compressed = vec![0u8; lz4::compress_bound(src.len() as i32) as usize];
-    let compressed_size = lz4::lz4_compress_default(src, &mut compressed)
-        .expect("Compression failed");
+    let compressed_size =
+        lz4::lz4_compress_default(src, &mut compressed).expect("Compression failed");
     compressed.truncate(compressed_size);
 
     // Create streaming decode context with no dictionary
@@ -262,11 +254,7 @@ fn test_full_streaming_roundtrip() {
         write_pos += size;
     }
 
-    assert_eq!(
-        write_pos,
-        text.len(),
-        "Total decompressed size mismatch"
-    );
+    assert_eq!(write_pos, text.len(), "Total decompressed size mismatch");
     assert_eq!(
         &output_buffer[..write_pos],
         &text[..],
@@ -310,7 +298,8 @@ fn test_decompress_safe_using_dict() {
     // Dictionary for compression
     let dictionary = b"Common prefix data that appears in many messages. The quick brown fox jumps over the lazy dog.";
 
-    let src = b"Common prefix data that appears in many messages. This is the actual message content.";
+    let src =
+        b"Common prefix data that appears in many messages. This is the actual message content.";
 
     // Create a streaming context and load the dictionary
     let mut stream = Lz4Stream::new();
@@ -360,10 +349,7 @@ fn test_streaming_empty_input() {
 
     // LZ4 should handle empty input gracefully
     // Either return 0 or produce a minimal valid block
-    assert!(
-        size >= 0,
-        "Empty input should not produce negative size"
-    );
+    assert!(size >= 0, "Empty input should not produce negative size");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -436,7 +422,7 @@ fn test_save_dict() {
 
     // For streaming compression, use streaming decompression with the saved dict
     let mut decode_ctx = Lz4StreamDecode::new();
-    
+
     // Set up decoder with no initial dict
     unsafe {
         set_stream_decode(&mut decode_ctx, &[]);

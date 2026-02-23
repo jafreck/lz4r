@@ -541,7 +541,9 @@ pub unsafe fn decompress_safe_using_dict(
             src_ptr, dst_ptr, src_size, max_output, dict_size,
         );
     }
-    decompress_safe_force_ext_dict(src_ptr, dst_ptr, src_size, max_output, dict_start, dict_size)
+    decompress_safe_force_ext_dict(
+        src_ptr, dst_ptr, src_size, max_output, dict_start, dict_size,
+    )
 }
 
 /// Partially decompress an LZ4 block using an explicit dictionary.

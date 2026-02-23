@@ -90,7 +90,10 @@ fn version_string_fn_is_static() {
 #[test]
 fn size_of_state_is_positive() {
     // Equivalent to LZ4_sizeofState(); must be > 0
-    assert!(size_of_state() > 0, "size_of_state must be a positive number of bytes");
+    assert!(
+        size_of_state() > 0,
+        "size_of_state must be a positive number of bytes"
+    );
 }
 
 #[test]
@@ -104,7 +107,10 @@ fn size_of_state_matches_stream_state_internal_size() {
 fn size_of_state_is_at_least_16_bytes() {
     // LZ4_stream_t in C is at least 16 KB in its hash table alone;
     // the Rust port must reflect a reasonable minimum.
-    assert!(size_of_state() >= 16, "state size should be at least 16 bytes");
+    assert!(
+        size_of_state() >= 16,
+        "state size should be at least 16 bytes"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -267,7 +273,10 @@ fn reexport_lz4_compress_default_is_callable() {
     let bound = lz4::block::compress::compress_bound(src.len() as i32) as usize;
     let mut dst = vec![0u8; bound];
     let result = lz4::lz4_compress_default(src, &mut dst);
-    assert!(result.is_ok(), "lz4_compress_default reexport must work: {result:?}");
+    assert!(
+        result.is_ok(),
+        "lz4_compress_default reexport must work: {result:?}"
+    );
     assert!(result.unwrap() > 0);
 }
 
@@ -281,7 +290,10 @@ fn reexport_lz4_decompress_safe_is_callable() {
 
     let mut decompressed = vec![0u8; src.len()];
     let result = lz4::lz4_decompress_safe(&compressed[..n], &mut decompressed);
-    assert!(result.is_ok(), "lz4_decompress_safe reexport must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "lz4_decompress_safe reexport must succeed: {result:?}"
+    );
     let m = result.unwrap();
     assert_eq!(m, src.len());
     assert_eq!(&decompressed[..m], src.as_ref());

@@ -135,7 +135,10 @@ fn compress_default_all_zeros_compresses_well() {
     assert!(result.is_ok());
     let n = result.unwrap();
     // Compressed size of 1024 zeros should be much smaller than 1024
-    assert!(n < src.len(), "zeros should compress to less than input size");
+    assert!(
+        n < src.len(),
+        "zeros should compress to less than input size"
+    );
 }
 
 #[test]
@@ -332,7 +335,10 @@ fn compress_fast_ext_state_produces_valid_compressed_output() {
     };
     assert!(result.is_ok());
     let n = result.unwrap();
-    assert!(n > 0 && n < src.len(), "highly compressible data should compress");
+    assert!(
+        n > 0 && n < src.len(),
+        "highly compressible data should compress"
+    );
 }
 
 #[test]
@@ -415,7 +421,10 @@ fn compress_fast_ext_state_fast_reset_after_full_init_matches() {
     }
     .unwrap();
 
-    assert_eq!(r_full, r_fast, "fast_reset on fresh state should match full init");
+    assert_eq!(
+        r_full, r_fast,
+        "fast_reset on fresh state should match full init"
+    );
     assert_eq!(&dst_full[..r_full], &dst_fast[..r_fast]);
 }
 
@@ -467,14 +476,8 @@ fn compress_dest_size_small_dst_partial_consume() {
     assert!(result.is_ok());
     let (consumed, compressed) = result.unwrap();
     // We can't consume 4096 bytes into 32 bytes of output
-    assert!(
-        consumed <= src.len(),
-        "consumed must not exceed src length"
-    );
-    assert!(
-        compressed <= dst.len(),
-        "compressed must fit in dst"
-    );
+    assert!(consumed <= src.len(), "consumed must not exceed src length");
+    assert!(compressed <= dst.len(), "compressed must fit in dst");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -551,7 +554,10 @@ fn compress_default_non_compressible_data_succeeds_with_sufficient_output() {
     }
     let mut dst = make_dst(src.len());
     let result = compress_default(&src, &mut dst);
-    assert!(result.is_ok(), "should succeed with worst-case dst: {result:?}");
+    assert!(
+        result.is_ok(),
+        "should succeed with worst-case dst: {result:?}"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -569,7 +575,10 @@ fn compress_default_single_zero_byte_format() {
     let src = [0x00u8];
     let mut dst = make_dst(1);
     let n = compress_default(&src, &mut dst).unwrap();
-    assert_eq!(n, 2, "single byte should compress to 2-byte block (token + literal)");
+    assert_eq!(
+        n, 2,
+        "single byte should compress to 2-byte block (token + literal)"
+    );
     assert_eq!(dst[0], 0x10, "token should encode 1 literal (0x10)");
     assert_eq!(dst[1], 0x00, "literal value should be preserved");
 }

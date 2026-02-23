@@ -133,7 +133,7 @@ fn protect_dict_end_returns_false_at_last_3_dict_bytes() {
     assert!(!protect_dict_end(dl, dl - 1)); // gap = 0
     assert!(!protect_dict_end(dl, dl - 2)); // gap = 1
     assert!(!protect_dict_end(dl, dl - 3)); // gap = 2
-    assert!(protect_dict_end(dl, dl - 4));  // gap = 3 → true
+    assert!(protect_dict_end(dl, dl - 4)); // gap = 3 → true
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -260,7 +260,9 @@ fn reverse_count_pattern_does_not_go_before_i_low() {
     let pattern = 0xCCCCCCCCu32;
     let bytes = pattern.to_ne_bytes();
     let mut full = Vec::new();
-    for _ in 0..2 { full.extend_from_slice(&bytes); } // 8 bytes
+    for _ in 0..2 {
+        full.extend_from_slice(&bytes);
+    } // 8 bytes
     unsafe {
         let i_low = full.as_ptr().add(5); // restrict to last 3 bytes
         let ip = full.as_ptr().add(8);
@@ -285,7 +287,7 @@ fn repeat_state_equality() {
 #[test]
 fn repeat_state_copy_clone() {
     let a = RepeatState::Confirmed;
-    let b = a;         // Copy
+    let b = a; // Copy
     let c = a.clone(); // Clone
     assert_eq!(b, RepeatState::Confirmed);
     assert_eq!(c, RepeatState::Confirmed);
@@ -359,8 +361,7 @@ fn insert_sets_next_to_update_to_target() {
         let ip = buf.as_ptr().add(20);
         insert(&mut ctx, ip);
         // target = (ip - prefix_start) + dict_limit
-        let expected = (ip.offset_from(buf.as_ptr()) as u32)
-            .wrapping_add(ctx.dict_limit);
+        let expected = (ip.offset_from(buf.as_ptr()) as u32).wrapping_add(ctx.dict_limit);
         // After insert, next_to_update must equal target
         assert_eq!(ctx.next_to_update, expected);
     }
@@ -473,7 +474,11 @@ fn insert_and_find_best_match_zero_attempts_returns_no_match() {
             DictCtxDirective::NoDictCtx,
         );
         // off==0 means no match was recorded (the chain loop never ran)
-        assert_eq!(m.off, 0, "zero attempts must record no offset; got off={}", m.off);
+        assert_eq!(
+            m.off, 0,
+            "zero attempts must record no offset; got off={}",
+            m.off
+        );
     }
 }
 
@@ -529,7 +534,11 @@ fn insert_and_get_wider_match_no_match_unique_data() {
             DictCtxDirective::NoDictCtx,
             false,
         );
-        assert!(m.len < 4, "unique data should yield no match; got len={}", m.len);
+        assert!(
+            m.len < 4,
+            "unique data should yield no match; got len={}",
+            m.len
+        );
     }
 }
 

@@ -44,7 +44,7 @@ pub const LZ4HC_CLEVEL_MAX: i32 = 12;
 pub const LZ4HC_DICTIONARY_LOGSIZE: u32 = 16;
 /// Chain table length: one entry per slot in the 64 KB dictionary window.
 pub const LZ4HC_MAXD: usize = 1 << LZ4HC_DICTIONARY_LOGSIZE; // 65536
-pub const LZ4HC_MAXD_MASK: usize = LZ4HC_MAXD - 1;           // 65535
+pub const LZ4HC_MAXD_MASK: usize = LZ4HC_MAXD - 1; // 65535
 
 pub const LZ4HC_HASH_LOG: u32 = 15;
 /// Hash table entries (HC uses a 15-bit log → 32768 u32 slots).
@@ -120,19 +120,71 @@ pub struct CParams {
 ///
 /// Matches `k_clTable[LZ4HC_CLEVEL_MAX + 1]` in lz4hc.c exactly.
 pub static K_CL_TABLE: [CParams; (LZ4HC_CLEVEL_MAX + 1) as usize] = [
-    CParams { strat: HcStrategy::Lz4Mid, nb_searches:     2, target_length:              16 }, /* 0, unused */
-    CParams { strat: HcStrategy::Lz4Mid, nb_searches:     2, target_length:              16 }, /* 1, unused */
-    CParams { strat: HcStrategy::Lz4Mid, nb_searches:     2, target_length:              16 }, /* 2 */
-    CParams { strat: HcStrategy::Lz4Hc,  nb_searches:     4, target_length:              16 }, /* 3 */
-    CParams { strat: HcStrategy::Lz4Hc,  nb_searches:     8, target_length:              16 }, /* 4 */
-    CParams { strat: HcStrategy::Lz4Hc,  nb_searches:    16, target_length:              16 }, /* 5 */
-    CParams { strat: HcStrategy::Lz4Hc,  nb_searches:    32, target_length:              16 }, /* 6 */
-    CParams { strat: HcStrategy::Lz4Hc,  nb_searches:    64, target_length:              16 }, /* 7 */
-    CParams { strat: HcStrategy::Lz4Hc,  nb_searches:   128, target_length:              16 }, /* 8 */
-    CParams { strat: HcStrategy::Lz4Hc,  nb_searches:   256, target_length:              16 }, /* 9 */
-    CParams { strat: HcStrategy::Lz4Opt, nb_searches:    96, target_length:              64 }, /* 10 == LZ4HC_CLEVEL_OPT_MIN */
-    CParams { strat: HcStrategy::Lz4Opt, nb_searches:   512, target_length:             128 }, /* 11 */
-    CParams { strat: HcStrategy::Lz4Opt, nb_searches: 16384, target_length: LZ4_OPT_NUM as u32 }, /* 12 == LZ4HC_CLEVEL_MAX */
+    CParams {
+        strat: HcStrategy::Lz4Mid,
+        nb_searches: 2,
+        target_length: 16,
+    }, /* 0, unused */
+    CParams {
+        strat: HcStrategy::Lz4Mid,
+        nb_searches: 2,
+        target_length: 16,
+    }, /* 1, unused */
+    CParams {
+        strat: HcStrategy::Lz4Mid,
+        nb_searches: 2,
+        target_length: 16,
+    }, /* 2 */
+    CParams {
+        strat: HcStrategy::Lz4Hc,
+        nb_searches: 4,
+        target_length: 16,
+    }, /* 3 */
+    CParams {
+        strat: HcStrategy::Lz4Hc,
+        nb_searches: 8,
+        target_length: 16,
+    }, /* 4 */
+    CParams {
+        strat: HcStrategy::Lz4Hc,
+        nb_searches: 16,
+        target_length: 16,
+    }, /* 5 */
+    CParams {
+        strat: HcStrategy::Lz4Hc,
+        nb_searches: 32,
+        target_length: 16,
+    }, /* 6 */
+    CParams {
+        strat: HcStrategy::Lz4Hc,
+        nb_searches: 64,
+        target_length: 16,
+    }, /* 7 */
+    CParams {
+        strat: HcStrategy::Lz4Hc,
+        nb_searches: 128,
+        target_length: 16,
+    }, /* 8 */
+    CParams {
+        strat: HcStrategy::Lz4Hc,
+        nb_searches: 256,
+        target_length: 16,
+    }, /* 9 */
+    CParams {
+        strat: HcStrategy::Lz4Opt,
+        nb_searches: 96,
+        target_length: 64,
+    }, /* 10 == LZ4HC_CLEVEL_OPT_MIN */
+    CParams {
+        strat: HcStrategy::Lz4Opt,
+        nb_searches: 512,
+        target_length: 128,
+    }, /* 11 */
+    CParams {
+        strat: HcStrategy::Lz4Opt,
+        nb_searches: 16384,
+        target_length: LZ4_OPT_NUM as u32,
+    }, /* 12 == LZ4HC_CLEVEL_MAX */
 ];
 
 /// Return the compression parameters for a given compression level.
@@ -312,7 +364,7 @@ pub unsafe fn count_back(
     let mut back: i32 = 0;
     // min is the maximum we can step back (negative value)
     let min = {
-        let di = i_min.offset_from(ip) as i32;   // ≤ 0
+        let di = i_min.offset_from(ip) as i32; // ≤ 0
         let dm = m_min.offset_from(match_ptr) as i32; // ≤ 0
         di.max(dm) // whichever is less negative → the binding limit
     };

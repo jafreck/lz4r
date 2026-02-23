@@ -11,8 +11,8 @@
 
 use lz4::frame::header::{
     lz4f_compress_bound_internal, lz4f_compress_frame_bound, lz4f_compression_level_max,
-    lz4f_get_block_size, lz4f_header_checksum, lz4f_optimal_bsid, read_le32, read_le64,
-    write_le32, write_le64, LZ4HC_CLEVEL_MAX,
+    lz4f_get_block_size, lz4f_header_checksum, lz4f_optimal_bsid, read_le32, read_le64, write_le32,
+    write_le64, LZ4HC_CLEVEL_MAX,
 };
 use lz4::frame::types::{
     BlockChecksum, BlockMode, BlockSizeId, ContentChecksum, FrameInfo, Preferences, BF_SIZE,
@@ -184,13 +184,19 @@ fn get_block_size_geometric_sequence() {
 /// Parity: 0 bytes fits in Max64Kb regardless of requested ID.
 #[test]
 fn optimal_bsid_zero_src() {
-    assert_eq!(lz4f_optimal_bsid(BlockSizeId::Max4Mb, 0), BlockSizeId::Max64Kb);
+    assert_eq!(
+        lz4f_optimal_bsid(BlockSizeId::Max4Mb, 0),
+        BlockSizeId::Max64Kb
+    );
 }
 
 /// 1 byte fits in Max64Kb.
 #[test]
 fn optimal_bsid_one_byte() {
-    assert_eq!(lz4f_optimal_bsid(BlockSizeId::Max4Mb, 1), BlockSizeId::Max64Kb);
+    assert_eq!(
+        lz4f_optimal_bsid(BlockSizeId::Max4Mb, 1),
+        BlockSizeId::Max64Kb
+    );
 }
 
 /// Exactly 64 KB fits in Max64Kb (boundary: src <= maxBlockSize returns proposed).
@@ -304,7 +310,10 @@ fn header_checksum_different_inputs_differ() {
     let h2 = lz4f_header_checksum(&[0x61u8]);
     // Not guaranteed by the formula, but empirically true for these bytes
     // (this validates that distinct FLG bytes produce distinct HC bytes)
-    assert_ne!(h1, h2, "distinct FLG bytes should produce distinct header checksums");
+    assert_ne!(
+        h1, h2,
+        "distinct FLG bytes should produce distinct header checksums"
+    );
 }
 
 /// Larger header (FLG + BD + optional content size bytes).
@@ -470,9 +479,15 @@ fn compress_frame_bound_zero_null_prefs_is_23() {
 #[test]
 fn compress_frame_bound_adds_max_fh_size() {
     let prefs = Preferences::default();
-    let prefs_flushed = Preferences { auto_flush: true, ..prefs };
+    let prefs_flushed = Preferences {
+        auto_flush: true,
+        ..prefs
+    };
     let internal = lz4f_compress_bound_internal(1024, &prefs_flushed, 0);
-    assert_eq!(lz4f_compress_frame_bound(1024, Some(&prefs)), MAX_FH_SIZE + internal);
+    assert_eq!(
+        lz4f_compress_frame_bound(1024, Some(&prefs)),
+        MAX_FH_SIZE + internal
+    );
 }
 
 /// Frame bound with None prefs equals frame bound with zeroed prefs (after auto_flush forced).
@@ -504,8 +519,14 @@ fn compress_frame_bound_content_checksum_increases_bound() {
 /// auto_flush in caller prefs doesn't matter — lz4f_compress_frame_bound forces it.
 #[test]
 fn compress_frame_bound_ignores_caller_auto_flush() {
-    let prefs_no_flush = Preferences { auto_flush: false, ..Preferences::default() };
-    let prefs_flush = Preferences { auto_flush: true, ..Preferences::default() };
+    let prefs_no_flush = Preferences {
+        auto_flush: false,
+        ..Preferences::default()
+    };
+    let prefs_flush = Preferences {
+        auto_flush: true,
+        ..Preferences::default()
+    };
     // Both should produce the same result since frame_bound forces auto_flush=true
     assert_eq!(
         lz4f_compress_frame_bound(1024, Some(&prefs_no_flush)),

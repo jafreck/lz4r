@@ -13,16 +13,16 @@ use std::fs;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::sync::atomic::Ordering;
 
-use crate::frame::{lz4f_create_decompression_context, lz4f_get_frame_info, lz4f_header_size};
 use crate::frame::types::{
-    BlockChecksum, BlockMode, BlockSizeId, ContentChecksum,
-    FrameInfo as NativeFrameInfo, FrameType as NativeFrameType,
+    BlockChecksum, BlockMode, BlockSizeId, ContentChecksum, FrameInfo as NativeFrameInfo,
+    FrameType as NativeFrameType,
 };
+use crate::frame::{lz4f_create_decompression_context, lz4f_get_frame_info, lz4f_header_size};
 
 use crate::io::file_io::STDIN_MARK;
 use crate::io::prefs::{
     DISPLAY_LEVEL, LEGACY_MAGICNUMBER, LZ4IO_MAGICNUMBER, LZ4IO_SKIPPABLE0, LZ4IO_SKIPPABLEMASK,
-    MB, MAGICNUMBER_SIZE,
+    MAGICNUMBER_SIZE, MB,
 };
 
 // ---------------------------------------------------------------------------
@@ -192,8 +192,12 @@ fn skip_blocks_data(file: &mut fs::File, block_checksum: bool, content_checksum:
         total += LZ4F_BLOCK_HEADER_SIZE as u64;
 
         let next_cblock_size = (read_le32(&buf) & 0x7FFF_FFFF) as u64;
-        let next_block =
-            next_cblock_size + if block_checksum { LZ4F_BLOCK_CHECKSUM_SIZE as u64 } else { 0 };
+        let next_block = next_cblock_size
+            + if block_checksum {
+                LZ4F_BLOCK_CHECKSUM_SIZE as u64
+            } else {
+                0
+            };
 
         if next_cblock_size == 0 {
             // Reached EndMark
@@ -272,7 +276,10 @@ fn skip_legacy_blocks_data(file: &mut fs::File) -> u64 {
         }
 
         total += (LEGACY_BLOCK_HEADER_SIZE as u64) + (next_cblock_size as u64);
-        if file.seek(SeekFrom::Current(next_cblock_size as i64)).is_err() {
+        if file
+            .seek(SeekFrom::Current(next_cblock_size as i64))
+            .is_err()
+        {
             return LEGACY_FRAME_UNDECODABLE;
         }
     }
@@ -686,12 +693,7 @@ pub fn display_compressed_files_info(paths: &[&str]) -> io::Result<()> {
         }
 
         if display_level >= 3 {
-            println!(
-                "{}({}/{})",
-                cfinfo.file_name,
-                idx + 1,
-                paths.len()
-            );
+            println!("{}({}/{})", cfinfo.file_name, idx + 1, paths.len());
             println!(
                 "    {:>6} {:>14} {:>5} {:>8} {:>20} {:>20} {:>9}",
                 "Frame", "Type", "Block", "Checksum", "Compressed", "Uncompressed", "Ratio"

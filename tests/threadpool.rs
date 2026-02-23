@@ -128,7 +128,9 @@ fn jobs_completed_returns_immediately_when_no_jobs() {
         pool.jobs_completed();
         d.store(1, Ordering::SeqCst);
     });
-    handle.join().expect("jobs_completed should not deadlock on idle pool");
+    handle
+        .join()
+        .expect("jobs_completed should not deadlock on idle pool");
     assert_eq!(done.load(Ordering::SeqCst), 1);
 }
 

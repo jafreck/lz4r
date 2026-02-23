@@ -104,9 +104,7 @@ pub fn fwrite_sparse(
         for i in 0..seg_words {
             let start = buf_pos + i * WORD;
             // Safety: bounds are guaranteed by `aligned_len` calculation.
-            let word = usize::from_ne_bytes(
-                buf[start..start + WORD].try_into().unwrap(),
-            );
+            let word = usize::from_ne_bytes(buf[start..start + WORD].try_into().unwrap());
             if word != 0 {
                 break;
             }

@@ -114,10 +114,7 @@ fn single_directory_with_one_file_expands() {
     let list = create_file_list(&[dir.path()]).unwrap();
 
     assert_eq!(list.len(), 1);
-    assert_eq!(
-        list[0].file_name().unwrap().to_string_lossy(),
-        "only.txt"
-    );
+    assert_eq!(list[0].file_name().unwrap().to_string_lossy(), "only.txt");
 }
 
 /// UTIL_prepareFileList expands subdirectories recursively.
@@ -273,7 +270,11 @@ fn symlink_to_file_is_not_included() {
     let list = create_file_list(&[dir.path()]).unwrap();
     // Only the real file appears; the symlink entry is not is_file() when
     // follow_links=false.
-    assert_eq!(list.len(), 1, "only the real file must appear; symlink is excluded");
+    assert_eq!(
+        list.len(),
+        1,
+        "only the real file must appear; symlink is excluded"
+    );
     assert_eq!(list[0].file_name().unwrap().to_string_lossy(), "real.txt");
 }
 

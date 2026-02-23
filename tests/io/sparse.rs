@@ -70,7 +70,10 @@ fn read_le32_known_vector() {
 #[test]
 fn read_le32_extra_bytes_ignored() {
     let result = read_le32(&[0x01, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF]);
-    assert_eq!(result, 1u32, "extra bytes beyond the first 4 must be ignored");
+    assert_eq!(
+        result, 1u32,
+        "extra bytes beyond the first 4 must be ignored"
+    );
 }
 
 /// High byte only: [0,0,0,0x80] → 0x80000000.
@@ -102,7 +105,10 @@ fn fwrite_sparse_end_zero_skips_is_noop() {
     let mut f = tempfile::tempfile().unwrap();
     fwrite_sparse_end(&mut f, 0).unwrap();
     let contents = read_all(&mut f);
-    assert!(contents.is_empty(), "stored_skips=0 must leave the file empty");
+    assert!(
+        contents.is_empty(),
+        "stored_skips=0 must leave the file empty"
+    );
 }
 
 /// stored_skips == 1: writes exactly 1 zero byte.
@@ -122,7 +128,10 @@ fn fwrite_sparse_end_four_skips_extends_file() {
     let mut f = tempfile::tempfile().unwrap();
     fwrite_sparse_end(&mut f, 4).unwrap();
     let len = f.seek(SeekFrom::End(0)).unwrap();
-    assert_eq!(len, 4, "stored_skips=4 should produce a 4-byte logical file");
+    assert_eq!(
+        len, 4,
+        "stored_skips=4 should produce a 4-byte logical file"
+    );
 }
 
 /// stored_skips == 1024: file logical size equals 1024.
@@ -145,7 +154,10 @@ fn fwrite_sparse_end_appends_after_existing_data() {
     fwrite_sparse_end(&mut f, 8).unwrap();
     let len = f.seek(SeekFrom::End(0)).unwrap();
     // Total logical size: 8 (written) + 8 (skips) = 16.
-    assert_eq!(len, 16, "sparse end after written data should produce correct total size");
+    assert_eq!(
+        len, 16,
+        "sparse end after written data should produce correct total size"
+    );
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -194,7 +206,10 @@ mod unix_fwrite_sparse {
         let skips = fwrite_sparse(&mut f, &zeros, SPARSE_SEGMENT_SIZE, 0, true).unwrap();
         assert_eq!(skips, zeros.len() as u64, "all zeros must be accumulated");
         let pos = f.seek(SeekFrom::Current(0)).unwrap();
-        assert_eq!(pos, 0, "no seek/write should have occurred for all-zero buffer");
+        assert_eq!(
+            pos, 0,
+            "no seek/write should have occurred for all-zero buffer"
+        );
     }
 
     /// A single zero byte accumulates 1 skip (trailing-bytes path).
@@ -238,7 +253,8 @@ mod unix_fwrite_sparse {
         let mut f = tempfile::tempfile().unwrap();
         let zeros = vec![0u8; WORD];
         let initial_skips = 5u64;
-        let skips = fwrite_sparse(&mut f, &zeros, SPARSE_SEGMENT_SIZE, initial_skips, true).unwrap();
+        let skips =
+            fwrite_sparse(&mut f, &zeros, SPARSE_SEGMENT_SIZE, initial_skips, true).unwrap();
         assert_eq!(skips, initial_skips + WORD as u64);
     }
 
@@ -274,7 +290,10 @@ mod unix_fwrite_sparse {
 
         let skips = fwrite_sparse(&mut f, &buf, SPARSE_SEGMENT_SIZE, 0, true).unwrap();
         // Both words are in one segment; the whole segment is written → skips == 0.
-        assert_eq!(skips, 0, "intra-segment trailing zeros are written, not accumulated");
+        assert_eq!(
+            skips, 0,
+            "intra-segment trailing zeros are written, not accumulated"
+        );
         let contents = read_all(&mut f);
         assert_eq!(contents, buf, "file must contain both words verbatim");
     }
@@ -289,7 +308,10 @@ mod unix_fwrite_sparse {
         let skips = fwrite_sparse(&mut f, &original, SPARSE_SEGMENT_SIZE, 0, true).unwrap();
         fwrite_sparse_end(&mut f, skips).unwrap();
         let contents = read_all(&mut f);
-        assert_eq!(contents, original, "all-zeros round-trip must match original");
+        assert_eq!(
+            contents, original,
+            "all-zeros round-trip must match original"
+        );
     }
 
     /// Non-zero data → fwrite_sparse → read back == original.
@@ -300,7 +322,10 @@ mod unix_fwrite_sparse {
         let skips = fwrite_sparse(&mut f, &original, SPARSE_SEGMENT_SIZE, 0, true).unwrap();
         fwrite_sparse_end(&mut f, skips).unwrap();
         let contents = read_all(&mut f);
-        assert_eq!(contents, original, "plain data round-trip must match original");
+        assert_eq!(
+            contents, original,
+            "plain data round-trip must match original"
+        );
     }
 
     /// Mixed buffer [non-zero | zeros | non-zero] round-trips correctly.
@@ -316,7 +341,10 @@ mod unix_fwrite_sparse {
         fwrite_sparse_end(&mut f, skips).unwrap();
 
         let contents = read_all(&mut f);
-        assert_eq!(contents, original, "mixed content round-trip must match original");
+        assert_eq!(
+            contents, original,
+            "mixed content round-trip must match original"
+        );
     }
 
     /// Large buffer that spans multiple segments round-trips correctly.
@@ -330,8 +358,15 @@ mod unix_fwrite_sparse {
         fwrite_sparse_end(&mut f, skips).unwrap();
 
         let contents = read_all(&mut f);
-        assert_eq!(contents.len(), original.len(), "multi-segment round-trip length must match");
-        assert_eq!(contents, original, "multi-segment round-trip content must match");
+        assert_eq!(
+            contents.len(),
+            original.len(),
+            "multi-segment round-trip length must match"
+        );
+        assert_eq!(
+            contents, original,
+            "multi-segment round-trip content must match"
+        );
     }
 
     // ── Trailing-bytes path (non-word-aligned) ────────────────────────────────
@@ -356,7 +391,10 @@ mod unix_fwrite_sparse {
         let mut buf = vec![0xFFu8; WORD]; // non-zero word
         buf.push(0u8); // one trailing zero byte
         let skips = fwrite_sparse(&mut f, &buf, SPARSE_SEGMENT_SIZE, 0, true).unwrap();
-        assert_eq!(skips, 1, "single trailing zero byte must be accumulated as 1 skip");
+        assert_eq!(
+            skips, 1,
+            "single trailing zero byte must be accumulated as 1 skip"
+        );
     }
 
     /// Buffer of 3 bytes (sub-word): all non-zero — written, skips == 0.
@@ -389,7 +427,10 @@ mod unix_fwrite_sparse {
         let mut f = tempfile::tempfile().unwrap();
         let initial_skips = 7u64;
         let skips = fwrite_sparse(&mut f, &[], SPARSE_SEGMENT_SIZE, initial_skips, true).unwrap();
-        assert_eq!(skips, initial_skips, "empty buffer must not modify stored_skips");
+        assert_eq!(
+            skips, initial_skips,
+            "empty buffer must not modify stored_skips"
+        );
         let pos = f.seek(SeekFrom::Current(0)).unwrap();
         assert_eq!(pos, 0, "empty buffer must not move the file pointer");
     }
@@ -410,7 +451,10 @@ mod unix_fwrite_sparse {
         let skips = fwrite_sparse(&mut f, &buf, SPARSE_SEGMENT_SIZE, over_one_gb, true).unwrap();
 
         // After the non-zero word flushes everything, skips must be 0.
-        assert_eq!(skips, 0, "non-zero buf must flush all pending skips after ONE_GB guard");
+        assert_eq!(
+            skips, 0,
+            "non-zero buf must flush all pending skips after ONE_GB guard"
+        );
         // File logical length = over_one_gb + WORD (the non-zero word was written).
         let len = f.seek(SeekFrom::End(0)).unwrap();
         assert_eq!(len, over_one_gb + WORD as u64);

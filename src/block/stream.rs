@@ -177,11 +177,8 @@ impl Lz4Stream {
 
                 while p.add(HASH_UNIT) <= dict_end {
                     let h = hash_position(p, TableType::ByU32);
-                    if get_index_on_hash(
-                        h,
-                        self.internal.hash_table.as_ptr(),
-                        TableType::ByU32,
-                    ) <= limit
+                    if get_index_on_hash(h, self.internal.hash_table.as_ptr(), TableType::ByU32)
+                        <= limit
                     {
                         put_index_on_hash(
                             idx32,
@@ -283,12 +280,7 @@ impl Lz4Stream {
     pub fn renorm_dict(&mut self, next_size: i32) {
         debug_assert!(next_size >= 0);
         // Mirror of the C guard: `currentOffset + (unsigned)nextSize > 0x80000000`.
-        if self
-            .internal
-            .current_offset
-            .wrapping_add(next_size as u32)
-            > 0x8000_0000
-        {
+        if self.internal.current_offset.wrapping_add(next_size as u32) > 0x8000_0000 {
             let delta = self.internal.current_offset.wrapping_sub(64 * KB as u32);
             // Compute dict_end before mutating dict_size / dictionary.
             let dict_end: *const u8 = unsafe {
@@ -309,8 +301,7 @@ impl Lz4Stream {
             if self.internal.dict_size > 64 * KB as u32 {
                 self.internal.dict_size = 64 * KB as u32;
             }
-            self.internal.dictionary =
-                unsafe { dict_end.sub(self.internal.dict_size as usize) };
+            self.internal.dictionary = unsafe { dict_end.sub(self.internal.dict_size as usize) };
         }
     }
 
@@ -334,12 +325,7 @@ impl Lz4Stream {
     /// long as the stream is used, because the stream's history pointer may
     /// point into it.  Heap-copying old data via [`save_dict`] eliminates
     /// this requirement.
-    pub fn compress_fast_continue(
-        &mut self,
-        src: &[u8],
-        dst: &mut [u8],
-        acceleration: i32,
-    ) -> i32 {
+    pub fn compress_fast_continue(&mut self, src: &[u8], dst: &mut [u8], acceleration: i32) -> i32 {
         let table_type = TableType::ByU32;
         let input_size = src.len() as i32;
         let max_output_size = dst.len() as i32;
@@ -368,19 +354,18 @@ impl Lz4Stream {
         // Invalidate tiny dictionaries (< 4 bytes) that are not in prefix mode
         // and not in dictCtx mode.  Doing so allows the faster prefix path to
         // take over on the *next* call.
-        let dict_end: *const u8 =
-            if self.internal.dict_size < 4
+        let dict_end: *const u8 = if self.internal.dict_size < 4
                 && dict_end != source_ptr          // not already prefix mode
                 && input_size > 0
                 && self.internal.dict_ctx.is_null()
-            {
-                self.internal.dict_size = 0;
-                self.internal.dictionary = source_ptr;
-                // Transition to prefix mode: dictEnd is now == source.
-                source_ptr
-            } else {
-                dict_end
-            };
+        {
+            self.internal.dict_size = 0;
+            self.internal.dictionary = source_ptr;
+            // Transition to prefix mode: dictEnd is now == source.
+            source_ptr
+        } else {
+            dict_end
+        };
 
         // Clip the dictionary if the new source overlaps its tail.
         if !dict_end.is_null() {

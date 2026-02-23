@@ -36,13 +36,13 @@
 
 use std::io::{self, Read, Write};
 
+use crate::frame::types::LZ4F_VERSION;
 use crate::frame::{
     lz4f_create_decompression_context, lz4f_decompress, lz4f_decompress_using_dict,
     DecompressOptions, Lz4FDCtx,
 };
-use crate::frame::types::LZ4F_VERSION;
 use crate::io::decompress_resources::DecompressResources;
-use crate::io::prefs::{display_level, LZ4IO_MAGICNUMBER, DISPLAY_LEVEL, Prefs};
+use crate::io::prefs::{display_level, Prefs, DISPLAY_LEVEL, LZ4IO_MAGICNUMBER};
 
 // Read/write buffer capacity for the decompression loop (64 KiB).
 // Large enough to amortise syscall overhead; small enough to stay L2-resident
@@ -123,23 +123,18 @@ fn feed_to_decompressor(
 
     while pos < input.len() {
         let (src_consumed, dst_written, hint) =
-            lz4f_decompress(dctx, Some(dst_buf), &input[pos..], None)
-                .map_err(lz4f_err_to_io)?;
+            lz4f_decompress(dctx, Some(dst_buf), &input[pos..], None).map_err(lz4f_err_to_io)?;
         pos += src_consumed;
         next_hint = hint;
 
         if dst_written > 0 {
             *filesize += dst_written as u64;
             if !prefs.test_mode {
-                dst.write_all(&dst_buf[..dst_written]).map_err(|e| {
-                    io::Error::new(e.kind(), format!("Write error: {e}"))
-                })?;
+                dst.write_all(&dst_buf[..dst_written])
+                    .map_err(|e| io::Error::new(e.kind(), format!("Write error: {e}")))?;
             }
             if DISPLAY_LEVEL.load(std::sync::atomic::Ordering::Relaxed) >= 2 {
-                display_level(
-                    2,
-                    &format!("\rDecompressed : {} MiB  ", *filesize >> 20),
-                );
+                display_level(2, &format!("\rDecompressed : {} MiB  ", *filesize >> 20));
             }
         }
 
@@ -183,15 +178,11 @@ fn feed_to_decompressor_dict(
         if dst_written > 0 {
             *filesize += dst_written as u64;
             if !prefs.test_mode {
-                dst.write_all(&dst_buf[..dst_written]).map_err(|e| {
-                    io::Error::new(e.kind(), format!("Write error: {e}"))
-                })?;
+                dst.write_all(&dst_buf[..dst_written])
+                    .map_err(|e| io::Error::new(e.kind(), format!("Write error: {e}")))?;
             }
             if DISPLAY_LEVEL.load(std::sync::atomic::Ordering::Relaxed) >= 2 {
-                display_level(
-                    2,
-                    &format!("\rDecompressed : {} MiB  ", *filesize >> 20),
-                );
+                display_level(2, &format!("\rDecompressed : {} MiB  ", *filesize >> 20));
             }
         }
 
@@ -213,13 +204,8 @@ fn feed_to_decompressor_dict(
 /// Decompresses one LZ4 frame from `src` into `dst` using the
 /// `next_hint`-driven read loop.  Also serves as the implementation for
 /// `nb_workers > 1`; see the module-level note on the multi-worker path.
-fn decompress_lz4f_st(
-    src: &mut impl Read,
-    dst: &mut impl Write,
-    prefs: &Prefs,
-) -> io::Result<u64> {
-    let mut dctx = lz4f_create_decompression_context(LZ4F_VERSION)
-        .map_err(lz4f_err_to_io)?;
+fn decompress_lz4f_st(src: &mut impl Read, dst: &mut impl Write, prefs: &Prefs) -> io::Result<u64> {
+    let mut dctx = lz4f_create_decompression_context(LZ4F_VERSION).map_err(lz4f_err_to_io)?;
 
     let mut src_buf = vec![0u8; DECOMP_BUF_SIZE];
     let mut dst_buf = vec![0u8; DECOMP_BUF_SIZE];
@@ -230,21 +216,31 @@ fn decompress_lz4f_st(
     // the magic number to parse the frame header correctly.
     let magic_bytes = LZ4IO_MAGICNUMBER.to_le_bytes();
     let mut next_hint = feed_to_decompressor(
-        &mut dctx, &magic_bytes, &mut dst_buf, dst, prefs, &mut filesize,
+        &mut dctx,
+        &magic_bytes,
+        &mut dst_buf,
+        dst,
+        prefs,
+        &mut filesize,
     )?;
 
     // Drive the decoder with hint-sized reads until the frame is complete.
     while next_hint != 0 {
         let to_read = next_hint.min(src_buf.len());
-        let read_n = src.read(&mut src_buf[..to_read]).map_err(|e| {
-            io::Error::new(e.kind(), format!("Read error: {e}"))
-        })?;
+        let read_n = src
+            .read(&mut src_buf[..to_read])
+            .map_err(|e| io::Error::new(e.kind(), format!("Read error: {e}")))?;
         if read_n == 0 {
             break; // EOF
         }
 
         next_hint = feed_to_decompressor(
-            &mut dctx, &src_buf[..read_n], &mut dst_buf, dst, prefs, &mut filesize,
+            &mut dctx,
+            &src_buf[..read_n],
+            &mut dst_buf,
+            dst,
+            prefs,
+            &mut filesize,
         )?;
     }
 
@@ -275,8 +271,7 @@ fn decompress_lz4f_st_dict(
     prefs: &Prefs,
     dict: &[u8],
 ) -> io::Result<u64> {
-    let mut dctx = lz4f_create_decompression_context(LZ4F_VERSION)
-        .map_err(lz4f_err_to_io)?;
+    let mut dctx = lz4f_create_decompression_context(LZ4F_VERSION).map_err(lz4f_err_to_io)?;
 
     let mut src_buf = vec![0u8; DECOMP_BUF_SIZE];
     let mut dst_buf = vec![0u8; DECOMP_BUF_SIZE];
@@ -285,21 +280,33 @@ fn decompress_lz4f_st_dict(
     // Re-inject the 4 magic bytes the caller already consumed from `src`.
     let magic_bytes = LZ4IO_MAGICNUMBER.to_le_bytes();
     let mut next_hint = feed_to_decompressor_dict(
-        &mut dctx, &magic_bytes, dict, &mut dst_buf, dst, prefs, &mut filesize,
+        &mut dctx,
+        &magic_bytes,
+        dict,
+        &mut dst_buf,
+        dst,
+        prefs,
+        &mut filesize,
     )?;
 
     // Drive the decoder with hint-sized reads until the frame is complete.
     while next_hint != 0 {
         let to_read = next_hint.min(src_buf.len());
-        let read_n = src.read(&mut src_buf[..to_read]).map_err(|e| {
-            io::Error::new(e.kind(), format!("Read error: {e}"))
-        })?;
+        let read_n = src
+            .read(&mut src_buf[..to_read])
+            .map_err(|e| io::Error::new(e.kind(), format!("Read error: {e}")))?;
         if read_n == 0 {
             break; // EOF
         }
 
         next_hint = feed_to_decompressor_dict(
-            &mut dctx, &src_buf[..read_n], dict, &mut dst_buf, dst, prefs, &mut filesize,
+            &mut dctx,
+            &src_buf[..read_n],
+            dict,
+            &mut dst_buf,
+            dst,
+            prefs,
+            &mut filesize,
         )?;
     }
 
@@ -375,7 +382,11 @@ mod tests {
 
         let n = decompress_lz4f(&mut compressed_body, &mut output, &prefs, &mut res).unwrap();
 
-        assert_eq!(n as usize, original.len(), "byte count should match even in test mode");
+        assert_eq!(
+            n as usize,
+            original.len(),
+            "byte count should match even in test mode"
+        );
         assert!(output.is_empty(), "test_mode must not write anything");
     }
 
@@ -412,7 +423,11 @@ mod tests {
         let mut output = Vec::new();
 
         let n = decompress_lz4f(&mut compressed_body, &mut output, &prefs, &mut res).unwrap();
-        assert_eq!(n as usize, original.len(), "byte count mismatch (dict path)");
+        assert_eq!(
+            n as usize,
+            original.len(),
+            "byte count mismatch (dict path)"
+        );
         assert_eq!(output, original, "output mismatch (dict path)");
     }
 

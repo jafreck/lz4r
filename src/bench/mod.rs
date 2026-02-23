@@ -12,10 +12,10 @@
 //! [`config::BenchConfig`] controls display verbosity, iteration count,
 //! decode-only mode, and other runtime knobs.
 
-pub mod config;
-pub mod compress_strategy;
-pub mod decompress_binding;
 pub mod bench_mem;
+pub mod compress_strategy;
+pub mod config;
+pub mod decompress_binding;
 pub mod runner;
 
 // Re-export public types so callers can use `bench::BenchConfig` directly.
@@ -81,7 +81,10 @@ fn bench_files_separately(
         }
     }
     if bench_error {
-        Err(io::Error::new(io::ErrorKind::Other, "benchmark reported errors"))
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            "benchmark reported errors",
+        ))
     } else {
         Ok(())
     }
@@ -121,7 +124,9 @@ pub fn bench_files(
     if config.decode_only {
         if config.display_level >= 2 {
             if config.skip_checksums {
-                eprintln!("Benchmark Decompression of LZ4 Frame _without_ checksum even when present ");
+                eprintln!(
+                    "Benchmark Decompression of LZ4 Frame _without_ checksum even when present "
+                );
             } else {
                 eprintln!("Benchmark Decompression of LZ4 Frame + Checksum when present ");
             }
@@ -149,7 +154,10 @@ pub fn bench_files(
         }
 
         let meta = fs::metadata(dict_path).map_err(|e| {
-            io::Error::new(e.kind(), format!("Dictionary error : could not stat dictionary file: {}", e))
+            io::Error::new(
+                e.kind(),
+                format!("Dictionary error : could not stat dictionary file: {}", e),
+            )
         })?;
         let dict_file_size = meta.len() as usize;
         if dict_file_size == 0 {
@@ -160,7 +168,10 @@ pub fn bench_files(
         }
 
         let mut f = fs::File::open(dict_path).map_err(|e| {
-            io::Error::new(e.kind(), format!("Dictionary error : could not open dictionary file: {}", e))
+            io::Error::new(
+                e.kind(),
+                format!("Dictionary error : could not open dictionary file: {}", e),
+            )
         })?;
 
         // LZ4 dictionaries are identified by their last LZ4_MAX_DICT_SIZE bytes;
@@ -168,7 +179,10 @@ pub fn bench_files(
         let dict_size = if dict_file_size > LZ4_MAX_DICT_SIZE {
             let offset = (dict_file_size - LZ4_MAX_DICT_SIZE) as u64;
             f.seek(SeekFrom::Start(offset)).map_err(|e| {
-                io::Error::new(e.kind(), format!("Dictionary error : could not seek dictionary file: {}", e))
+                io::Error::new(
+                    e.kind(),
+                    format!("Dictionary error : could not seek dictionary file: {}", e),
+                )
             })?;
             LZ4_MAX_DICT_SIZE
         } else {
@@ -177,7 +191,10 @@ pub fn bench_files(
 
         let mut buf = vec![0u8; dict_size];
         f.read_exact(&mut buf).map_err(|e| {
-            io::Error::new(e.kind(), format!("Dictionary error : could not read dictionary file: {}", e))
+            io::Error::new(
+                e.kind(),
+                format!("Dictionary error : could not read dictionary file: {}", e),
+            )
         })?;
         buf
     } else {
@@ -205,10 +222,14 @@ mod tests {
     fn bench_files_synthetic_ok() {
         // Acceptance criterion: bench_files(&[], 1, 1, None, &config) returns Ok(())
         let mut config = BenchConfig::default();
-        config.set_nb_seconds(0);         // single pass — fast
+        config.set_nb_seconds(0); // single pass — fast
         config.set_notification_level(0); // suppress output
         let result = bench_files(&[], 1, 1, None, &config);
-        assert!(result.is_ok(), "synthetic test should return Ok: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "synthetic test should return Ok: {:?}",
+            result.err()
+        );
     }
 
     #[test]
@@ -233,7 +254,11 @@ mod tests {
         config.set_notification_level(0);
 
         let result = bench_files(&[&path], 1, 3, None, &config);
-        assert!(result.is_ok(), "3-level file bench should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "3-level file bench should succeed: {:?}",
+            result.err()
+        );
     }
 
     #[test]
@@ -253,7 +278,11 @@ mod tests {
         config.set_bench_separately(true);
 
         let result = bench_files(&[&path1, &path2], 1, 1, None, &config);
-        assert!(result.is_ok(), "bench_separately should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "bench_separately should succeed: {:?}",
+            result.err()
+        );
     }
 
     #[test]

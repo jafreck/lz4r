@@ -24,8 +24,9 @@ use std::io::{self, Read, Write};
 
 use crate::block::compress::{compress_bound, compress_fast};
 use crate::io::file_io::{open_dst_file, open_src_file, STDOUT_MARK};
-use crate::io::prefs::{final_time_display, Prefs, LEGACY_BLOCKSIZE, LEGACY_MAGICNUMBER,
-                       MAGICNUMBER_SIZE};
+use crate::io::prefs::{
+    final_time_display, Prefs, LEGACY_BLOCKSIZE, LEGACY_MAGICNUMBER, MAGICNUMBER_SIZE,
+};
 use crate::timefn::get_time;
 
 extern "C" {
@@ -66,8 +67,8 @@ fn compress_block_fast(src: &[u8], dst: &mut Vec<u8>, clevel: i32) -> io::Result
     let bound = compress_bound(src.len() as i32) as usize;
     dst.resize(bound + LEGACY_BLOCK_HEADER_SIZE, 0);
 
-    let c_size = compress_fast(src, &mut dst[LEGACY_BLOCK_HEADER_SIZE..], acceleration)
-        .map_err(|e| {
+    let c_size =
+        compress_fast(src, &mut dst[LEGACY_BLOCK_HEADER_SIZE..], acceleration).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::Other,
                 format!("fast compression failed: {:?}", e),
@@ -422,8 +423,7 @@ mod tests {
 
         let prefs = Prefs::default();
         let srcs = [src1.to_str().unwrap(), src2.to_str().unwrap()];
-        let result =
-            compress_multiple_filenames_legacy(&srcs, ".lz4", 1, &prefs);
+        let result = compress_multiple_filenames_legacy(&srcs, ".lz4", 1, &prefs);
         assert!(result.is_ok());
 
         // Both output files should exist

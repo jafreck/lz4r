@@ -86,8 +86,14 @@ fn reset_clears_state_after_use() {
 
     let mut dst_reused = make_dst(src.len());
     let n_reused = reused.compress_fast_continue(src, &mut dst_reused, 1);
-    assert_eq!(n_fresh, n_reused, "reset stream must produce same output as fresh stream");
-    assert_eq!(&dst_fresh[..n_fresh as usize], &dst_reused[..n_reused as usize]);
+    assert_eq!(
+        n_fresh, n_reused,
+        "reset stream must produce same output as fresh stream"
+    );
+    assert_eq!(
+        &dst_fresh[..n_fresh as usize],
+        &dst_reused[..n_reused as usize]
+    );
 }
 
 #[test]
@@ -162,7 +168,11 @@ fn load_dict_large_dict_clamped_to_64kb() {
     let mut stream = Lz4Stream::new();
     let dict = vec![0u8; 128 * KB];
     let result = stream.load_dict(&dict);
-    assert_eq!(result, 64 * KB as i32, "large dict must be clamped to 64 KB");
+    assert_eq!(
+        result,
+        64 * KB as i32,
+        "large dict must be clamped to 64 KB"
+    );
 }
 
 #[test]
@@ -183,7 +193,10 @@ fn load_dict_dict_size_reflected_by_save_dict() {
 
     let mut save_buf = vec![0u8; 64 * KB];
     let saved = stream.save_dict(&mut save_buf);
-    assert_eq!(saved, 512, "save_dict should return amount loaded by load_dict");
+    assert_eq!(
+        saved, 512,
+        "save_dict should return amount loaded by load_dict"
+    );
 }
 
 #[test]
@@ -252,7 +265,10 @@ fn attach_dictionary_none_allows_compress() {
     let src = b"hello after detach aaaaaaaaaaaaaaaaaaaaaa";
     let mut dst = make_dst(src.len());
     let n = stream.compress_fast_continue(src, &mut dst, 1);
-    assert!(n > 0, "stream with None attached dict must compress successfully");
+    assert!(
+        n > 0,
+        "stream with None attached dict must compress successfully"
+    );
 }
 
 #[test]
@@ -267,7 +283,10 @@ fn attach_dictionary_empty_dict_stream_allows_compress() {
     let src = b"hello after empty attach aaaaaaaaaaaaaaaaaaa";
     let mut dst = make_dst(src.len());
     let n = working.compress_fast_continue(src, &mut dst, 1);
-    assert!(n > 0, "stream with empty attached dict must compress successfully");
+    assert!(
+        n > 0,
+        "stream with empty attached dict must compress successfully"
+    );
 }
 
 #[test]
@@ -284,7 +303,10 @@ fn attach_dictionary_non_empty_dict_allows_compress() {
     let src: Vec<u8> = (0u8..=255u8).cycle().take(512).collect();
     let mut dst = make_dst(src.len());
     let n = working.compress_fast_continue(&src, &mut dst, 1);
-    assert!(n > 0, "stream with non-empty attached dict must compress successfully");
+    assert!(
+        n > 0,
+        "stream with non-empty attached dict must compress successfully"
+    );
 }
 
 #[test]
@@ -305,7 +327,10 @@ fn attach_dictionary_bumps_current_offset_when_zero() {
     let src: Vec<u8> = (0u8..=255u8).cycle().take(256).collect();
     let mut dst = make_dst(src.len());
     let n = working.compress_fast_continue(&src, &mut dst, 1);
-    assert!(n > 0, "compress after attach must succeed even from zero initial offset");
+    assert!(
+        n > 0,
+        "compress after attach must succeed even from zero initial offset"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -371,7 +396,10 @@ fn save_dict_after_compress_returns_positive() {
 
     let mut save_buf = vec![0u8; 64 * KB];
     let saved = stream.save_dict(&mut save_buf);
-    assert!(saved > 0, "save_dict should return the number of saved bytes");
+    assert!(
+        saved > 0,
+        "save_dict should return the number of saved bytes"
+    );
     assert!(saved as usize <= 64 * KB);
 }
 
@@ -423,7 +451,10 @@ fn save_dict_updates_history_so_subsequent_save_returns_same_size() {
     // should reflect the same (or equal) size since no new data was compressed.
     let mut save_buf2 = vec![0u8; 64 * KB];
     let saved2 = stream.save_dict(&mut save_buf2);
-    assert_eq!(saved, saved2, "second save_dict must return same size as first");
+    assert_eq!(
+        saved, saved2,
+        "second save_dict must return same size as first"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -436,7 +467,10 @@ fn compress_fast_continue_single_block_returns_positive() {
     let src = b"Hello, LZ4 streaming world! aaaaaaaaaaaaaaaaaaaaaa";
     let mut dst = make_dst(src.len());
     let n = stream.compress_fast_continue(src, &mut dst, 1);
-    assert!(n > 0, "single-block compress should return positive byte count");
+    assert!(
+        n > 0,
+        "single-block compress should return positive byte count"
+    );
 }
 
 #[test]
@@ -454,8 +488,9 @@ fn compress_fast_continue_empty_input_returns_one_byte() {
 fn compress_fast_continue_output_too_small_returns_zero() {
     // A 1-byte output buffer for non-trivial input should return 0.
     let mut stream = Lz4Stream::new();
-    let src: Vec<u8> = b"This is a string long enough that it cannot possibly fit in 1 byte after compression."
-        .to_vec();
+    let src: Vec<u8> =
+        b"This is a string long enough that it cannot possibly fit in 1 byte after compression."
+            .to_vec();
     let mut dst = [0u8; 1];
     let n = stream.compress_fast_continue(&src, &mut dst, 1);
     assert_eq!(n, 0, "output too small should return 0");
@@ -563,7 +598,12 @@ fn compress_fast_continue_after_load_dict_succeeds() {
     let loaded = stream.load_dict(&dict);
     assert!(loaded > 0);
 
-    let src: Vec<u8> = b"data similar to dict: ".iter().cycle().take(256).cloned().collect();
+    let src: Vec<u8> = b"data similar to dict: "
+        .iter()
+        .cycle()
+        .take(256)
+        .cloned()
+        .collect();
     let mut dst = make_dst(src.len());
     let n = stream.compress_fast_continue(&src, &mut dst, 1);
     assert!(n > 0, "compress after load_dict must succeed");
@@ -659,7 +699,10 @@ fn compress_force_ext_dict_produces_compressed_output() {
             dst.len() as i32,
         )
     };
-    assert!(n > 0, "compress_force_ext_dict must return > 0 bytes for compressible input");
+    assert!(
+        n > 0,
+        "compress_force_ext_dict must return > 0 bytes for compressible input"
+    );
 }
 
 #[test]

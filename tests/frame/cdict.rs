@@ -246,7 +246,10 @@ fn create_is_deterministic_given_same_input() {
     // Both should succeed; the internal state is deterministically derived from `dict`.
     let c1 = Lz4FCDict::create(&dict);
     let c2 = Lz4FCDict::create(&dict);
-    assert!(c1.is_some() == c2.is_some(), "both calls must have the same success/failure result");
+    assert!(
+        c1.is_some() == c2.is_some(),
+        "both calls must have the same success/failure result"
+    );
 }
 
 // ---------------------------------------------------------------------------
