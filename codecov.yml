@@ -1,0 +1,20 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        enabled: false   # don't fail PRs for uncovered patch lines
+
+comment:
+  layout: "reach,diff,flags,files"
+  behavior: default
+
+ignore:
+  - "benches/**"
+  - "fuzz/**"
+  - "e2e/**"
+  - "tests/**"
+  - "scripts/**"
