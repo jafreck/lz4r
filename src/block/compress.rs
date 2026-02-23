@@ -890,45 +890,43 @@ pub unsafe fn compress_fast_ext_state_fast_reset(
                 acceleration,
             )
         }
-    } else {
-        if (src_len as usize) < LZ4_64KLIMIT {
-            let table_type = TableType::ByU16;
-            prepare_table(state, src_len, table_type);
-            let dict_issue = if (*state).current_offset != 0 {
-                DictIssueDirective::DictSmall
-            } else {
-                DictIssueDirective::NoDictIssue
-            };
-            compress_generic(
-                state,
-                src,
-                dst,
-                src_len,
-                ptr::null_mut(),
-                dst_capacity,
-                LimitedOutputDirective::LimitedOutput,
-                table_type,
-                DictDirective::NoDict,
-                dict_issue,
-                acceleration,
-            )
+    } else if (src_len as usize) < LZ4_64KLIMIT {
+        let table_type = TableType::ByU16;
+        prepare_table(state, src_len, table_type);
+        let dict_issue = if (*state).current_offset != 0 {
+            DictIssueDirective::DictSmall
         } else {
-            let table_type = select_table_type_for_src(src);
-            prepare_table(state, src_len, table_type);
-            compress_generic(
-                state,
-                src,
-                dst,
-                src_len,
-                ptr::null_mut(),
-                dst_capacity,
-                LimitedOutputDirective::LimitedOutput,
-                table_type,
-                DictDirective::NoDict,
-                DictIssueDirective::NoDictIssue,
-                acceleration,
-            )
-        }
+            DictIssueDirective::NoDictIssue
+        };
+        compress_generic(
+            state,
+            src,
+            dst,
+            src_len,
+            ptr::null_mut(),
+            dst_capacity,
+            LimitedOutputDirective::LimitedOutput,
+            table_type,
+            DictDirective::NoDict,
+            dict_issue,
+            acceleration,
+        )
+    } else {
+        let table_type = select_table_type_for_src(src);
+        prepare_table(state, src_len, table_type);
+        compress_generic(
+            state,
+            src,
+            dst,
+            src_len,
+            ptr::null_mut(),
+            dst_capacity,
+            LimitedOutputDirective::LimitedOutput,
+            table_type,
+            DictDirective::NoDict,
+            DictIssueDirective::NoDictIssue,
+            acceleration,
+        )
     }
 }
 
@@ -1048,7 +1046,7 @@ unsafe fn compress_dest_size_ext_state_internal(
         compress_fast_ext_state(
             state,
             src,
-            src_size as i32,
+            src_size,
             dst,
             target_dst_size,
             acceleration,

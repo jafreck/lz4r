@@ -81,8 +81,7 @@ fn bench_files_separately(
         }
     }
     if bench_error {
-        Err(io::Error::new(
-            io::ErrorKind::Other,
+        Err(io::Error::other(
             "benchmark reported errors",
         ))
     } else {

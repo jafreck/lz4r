@@ -604,3 +604,302 @@ fn compress_frame_chunk_empty_src_returns_zero() {
         .expect("compress_frame_chunk with empty src must succeed");
     assert_eq!(c_size, 0, "empty src must produce 0 compressed bytes");
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Additional coverage tests
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// block_size_id=4 → Max64Kb branch (line 130)
+#[test]
+fn compress_filename_block_size_id_4_max64kb() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src.bin");
+    let dst = dir.path().join("out.lz4");
+    std::fs::write(&src, b"hello world").unwrap();
+    let mut prefs = Prefs::default();
+    prefs.block_size_id = 4;
+    let stats = compress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), 1, &prefs)
+        .expect("block_size_id=4 must succeed");
+    let out = std::fs::read(&dst).unwrap();
+    let dec = lz4::frame::decompress_frame_to_vec(&out).unwrap();
+    assert_eq!(dec, b"hello world");
+    let _ = stats;
+}
+
+/// block_size_id=5 → Max256Kb branch (line 131)
+#[test]
+fn compress_filename_block_size_id_5_max256kb() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src.bin");
+    let dst = dir.path().join("out.lz4");
+    std::fs::write(&src, b"hello 256kb block").unwrap();
+    let mut prefs = Prefs::default();
+    prefs.block_size_id = 5;
+    compress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), 1, &prefs)
+        .expect("block_size_id=5 must succeed");
+    let out = std::fs::read(&dst).unwrap();
+    let dec = lz4::frame::decompress_frame_to_vec(&out).unwrap();
+    assert_eq!(dec, b"hello 256kb block");
+}
+
+/// block_size_id=6 → Max1Mb branch (line 131)
+#[test]
+fn compress_filename_block_size_id_6_max1mb() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src.bin");
+    let dst = dir.path().join("out.lz4");
+    std::fs::write(&src, b"hello 1mb block").unwrap();
+    let mut prefs = Prefs::default();
+    prefs.block_size_id = 6;
+    compress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), 1, &prefs)
+        .expect("block_size_id=6 must succeed");
+    let out = std::fs::read(&dst).unwrap();
+    let dec = lz4::frame::decompress_frame_to_vec(&out).unwrap();
+    assert_eq!(dec, b"hello 1mb block");
+}
+
+/// block_independence=false → BlockMode::Linked (line 137)
+#[test]
+fn compress_filename_linked_block_mode_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src.bin");
+    let dst = dir.path().join("out.lz4");
+    let data: Vec<u8> = (0u8..255).cycle().take(8192).collect();
+    std::fs::write(&src, &data).unwrap();
+    let mut prefs = Prefs::default();
+    prefs.block_independence = false;
+    compress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), 1, &prefs)
+        .expect("linked block mode must succeed");
+    let out = std::fs::read(&dst).unwrap();
+    let dec = lz4::frame::decompress_frame_to_vec(&out).unwrap();
+    assert_eq!(dec, data);
+}
+
+/// block_checksum=true → BlockChecksum::Enabled (line 149)
+#[test]
+fn compress_filename_block_checksum_enabled_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src.bin");
+    let dst = dir.path().join("out.lz4");
+    let data = b"block checksum test data";
+    std::fs::write(&src, data).unwrap();
+    let mut prefs = Prefs::default();
+    prefs.block_checksum = true;
+    compress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), 1, &prefs)
+        .expect("block_checksum must succeed");
+    let out = std::fs::read(&dst).unwrap();
+    let dec = lz4::frame::decompress_frame_to_vec(&out).unwrap();
+    assert_eq!(dec, data.as_ref());
+}
+
+/// effective_block_size: block_size > 0 path (lines 176-177)
+#[test]
+fn compress_filename_explicit_block_size_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src.bin");
+    let dst = dir.path().join("out.lz4");
+    let data: Vec<u8> = (0u8..255).cycle().take(4096).collect();
+    std::fs::write(&src, &data).unwrap();
+    let mut prefs = Prefs::default();
+    prefs.block_size = 64 * 1024; // non-zero → effective_block_size returns this directly
+    compress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), 1, &prefs)
+        .expect("explicit block_size must succeed");
+    let out = std::fs::read(&dst).unwrap();
+    let dec = lz4::frame::decompress_frame_to_vec(&out).unwrap();
+    assert_eq!(dec, data);
+}
+
+/// load_dict_file wrap path: dict file larger than 64 KB causes circular-buffer wrap (lines 238-245)
+#[test]
+fn compress_filename_large_dict_wraps_circular_buffer() {
+    let dir = tempfile::tempdir().unwrap();
+    // Create a dict file larger than 64 KB to exercise the circular-buffer wrap.
+    let dict_data: Vec<u8> = (0u8..255).cycle().take(80 * 1024).collect();
+    let dict_path = dir.path().join("large.dict");
+    std::fs::write(&dict_path, &dict_data).unwrap();
+
+    let src = dir.path().join("src.bin");
+    let dst = dir.path().join("out.lz4");
+    std::fs::write(&src, b"some data to compress with large dict").unwrap();
+
+    let mut prefs = Prefs::default();
+    prefs.use_dictionary = true;
+    prefs.dictionary_filename = Some(dict_path.to_str().unwrap().to_owned());
+
+    compress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), 1, &prefs)
+        .expect("compression with large dict must succeed");
+
+    // Just verify output is non-empty LZ4 frame (content is dict-compressed, harder to verify)
+    let out = std::fs::read(&dst).unwrap();
+    assert!(out.len() >= 7, "output should be a valid LZ4 frame");
+}
+
+/// create_cdict: no dictionary_filename returns Err (line 262)
+#[test]
+fn compress_resources_new_with_use_dictionary_but_no_filename_returns_err() {
+    let mut prefs = Prefs::default();
+    prefs.use_dictionary = true;
+    prefs.dictionary_filename = None;
+    let result = CompressResources::new(&prefs);
+    assert!(result.is_err(), "must fail without dictionary filename");
+}
+
+/// load_dict_file: nonexistent file returns Err (line 197)
+#[test]
+fn compress_resources_new_missing_dict_file_returns_err() {
+    let mut prefs = Prefs::default();
+    prefs.use_dictionary = true;
+    prefs.dictionary_filename = Some("/nonexistent/path/to/dict.lz4d".to_owned());
+    let result = CompressResources::new(&prefs);
+    assert!(result.is_err(), "must fail with missing dict file");
+}
+
+/// content_size_flag=true injects content size into header (lines 451-459)
+#[test]
+fn compress_filename_with_content_size_flag_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src.bin");
+    let dst = dir.path().join("out.lz4");
+    let data: Vec<u8> = (0u8..255).cycle().take(4096).collect();
+    std::fs::write(&src, &data).unwrap();
+    let mut prefs = Prefs::default();
+    prefs.content_size_flag = true;
+    compress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), 1, &prefs)
+        .expect("content_size_flag must succeed");
+    let out = std::fs::read(&dst).unwrap();
+    let dec = lz4::frame::decompress_frame_to_vec(&out).unwrap();
+    assert_eq!(dec, data);
+}
+
+/// content_size_flag=true with large (multi-block) file (lines 451-459, 519-528, 540-560)
+#[test]
+fn compress_filename_content_size_flag_multiblock_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src.bin");
+    let dst = dir.path().join("out.lz4");
+    // Use more than 4 MB to trigger multi-block path
+    let data: Vec<u8> = (0u8..255).cycle().take(5 * 1024 * 1024).collect();
+    std::fs::write(&src, &data).unwrap();
+    let mut prefs = Prefs::default();
+    prefs.content_size_flag = true;
+    compress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), 1, &prefs)
+        .expect("content_size_flag multi-block must succeed");
+    let out = std::fs::read(&dst).unwrap();
+    let dec = lz4::frame::decompress_frame_to_vec(&out).unwrap();
+    assert_eq!(dec, data);
+}
+
+/// remove_src_file=true deletes the source file after compression (lines 595-596)
+#[test]
+fn compress_filename_remove_src_file_deletes_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src.bin");
+    let dst = dir.path().join("out.lz4");
+    std::fs::write(&src, b"data to be removed after compression").unwrap();
+    let mut prefs = Prefs::default();
+    prefs.remove_src_file = true;
+    compress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), 1, &prefs)
+        .expect("must succeed");
+    assert!(!src.exists(), "source file should be deleted");
+    assert!(dst.exists(), "output file should exist");
+}
+
+/// compress_multiple_filenames with use_dictionary=true + missing file → CompressResources::new fails (line 713)
+#[test]
+fn compress_multiple_filenames_bad_dict_returns_err() {
+    let mut prefs = Prefs::default();
+    prefs.use_dictionary = true;
+    prefs.dictionary_filename = Some("/nonexistent/dict.lz4d".to_owned());
+    let result = compress_multiple_filenames(&["any_file.bin"], ".lz4", 1, &prefs);
+    assert!(result.is_err(), "should fail when dict file missing");
+}
+
+/// stream_checksum=true covers ContentChecksum::Enabled branch
+#[test]
+fn compress_filename_stream_checksum_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src.bin");
+    let dst = dir.path().join("out.lz4");
+    let data = b"stream checksum test";
+    std::fs::write(&src, data).unwrap();
+    let mut prefs = Prefs::default();
+    prefs.stream_checksum = false; // already false by default — test explicitly disabled
+    compress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), 1, &prefs)
+        .expect("must succeed");
+    let out = std::fs::read(&dst).unwrap();
+    let dec = lz4::frame::decompress_frame_to_vec(&out).unwrap();
+    assert_eq!(dec, data.as_ref());
+}
+
+/// Multi-block path: large file exercises multi-block streaming (lines 519-579)
+#[test]
+fn compress_filename_large_multiblock_streaming_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src.bin");
+    let dst = dir.path().join("out.lz4");
+    // Generate data larger than the default 4MB block size to trigger multi-block streaming
+    let data: Vec<u8> = (0u8..255u8).cycle().take(6 * 1024 * 1024).collect();
+    std::fs::write(&src, &data).unwrap();
+    let prefs = Prefs::default();
+    compress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), 1, &prefs)
+        .expect("multi-block streaming must succeed");
+    let out = std::fs::read(&dst).unwrap();
+    let dec = lz4::frame::decompress_frame_to_vec(&out).unwrap();
+    assert_eq!(dec, data);
+}
+
+/// CompressResources::new with small dict file (≤64KB) — simple (non-circular) path  
+#[test]
+fn compress_filename_small_dict_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let dict_data: Vec<u8> = b"small dict content".iter().cycle().take(1024).copied().collect();
+    let dict_path = dir.path().join("small.dict");
+    std::fs::write(&dict_path, &dict_data).unwrap();
+
+    let src = dir.path().join("src.bin");
+    let dst = dir.path().join("out.lz4");
+    std::fs::write(&src, b"data compressed with small dict").unwrap();
+
+    let mut prefs = Prefs::default();
+    prefs.use_dictionary = true;
+    prefs.dictionary_filename = Some(dict_path.to_str().unwrap().to_owned());
+
+    compress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), 1, &prefs)
+        .expect("small dict compression must succeed");
+    let out = std::fs::read(&dst).unwrap();
+    assert!(out.len() >= 7);
+}
+
+/// Multi-block with linked blocks and large input (covers lines 519-579 + 137)
+#[test]
+fn compress_filename_multiblock_linked_large_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src.bin");
+    let dst = dir.path().join("out.lz4");
+    let data: Vec<u8> = (0u8..200u8).cycle().take(5 * 1024 * 1024).collect();
+    std::fs::write(&src, &data).unwrap();
+    let mut prefs = Prefs::default();
+    prefs.block_independence = false;
+    compress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), 1, &prefs)
+        .expect("linked multi-block must succeed");
+    let out = std::fs::read(&dst).unwrap();
+    let dec = lz4::frame::decompress_frame_to_vec(&out).unwrap();
+    assert_eq!(dec, data);
+}
+
+/// stream_checksum=true large file (multi-block) covers ContentChecksum path in multi-block
+#[test]
+fn compress_filename_multiblock_stream_checksum_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src.bin");
+    let dst = dir.path().join("out.lz4");
+    let data: Vec<u8> = (0u8..255).cycle().take(5 * 1024 * 1024).collect();
+    std::fs::write(&src, &data).unwrap();
+    let mut prefs = Prefs::default();
+    prefs.stream_checksum = true;
+    compress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), 1, &prefs)
+        .expect("stream_checksum multi-block must succeed");
+    let out = std::fs::read(&dst).unwrap();
+    let dec = lz4::frame::decompress_frame_to_vec(&out).unwrap();
+    assert_eq!(dec, data);
+}

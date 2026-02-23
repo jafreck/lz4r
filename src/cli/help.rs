@@ -240,7 +240,7 @@ pub fn print_bad_usage(program: &str) -> ! {
 /// Reads exactly one byte from stdin via `libc::getchar` so that only the
 /// newline is consumed, leaving any remaining buffered input intact.
 pub fn wait_enter() {
-    eprint!("Press enter to continue...\n");
+    eprintln!("Press enter to continue...");
     let _ = io::stderr().flush();
     // Read a single byte so buffered input beyond the newline is not discarded.
     unsafe { libc::getchar() };

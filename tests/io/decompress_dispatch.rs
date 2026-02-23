@@ -485,3 +485,115 @@ fn decompress_multiple_filenames_nul_sentinel_succeeds() {
     decompress_multiple_filenames(&[src.to_str().unwrap()], NUL_MARK, &prefs)
         .expect("nul sentinel should succeed");
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Additional coverage tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// decompress_filename with remove_src_file=true deletes the source (line 362).
+#[test]
+fn decompress_filename_remove_src_file_deletes_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("remove_me.lz4");
+    let dst = dir.path().join("remove_me.out");
+    fs::write(&src, make_frame_stream(b"delete source file test")).unwrap();
+
+    let mut prefs = Prefs::default();
+    prefs.remove_src_file = true;
+
+    decompress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), &prefs)
+        .expect("decompress with remove_src_file must succeed");
+    assert!(!src.exists(), "source file must be deleted after decompression");
+    assert!(dst.exists(), "destination file must exist");
+}
+
+/// LZ4 frame followed by unrecognized magic: second frame unknown triggers display+break (lines 323, 326).
+#[test]
+fn decompress_filename_lz4_frame_then_unknown_magic_stops_gracefully() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("unknown_after_frame.lz4");
+    let dst = dir.path().join("unknown_after_frame.out");
+
+    let mut data = make_frame_stream(b"valid frame before junk");
+    // Append unrecognized 4-byte magic
+    data.extend_from_slice(&0xDEADBEEFu32.to_le_bytes());
+
+    fs::write(&src, &data).unwrap();
+
+    let prefs = Prefs::default();
+    // Should succeed (unrecognized subsequent frame just stops decoding)
+    let result = decompress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), &prefs);
+    assert!(result.is_ok(), "subsequent unknown magic must not error: {result:?}");
+}
+
+/// Legacy frame followed by unrecognized magic → same break path.
+#[test]
+fn decompress_filename_legacy_then_unknown_magic_stops_gracefully() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("legacy_then_junk.lz4");
+    let dst = dir.path().join("legacy_then_junk.out");
+
+    let mut data = make_legacy_stream(b"legacy frame before junk");
+    // Append unrecognized magic after the legacy frame
+    data.extend_from_slice(&0xCAFEBABEu32.to_le_bytes());
+
+    fs::write(&src, &data).unwrap();
+
+    let prefs = Prefs::default();
+    let result = decompress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), &prefs);
+    assert!(result.is_ok(), "legacy then unknown magic must not error: {result:?}");
+}
+
+/// decompress_filename with a regular file dst propagates file metadata (line 488).
+#[test]
+fn decompress_filename_regular_dst_propagates_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("meta.lz4");
+    let dst = dir.path().join("meta.out");
+    fs::write(&src, make_frame_stream(b"metadata propagation test")).unwrap();
+
+    let prefs = Prefs::default();
+    decompress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), &prefs)
+        .expect("must succeed and propagate metadata");
+    assert!(dst.exists());
+}
+
+/// decompress_multiple_filenames with no overwrite returns error (line 362 branch).
+#[test]
+fn decompress_multiple_filenames_no_overwrite_existing_dst_returns_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("noover.lz4");
+    let dst = dir.path().join("noover");
+    fs::write(&src, make_frame_stream(b"no overwrite test data")).unwrap();
+    fs::write(&dst, b"existing content").unwrap(); // pre-exist
+
+    let mut prefs = Prefs::default();
+    prefs.overwrite = false;
+
+    let result = decompress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), &prefs);
+    assert!(result.is_err(), "must fail when dst exists and overwrite=false");
+}
+
+/// SparseWriter flush: exercise the flush method on the write path (lines 149-151).
+/// This happens whenever a file decompression flushes the sparse writer.
+#[test]
+fn decompress_filename_large_frame_exercises_sparse_writer_flush() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("large_sparse.lz4");
+    let dst = dir.path().join("large_sparse.out");
+    let payload: Vec<u8> = b"sparse flush test content "
+        .iter()
+        .cycle()
+        .take(128 * 1024)
+        .copied()
+        .collect();
+    fs::write(&src, make_frame_stream(&payload)).unwrap();
+
+    let mut prefs = Prefs::default();
+    prefs.sparse_file_support = 1;
+
+    let result = decompress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), &prefs);
+    assert!(result.is_ok());
+    let out = fs::read(&dst).unwrap();
+    assert_eq!(out, payload);
+}

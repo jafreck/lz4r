@@ -668,7 +668,7 @@ pub unsafe fn save_dict_hc(state: &mut Lz4StreamHc, safe_buffer: *mut u8, dict_s
         dict_size = prefix_size;
     }
 
-    debug_assert!(safe_buffer != core::ptr::null_mut() || dict_size == 0);
+    debug_assert!(!safe_buffer.is_null() || dict_size == 0);
 
     // Copy the tail of the prefix into the safe buffer.
     if dict_size > 0 {

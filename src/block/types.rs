@@ -384,7 +384,7 @@ pub unsafe fn wild_copy32(mut dst: *mut u8, mut src: *const u8, dst_end: *mut u8
 /// - `src_ptr + offset == dst_ptr` (strict back-reference invariant).
 /// - The output buffer must have at least 12 bytes of margin beyond `dst_end`.
 /// - All pointers must be in bounds for their respective accesses.
-#[inline(always)]
+#[inline]
 pub unsafe fn memcpy_using_offset_base(
     mut dst: *mut u8,
     mut src: *const u8,
@@ -424,7 +424,7 @@ pub unsafe fn memcpy_using_offset_base(
 ///
 /// # Safety
 /// Raw pointer arithmetic; callers must ensure valid ranges and write margin.
-#[inline(always)]
+#[inline]
 pub unsafe fn memcpy_using_offset(
     mut dst: *mut u8,
     src: *const u8,

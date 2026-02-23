@@ -38,7 +38,7 @@ pub fn create_file_list(inputs: &[&Path]) -> io::Result<Vec<PathBuf>> {
                 let entry = entry.map_err(|e| {
                     e.io_error()
                         .map(|io| io::Error::new(io.kind(), io.to_string()))
-                        .unwrap_or_else(|| io::Error::new(io::ErrorKind::Other, e.to_string()))
+                        .unwrap_or_else(|| io::Error::other(e.to_string()))
                 })?;
                 if entry.file_type().is_file() {
                     result.push(entry.into_path());

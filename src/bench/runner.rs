@@ -146,8 +146,7 @@ pub fn bench_c_level(
     }
 
     if bench_error {
-        Err(io::Error::new(
-            io::ErrorKind::Other,
+        Err(io::Error::other(
             "benchmark reported errors",
         ))
     } else {
@@ -266,7 +265,7 @@ pub fn bench_file_table(
     // buffers), then divide by 3 to obtain the usable input slice.
     let mut benched_size = find_max_mem(total_size_to_load.saturating_mul(3)) / 3;
     if benched_size == 0 {
-        return Err(io::Error::new(io::ErrorKind::Other, "not enough memory"));
+        return Err(io::Error::other("not enough memory"));
     }
     // No need to allocate more than the actual corpus.
     if benched_size as u64 > total_size_to_load {

@@ -666,8 +666,8 @@ pub fn display_compressed_files_info(paths: &[&str]) -> io::Result<()> {
 
     if display_level < 3 {
         println!(
-            "{:>10} {:>14} {:>5} {:>11} {:>13} {:>8}   {}",
-            "Frames", "Type", "Block", "Compressed", "Uncompressed", "Ratio", "Filename"
+            "{:>10} {:>14} {:>5} {:>11} {:>13} {:>8}   Filename",
+            "Frames", "Type", "Block", "Compressed", "Uncompressed", "Ratio"
         );
     }
 

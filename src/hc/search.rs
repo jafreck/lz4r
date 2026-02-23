@@ -318,8 +318,7 @@ pub unsafe fn insert_and_get_wider_match(
                         .sub(look_back_length as usize)
                         .add((longest - 1) as usize),
                 )
-            {
-                if bt::read32(match_ptr) == pattern {
+                && bt::read32(match_ptr) == pattern {
                     let back = if look_back_length != 0 {
                         count_back(ip, match_ptr, i_low_limit, prefix_ptr)
                     } else {
@@ -334,7 +333,6 @@ pub unsafe fn insert_and_get_wider_match(
                         s_back = back;
                     }
                 }
-            }
         } else {
             // ── Within external dict (lowestMatchIndex <= matchIndex < dictLimit) ──
             let match_ptr = dict_start.add((match_index - dict_idx) as usize);

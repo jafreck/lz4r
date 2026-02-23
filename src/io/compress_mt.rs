@@ -242,10 +242,7 @@ pub fn compress_filename_mt(
     io_prefs: &Prefs,
 ) -> io::Result<()> {
     let mut src_reader = open_src_file(src_filename)?;
-    let dst_file = open_dst_file(dst_filename, io_prefs).map_err(|e| {
-        // close src_reader implicitly on drop
-        e
-    })?;
+    let dst_file = open_dst_file(dst_filename, io_prefs)?;
     let dst_is_stdout = dst_file.is_stdout;
     let mut dst_writer: Box<dyn Write> = Box::new(dst_file);
 
@@ -286,7 +283,7 @@ pub fn compress_filename_mt(
             cdict_ptr,
             Some(&prefs),
         )
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Compression failed: {}", e)))?;
+        .map_err(|e| io::Error::other(format!("Compression failed: {}", e)))?;
         compressedfilesize = c_size as u64;
 
         display_level(
@@ -317,8 +314,7 @@ pub fn compress_filename_mt(
         // a second, internal checksum.
         let header_size = lz4f_compress_begin(&mut ress.ctx, &mut ress.dst_buffer, Some(&prefs))
             .map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
+                io::Error::other(
                     format!("File header generation failed : {}", e),
                 )
             })?;
