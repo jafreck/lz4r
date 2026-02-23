@@ -14,8 +14,8 @@
 //   - bytes_written: includes magic (4 bytes) + per-block headers + compressed data
 //   - empty_input: zero source bytes → result.bytes_read == 0, output == magic only
 //   - large_input: multi-block input (> LEGACY_BLOCKSIZE) produces multiple block headers
-//   - round_trip_fast: decompress with lz4_flex and recover original
-//   - round_trip_hc: decompress with lz4_flex and recover original
+//   - round_trip_fast: compress fast, decompress natively and recover original
+//   - round_trip_hc: compress HC, decompress natively and recover original
 //   - hc_at_least_as_compact: HC output ≤ fast output on compressible data
 //   - negative_clevel: acceleration derived from abs(clevel) for fast path
 //   - nonexistent_src: returns Err
@@ -190,7 +190,7 @@ fn large_input_produces_multiple_blocks() {
 // Round-trip: fast mode
 // ═════════════════════════════════════════════════════════════════════════════
 
-/// Compress with fast mode and decompress each block with lz4_flex to verify parity.
+/// Compress with fast mode and verify decompression recovers the original.
 #[test]
 fn round_trip_fast_mode_small_input() {
     let original = b"The quick brown fox jumps over the lazy dog.";
@@ -202,7 +202,7 @@ fn round_trip_fast_mode_small_input() {
 
     let (_sz, block_data) = &blocks[0];
     let decompressed =
-        lz4_flex::block::decompress(block_data, original.len() * 4).unwrap();
+        lz4::block::decompress_block_to_vec(block_data, original.len() * 4);
     assert_eq!(&decompressed[..original.len()], original);
 }
 
@@ -215,7 +215,7 @@ fn round_trip_fast_mode_repetitive_data() {
     let blocks = parse_blocks(&out);
     let mut recovered = Vec::new();
     for (_sz, block_data) in &blocks {
-        let dec = lz4_flex::block::decompress(block_data, original.len() * 2).unwrap();
+        let dec = lz4::block::decompress_block_to_vec(block_data, original.len() * 2);
         recovered.extend_from_slice(&dec);
     }
     // Decompressed bytes should reconstruct the original exactly
@@ -238,7 +238,7 @@ fn round_trip_hc_mode_small_input() {
 
     let (_sz, block_data) = &blocks[0];
     let decompressed =
-        lz4_flex::block::decompress(block_data, original.len() * 4).unwrap();
+        lz4::block::decompress_block_to_vec(block_data, original.len() * 4);
     assert_eq!(&decompressed[..original.len()], original);
 }
 
@@ -250,7 +250,7 @@ fn round_trip_hc_mode_repetitive_data() {
     let blocks = parse_blocks(&out);
     let mut recovered = Vec::new();
     for (_sz, block_data) in &blocks {
-        let dec = lz4_flex::block::decompress(block_data, original.len() * 2).unwrap();
+        let dec = lz4::block::decompress_block_to_vec(block_data, original.len() * 2);
         recovered.extend_from_slice(&dec);
     }
     assert_eq!(&recovered[..original.len()], &original[..]);
@@ -286,7 +286,7 @@ fn clevel_2_uses_fast_path() {
     let (out, result) = compress_to_bytes(data, 2);
     assert_eq!(result.bytes_read, data.len() as u64);
     let blocks = parse_blocks(&out);
-    let dec = lz4_flex::block::decompress(&blocks[0].1, data.len() * 4).unwrap();
+    let dec = lz4::block::decompress_block_to_vec(&blocks[0].1, data.len() * 4);
     assert_eq!(&dec[..data.len()], data);
 }
 
@@ -297,7 +297,7 @@ fn clevel_3_uses_hc_path() {
     let (out, result) = compress_to_bytes(data, 3);
     assert_eq!(result.bytes_read, data.len() as u64);
     let blocks = parse_blocks(&out);
-    let dec = lz4_flex::block::decompress(&blocks[0].1, data.len() * 4).unwrap();
+    let dec = lz4::block::decompress_block_to_vec(&blocks[0].1, data.len() * 4);
     assert_eq!(&dec[..data.len()], data);
 }
 
@@ -308,7 +308,7 @@ fn clevel_0_produces_valid_output() {
     let (out, result) = compress_to_bytes(data, 0);
     assert_eq!(result.bytes_read, data.len() as u64);
     let blocks = parse_blocks(&out);
-    let dec = lz4_flex::block::decompress(&blocks[0].1, data.len() * 4).unwrap();
+    let dec = lz4::block::decompress_block_to_vec(&blocks[0].1, data.len() * 4);
     assert_eq!(&dec[..data.len()], data);
 }
 
@@ -319,7 +319,7 @@ fn negative_clevel_fast_path_produces_valid_output() {
     let (out, result) = compress_to_bytes(data, -5);
     assert_eq!(result.bytes_read, data.len() as u64);
     let blocks = parse_blocks(&out);
-    let dec = lz4_flex::block::decompress(&blocks[0].1, data.len() * 4).unwrap();
+    let dec = lz4::block::decompress_block_to_vec(&blocks[0].1, data.len() * 4);
     assert_eq!(&dec[..data.len()], data);
 }
 

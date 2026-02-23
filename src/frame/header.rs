@@ -1,15 +1,20 @@
-//! Byte-order I/O helpers, block-size utilities, header checksum, and compress-bound functions.
+//! Byte-order I/O helpers, block-size utilities, header checksum, and compress-bound
+//! functions for the LZ4 frame format.
 //!
-//! Translated from lz4frame.c v1.10.0, lines 167–420.
+//! This module implements the low-level building blocks used when constructing and
+//! parsing LZ4 frame headers.  All behaviour is specified by the
+//! [LZ4 frame format](https://github.com/lz4/lz4/blob/dev/doc/lz4_Frame_format.md)
+//! and corresponds to the reference implementation in `lz4frame.c` v1.10.0
+//! (lines 167–420).
 //!
-//! Covers:
-//! - LE read/write helpers (`read_le32`, `write_le32`, `read_le64`, `write_le64`)
-//! - `lz4f_compression_level_max` — mirrors `LZ4F_compressionLevel_max`
-//! - `lz4f_get_block_size`        — mirrors `LZ4F_getBlockSize`
-//! - `lz4f_optimal_bsid`          — mirrors `LZ4F_optimalBSID`
-//! - `lz4f_header_checksum`       — mirrors `LZ4F_headerChecksum`
-//! - `lz4f_compress_bound_internal` — mirrors `LZ4F_compressBound_internal`
-//! - `lz4f_compress_frame_bound`  — mirrors `LZ4F_compressFrameBound`
+//! # Contents
+//! - Little-endian read/write helpers: [`read_le32`], [`write_le32`], [`read_le64`], [`write_le64`].
+//! - [`lz4f_compression_level_max`] — the highest valid HC compression level.
+//! - [`lz4f_get_block_size`] — byte capacity for a [`BlockSizeId`](crate::frame::types::BlockSizeId).
+//! - [`lz4f_optimal_bsid`] — smallest block size that fits a given source length.
+//! - [`lz4f_header_checksum`] — single-byte frame header integrity check.
+//! - [`lz4f_compress_bound_internal`] — worst-case compressed size for streaming callers.
+//! - [`lz4f_compress_frame_bound`] — worst-case compressed frame size for one-shot callers.
 
 use crate::frame::types::{
     BlockChecksum, BlockSizeId, ContentChecksum, Preferences, BF_SIZE, BH_SIZE, MAX_FH_SIZE,
@@ -96,7 +101,7 @@ pub fn lz4f_compression_level_max() -> i32 {
 ///
 /// Equivalent to `LZ4F_getBlockSize` (lz4frame.c:333–342).
 pub fn lz4f_get_block_size(block_size_id: BlockSizeId) -> Option<usize> {
-    // Mirrors C: static const size_t blockSizes[4] = { 64 KB, 256 KB, 1 MB, 4 MB }
+    // Block sizes for IDs 4–7 as defined by the LZ4 frame format spec.
     const BLOCK_SIZES: [usize; 4] = [
         64 * 1024,       // index 0 → Max64Kb  (ID 4)
         256 * 1024,      // index 1 → Max256Kb (ID 5)
@@ -104,7 +109,7 @@ pub fn lz4f_get_block_size(block_size_id: BlockSizeId) -> Option<usize> {
         4 * 1024 * 1024, // index 3 → Max4Mb   (ID 7)
     ];
 
-    // Normalize Default → Max64Kb (mirrors: if (blockSizeID == 0) blockSizeID = LZ4F_BLOCKSIZEID_DEFAULT)
+    // `BlockSizeId::Default` (value 0) is defined by the spec to be equivalent to `Max64Kb`.
     let id = match block_size_id {
         BlockSizeId::Default => BlockSizeId::Max64Kb,
         other => other,
@@ -134,14 +139,14 @@ pub fn lz4f_optimal_bsid(requested_bsid: BlockSizeId, src_size: usize) -> BlockS
         if src_size <= max_block_size {
             return proposed;
         }
-        // Advance proposedBSID by 1 (mirrors: proposedBSID = (LZ4F_blockSizeID_t)((int)proposedBSID + 1))
+        // Step up to the next larger block-size tier.
         proposed = match proposed {
             BlockSizeId::Max64Kb  => BlockSizeId::Max256Kb,
             BlockSizeId::Max256Kb => BlockSizeId::Max1Mb,
             BlockSizeId::Max1Mb   => BlockSizeId::Max4Mb,
             _ => break, // safety guard; not reachable under normal inputs
         };
-        max_block_size <<= 2; // mirrors: maxBlockSize <<= 2
+        max_block_size <<= 2; // Each step quadruples the block size: 64 K → 256 K → 1 M → 4 M.
     }
 
     requested_bsid
@@ -176,7 +181,7 @@ pub fn lz4f_compress_bound_internal(
     prefs: &Preferences,
     already_buffered: usize,
 ) -> usize {
-    // flush = prefsPtr->autoFlush | (srcSize==0)
+    // A zero-length source forces a flush: there is nothing left to accumulate in the buffer.
     let flush = prefs.auto_flush || src_size == 0;
 
     // Resolve Default block-size ID → Max64Kb
@@ -187,7 +192,7 @@ pub fn lz4f_compress_bound_internal(
     let block_size = lz4f_get_block_size(block_id).unwrap_or(64 * 1024);
 
     let max_buffered = block_size - 1;
-    let buffered_size = already_buffered.min(max_buffered); // MIN(alreadyBuffered, maxBuffered)
+    let buffered_size = already_buffered.min(max_buffered); // clamp to the usable buffer headroom
     let max_src_size = src_size + buffered_size;
 
     let nb_full_blocks = max_src_size / block_size;
@@ -210,7 +215,7 @@ pub fn lz4f_compress_bound_internal(
             0
         };
 
-    // Mirrors: ((BHSize + blockCRCSize) * nbBlocks) + (blockSize * nbFullBlocks) + lastBlockSize + frameEnd
+    // Sum: per-block header overhead × block count + raw block data + partial last block + frame trailer.
     ((BH_SIZE + block_crc_size) * nb_blocks)
         + (block_size * nb_full_blocks)
         + last_block_size
@@ -225,11 +230,12 @@ pub fn lz4f_compress_bound_internal(
 ///
 /// Equivalent to `LZ4F_compressFrameBound` (lz4frame.c:406–416).
 pub fn lz4f_compress_frame_bound(src_size: usize, prefs: Option<&Preferences>) -> usize {
-    // Mirrors: if (preferencesPtr!=NULL) prefs = *preferencesPtr; else MEM_INIT(&prefs, 0, sizeof(prefs));
+    // Work on a local copy so we can override `auto_flush` without affecting the caller.
     let mut local_prefs = prefs.copied().unwrap_or_default();
-    local_prefs.auto_flush = true; // mirrors: prefs.autoFlush = 1;
+    // A one-shot frame always flushes: every byte of input ends up in the frame.
+    local_prefs.auto_flush = true;
 
-    // headerSize = maxFHSize (19); then add internal bound
+    // LZ4 frame headers are at most MAX_FH_SIZE (19) bytes; add that to the compressed payload bound.
     MAX_FH_SIZE + lz4f_compress_bound_internal(src_size, &local_prefs, 0)
 }
 

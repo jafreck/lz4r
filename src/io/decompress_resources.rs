@@ -1,44 +1,29 @@
-// decompress_resources.rs — Decompression context and buffer pool.
-// Migrated from lz4io.c lines 1888–2014 (declarations #17, #18).
-//
-// Migration decisions:
-// - `dRess_t` (lz4io.c lines 1877–1886) → `DecompressResources`.
-//   The C struct holds a raw `LZ4F_decompressionContext_t`, src/dst heap
-//   buffers, a file pointer, and an optional dictionary buffer.
-//   In Rust we use `lz4_flex::frame::FrameDecoder` (which owns the
-//   decompression context internally), explicit `Vec<u8>` buffers, and
-//   carry the dictionary as `Option<Vec<u8>>`.  The `dstFile` pointer is
-//   not stored here — callers pass a `&mut impl Write` at the call site.
-// - `LZ4IO_loadDDict` / `LZ4IO_createDResources` / `LZ4IO_freeDResources`
-//   → `DecompressResources::new` and `DecompressResources::with_dict`.
-//   Rust's ownership model handles freeing automatically.
-// - `LZ4IO_createDict` (lines 1005–1062) is inlined into `load_dict_file`,
-//   preserving the circular-buffer / last-64KB semantics exactly.
-// - `BufferPool` (lines 1939–2014):
-//   The C implementation uses a fixed circular array and a spin-wait loop
-//   in `BufPool_getBuffer` (lines 1990–2001) that burns CPU waiting for a
-//   buffer to be released.  In Rust this is replaced with a
-//   `crossbeam_channel::bounded(count)` channel pre-filled with `Buffer`
-//   values.  `acquire` calls `recv()` (blocking, no spin) and `release`
-//   calls `send()`.  This preserves the FIFO ordering relied upon by the
-//   async-IO decompress path while eliminating busy-waiting.
-// - `#define PBUFFERS_NB 3` (1 being-decompressed + 1 queued + 1 in-flight
-//   to IO) is exposed as the default `count` in `BufferPool::new`; callers
-//   can override.
-// - Constants `INBUFF_SIZE` / `OUTBUFF_SIZE` are re-exported so that the
-//   frame-decompression module (task-018) can use them without duplication.
+//! Decompression context and buffer pool.
+//!
+//! This module provides two layers of resource management for the LZ4
+//! decompression pipeline:
+//!
+//! - [`DecompressResources`]: scratch I/O buffers and an optional pre-loaded
+//!   dictionary for the single-threaded decompression path.
+//! - [`BufferPool`]: a fixed pool of reusable [`Buffer`] objects used by the
+//!   multi-threaded decompression path.  Buffers are exchanged over a bounded
+//!   channel, so acquisition blocks rather than busy-waits when all buffers
+//!   are in use.
+//!
+//! Dictionary loading ([`load_dict_file`]) retains only the last 64 KiB of
+//! the dictionary file, matching the LZ4 specification's maximum dictionary
+//! size limit.
 
 use std::fs;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 
 use crossbeam_channel::{bounded, Receiver, Sender};
-use lz4_flex::frame::FrameDecoder;
 
 use crate::io::prefs::{LZ4_MAX_DICT_SIZE, MB, Prefs};
 
 // ---------------------------------------------------------------------------
-// Buffer-size constants (lz4io.c lines 1934–1937)
+// Buffer-size constants
 // ---------------------------------------------------------------------------
 
 /// Size of each MT decompression input buffer (4 MiB).
@@ -55,11 +40,15 @@ pub const PBUFFERS_NB: usize = 3;
 pub const LZ4IO_D_BUFFER_SIZE: usize = 64 * 1024;
 
 // ---------------------------------------------------------------------------
-// Dictionary loading (mirrors LZ4IO_createDict, lz4io.c lines 1005–1062)
+// Dictionary loading
 // ---------------------------------------------------------------------------
 
 /// Loads the last `LZ4_MAX_DICT_SIZE` (64 KiB) bytes of `dict_path` into a
-/// `Vec<u8>`, exactly as `LZ4IO_createDict` does using a circular buffer.
+/// contiguous `Vec<u8>` using an in-place circular buffer.
+///
+/// If the file is shorter than 64 KiB the entire file is returned.  If it is
+/// longer, only the trailing 64 KiB is retained — the portion that LZ4
+/// decoders are permitted to reference as dictionary context.
 ///
 /// Returns `io::Error` on any I/O failure.
 pub fn load_dict_file(dict_path: &Path) -> io::Result<Vec<u8>> {
@@ -69,7 +58,7 @@ pub fn load_dict_file(dict_path: &Path) -> io::Result<Vec<u8>> {
     // (the file might be stdin-like, in which case we just read it all).
     let _ = file.seek(SeekFrom::End(-(LZ4_MAX_DICT_SIZE as i64)));
 
-    // Read into a circular buffer of size LZ4_MAX_DICT_SIZE, mirroring C.
+    // Accumulate bytes into a circular buffer of capacity LZ4_MAX_DICT_SIZE.
     let mut circular: Vec<u8> = vec![0u8; LZ4_MAX_DICT_SIZE];
     let mut dict_end: usize = 0;
     let mut dict_len: usize = 0;
@@ -104,65 +93,51 @@ pub fn load_dict_file(dict_path: &Path) -> io::Result<Vec<u8>> {
 }
 
 // ---------------------------------------------------------------------------
-// DecompressResources (dRess_t, lz4io.c lines 1877–1929)
+// DecompressResources
 // ---------------------------------------------------------------------------
 
 /// Decompression context and associated buffers.
 ///
-/// Equivalent to `dRess_t` in C.  Owns the `lz4_flex` frame-decompressor
-/// state, scratch I/O buffers, and an optional pre-loaded dictionary.
+/// Holds the scratch I/O buffers and optional pre-loaded dictionary needed by
+/// the single-threaded decompression path.  The LZ4F decompression context is
+/// created per-call inside the frame-decompression module rather than stored
+/// here, keeping this struct FFI-free.
 pub struct DecompressResources {
-    /// Frame decompressor wrapping the LZ4F decompression context.
-    /// Equivalent to `ress.dCtx`.
-    pub decoder: FrameDecoder<io::Empty>,
-
     /// Scratch buffer for reading compressed input (64 KiB).
-    /// Equivalent to `ress.srcBuffer` / `ress.srcBufferSize`.
     pub src_buffer: Vec<u8>,
 
     /// Scratch buffer for writing decompressed output (64 KiB).
-    /// Equivalent to `ress.dstBuffer` / `ress.dstBufferSize`.
     pub dst_buffer: Vec<u8>,
 
     /// Pre-loaded dictionary bytes, if any.
-    /// Equivalent to `ress.dictBuffer` / `ress.dictBufferSize`.
     pub dict_buffer: Option<Vec<u8>>,
 }
 
 impl DecompressResources {
-    /// Creates decompression resources without a dictionary.
-    ///
-    /// Equivalent to `LZ4IO_createDResources(prefs)` when
-    /// `prefs->useDictionary == false`.
+    /// Creates decompression resources with no dictionary.
     pub fn new(_prefs: &Prefs) -> io::Result<Self> {
         Ok(DecompressResources {
-            decoder: FrameDecoder::new(io::empty()),
             src_buffer: vec![0u8; LZ4IO_D_BUFFER_SIZE],
             dst_buffer: vec![0u8; LZ4IO_D_BUFFER_SIZE],
             dict_buffer: None,
         })
     }
 
-    /// Creates decompression resources and loads the dictionary at
-    /// `dict_path`.
+    /// Creates decompression resources and loads the dictionary at `dict_path`.
     ///
-    /// Equivalent to `LZ4IO_createDResources(prefs)` when
-    /// `prefs->useDictionary == true`, followed by `LZ4IO_loadDDict`.
+    /// Only the last 64 KiB of the dictionary file is retained; see
+    /// [`load_dict_file`] for details.
     pub fn with_dict(_prefs: &Prefs, dict_path: &Path) -> io::Result<Self> {
         let dict = load_dict_file(dict_path)?;
         Ok(DecompressResources {
-            decoder: FrameDecoder::new(io::empty()),
             src_buffer: vec![0u8; LZ4IO_D_BUFFER_SIZE],
             dst_buffer: vec![0u8; LZ4IO_D_BUFFER_SIZE],
             dict_buffer: Some(dict),
         })
     }
 
-    /// Creates decompression resources, loading a dictionary if
-    /// `prefs.use_dictionary` is set.
-    ///
-    /// Convenience wrapper that mirrors the C call pattern:
-    /// `LZ4IO_createDResources` → `LZ4IO_loadDDict`.
+    /// Creates decompression resources, loading a dictionary from
+    /// `prefs.dictionary_filename` if `prefs.use_dictionary` is set.
     pub fn from_prefs(prefs: &Prefs) -> io::Result<Self> {
         if prefs.use_dictionary {
             let path = prefs
@@ -183,12 +158,16 @@ impl DecompressResources {
 }
 
 // ---------------------------------------------------------------------------
-// Buffer (lz4io.c lines 1939–1943)
+// Buffer
 // ---------------------------------------------------------------------------
 
-/// A reusable heap buffer with a capacity and a populated byte count.
+/// A reusable heap buffer with a fixed capacity and a mutable populated-byte
+/// count.
 ///
-/// Equivalent to the C `Buffer` struct.
+/// [`BufferPool`] owns a set of these and circulates them between the
+/// decompressor and writer threads.  `size` tracks how many leading bytes of
+/// `data` are currently valid; it must be reset to `0` before returning a
+/// buffer to the pool.
 #[derive(Debug)]
 pub struct Buffer {
     /// The underlying storage.
@@ -226,30 +205,27 @@ impl Buffer {
 }
 
 // ---------------------------------------------------------------------------
-// BufferPool (lz4io.c lines 1950–2013)
+// BufferPool
 // ---------------------------------------------------------------------------
 
-/// A fixed-size pool of reusable `Buffer` objects for MT decompression.
+/// A fixed-size pool of reusable [`Buffer`] objects for multi-threaded
+/// decompression.
 ///
-/// The C implementation (`BufferPool`) uses a circular array and a spin-wait
-/// loop in `BufPool_getBuffer`.  This Rust version replaces the spin-wait
-/// with a `crossbeam_channel::bounded` channel: `acquire` blocks on `recv()`
-/// until a buffer is available, and `release` returns a buffer via `send()`.
-/// This is semantically equivalent (FIFO ordering, bounded parallelism) but
-/// never busy-waits.
-///
-/// Equivalent to `BufferPool` + `LZ4IO_createBufferPool` +
-/// `LZ4IO_freeBufferPool` + `BufPool_getBuffer` + `BufPool_releaseBuffer`.
+/// Buffers are passed through a `crossbeam_channel::bounded` channel.
+/// [`acquire`][BufferPool::acquire] blocks until a buffer is available;
+/// [`release`][BufferPool::release] returns one.  This gives FIFO ordering
+/// and bounded parallelism without busy-waiting.
 pub struct BufferPool {
     sender: Sender<Buffer>,
     receiver: Receiver<Buffer>,
 }
 
 impl BufferPool {
-    /// Creates a pool with `count` buffers each of `buf_size` bytes.
+    /// Creates a pool pre-filled with `count` buffers each of `buf_size`
+    /// bytes.
     ///
-    /// Equivalent to `LZ4IO_createBufferPool(bufSize)` with `PBUFFERS_NB`
-    /// as the count.
+    /// Pass [`PBUFFERS_NB`] as `count` for the standard three-buffer pipeline
+    /// (one being decompressed, one queued, one in-flight to I/O).
     ///
     /// # Panics
     ///
@@ -266,18 +242,16 @@ impl BufferPool {
     }
 
     /// Acquires a buffer from the pool, blocking until one is available.
-    ///
-    /// Equivalent to `BufPool_getBuffer` but blocks instead of spinning.
     pub fn acquire(&self) -> Buffer {
         self.receiver
             .recv()
             .expect("BufferPool channel closed unexpectedly")
     }
 
-    /// Returns a buffer to the pool.  The caller must reset `buf.size` to 0
-    /// before releasing, mirroring `bp->buffers[id].size = 0` in C.
+    /// Returns a buffer to the pool.
     ///
-    /// Equivalent to `BufPool_releaseBuffer`.
+    /// The caller must reset `buf.size` to `0` before releasing so that the
+    /// next acquirer sees a logically empty buffer.
     pub fn release(&self, buf: Buffer) {
         self.sender
             .send(buf)

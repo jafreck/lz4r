@@ -1,31 +1,15 @@
-/*
-    bench/runner.rs — File loading, memory probe, and level iteration
-    Migrated from lz4-1.10.0/programs/bench.c (lines 622–753)
-
-    Original copyright (C) Yann Collet 2012-2020 — GPL v2 License.
-
-    Migration notes:
-    - `BMK_findMaxMem` (lines 622–643): The C implementation probes available
-      memory by repeatedly attempting malloc at decreasing sizes. In Rust,
-      Vec::with_capacity provides natural OOM handling; the probing loop is
-      replaced with a purely arithmetic computation that mirrors C exactly for
-      the common case (ample memory): the probe loop subtracts `step` once,
-      then the "keep some space available" block subtracts `step` a second time.
-      Both subtractions are performed explicitly in `find_max_mem`.
-    - `BMK_benchCLevel` (lines 646–672): Preserves the basename-extraction
-      logic (strrchr on '\\' then '/') and the level-iteration loop. A fresh
-      CompressionStrategy and FrameDecompressor are constructed for each level,
-      matching C's per-level re-initialisation. `SET_REALTIME_PRIORITY` is
-      implemented via `libc::setpriority` and gated behind the
-      `realtime-priority` Cargo feature.
-    - `BMK_loadFiles` (lines 678–708): Translated to idiomatic Rust using
-      `std::fs::File` + `read_exact`. Skips directories via `fs::metadata`.
-      Returns `Err` when no data was loaded (mirrors END_PROCESS(12, …)).
-    - `BMK_benchFileTable` (lines 710–753): Uses the simplified `find_max_mem`
-      helper. The LZ4_MAX_INPUT_SIZE cap and "not enough memory" truncation
-      messages are preserved. Returns `io::Error` instead of calling the C
-      END_PROCESS() macro that would have terminated the process.
-*/
+//! Benchmark runner: file loading, memory estimation, and compression-level sweeps.
+//!
+//! This module coordinates the three high-level operations the benchmark driver
+//! needs before measuring throughput:
+//!
+//! 1. **Memory estimation** ([`find_max_mem`]): determines the largest contiguous
+//!    buffer the process can safely allocate for benchmark input data.
+//! 2. **File loading** ([`load_files`]): reads one or more files into a single
+//!    contiguous buffer, capped by the estimated memory limit.
+//! 3. **Level sweep** ([`bench_c_level`], [`bench_file_table`]): runs
+//!    [`bench_mem`] for every compression level in a requested range,
+//!    constructing fresh codec state per level.
 
 use std::fs;
 use std::io::{self, Read};
@@ -42,39 +26,34 @@ const LZ4_MAX_INPUT_SIZE: usize = 0x7E00_0000;
 
 /// Estimate the maximum usable buffer size for the benchmark.
 ///
-/// Migrated from `BMK_findMaxMem` (bench.c lines 622–643).
-///
-/// The C implementation probes available memory via repeated `malloc` attempts.
-/// In Rust, `Vec` allocation fails naturally on OOM, so the probe loop is
-/// replaced with a purely arithmetic computation that matches C's common-case
-/// result (when the first malloc succeeds): round `required_mem` up to the next
-/// 64 MiB boundary, add two 64 MiB headroom blocks, cap at [`MAX_MEMORY`],
-/// subtract one 64 MiB step (simulating the probe loop's single iteration), then
-/// subtract another 64 MiB step ("keep some space available", bench.c lines 638–640).
+/// Rounds `required_mem` up to the next 64 MiB boundary, adds two 64 MiB
+/// headroom blocks, caps the result at [`MAX_MEMORY`], then subtracts two
+/// further 64 MiB steps — one to account for compressor workspace and one
+/// to retain headroom for the decompressor and output buffers. Returns the
+/// result in bytes.
 fn find_max_mem(required_mem: u64) -> usize {
-    const STEP: u64 = 64 * 1024 * 1024; // 64 MB — matches bench.c line 624
+    const STEP: u64 = 64 * 1024 * 1024; // 64 MiB boundary granularity
 
-    // C: requiredMem = (((requiredMem >> 26) + 1) << 26)
-    // Rounds up to the next multiple of 2^26 (64 MiB).
+    // Round up to the next multiple of 2^26 (64 MiB).
     let mut mem = ((required_mem >> 26) + 1) << 26;
 
-    // C: requiredMem += 2*step
+    // Add two STEP blocks of headroom before capping.
     mem = mem.saturating_add(2 * STEP);
 
-    // C: if (requiredMem > maxMemory) requiredMem = maxMemory
     if mem > MAX_MEMORY as u64 {
         mem = MAX_MEMORY as u64;
     }
 
-    // C: probe loop (bench.c lines 631–635): in the common case (ample memory),
-    // the loop executes exactly once, subtracting `step` before a successful malloc.
+    // First subtraction: reserves space for the compressor's working memory,
+    // which runs alongside the input buffer during measurement.
     if mem > STEP {
         mem -= STEP;
     } else {
         mem >>= 1;
     }
 
-    // C: keep some space available (bench.c lines 638–640)
+    // Second subtraction: retains headroom so the decompressor and output
+    // buffer don't push the process into OOM territory.
     if mem > STEP {
         mem -= STEP;
     } else {
@@ -88,20 +67,18 @@ fn find_max_mem(required_mem: u64) -> usize {
 
 /// Benchmark a single source buffer across a range of compression levels.
 ///
-/// Migrated from `BMK_benchCLevel` (bench.c lines 646–672).
+/// Extracts the basename of `display_name` (strips any leading path component,
+/// checking `'\\'` first, then `'/'`) and iterates `c_level..=c_level_last`,
+/// constructing a fresh [`CompressionStrategy`] and [`FrameDecompressor`] for
+/// each level before delegating to [`bench_mem`]. Fresh per-level state ensures
+/// that dictionary or codec internals from one level do not bleed into the next.
 ///
-/// Extracts the basename of `display_name` (strips any leading path component
-/// using the exact C `strrchr` logic — checking `'\\'` first, then `'/'` only
-/// if no `'\\'` is found), then iterates
-/// `c_level..=c_level_last`, constructing a fresh [`CompressionStrategy`] and
-/// [`FrameDecompressor`] for each level and delegating to [`bench_mem`].
-///
-/// `file_sizes` — per-file byte counts within `src` (C `fileSizes`/`nbFiles`);
-/// empty slice means treat `src` as a single file.
+/// `file_sizes` holds per-file byte counts within `src`; an empty slice causes
+/// `src` to be treated as a single logical file.
 ///
 /// When the `realtime-priority` Cargo feature is enabled, the function
-/// attempts to raise the process scheduling priority via `setpriority(2)`
-/// (equivalent to `SET_REALTIME_PRIORITY` in platform.h).
+/// attempts to raise the process scheduling priority via `setpriority(2)` to
+/// reduce OS-induced jitter in measurements.
 pub fn bench_c_level(
     src: &[u8],
     display_name: &str,
@@ -111,8 +88,8 @@ pub fn bench_c_level(
     dict: &[u8],
     file_sizes: &[usize],
 ) -> io::Result<()> {
-    // Strip path prefix — mirrors C strrchr logic (bench.c lines 653–655).
-    // C checks '\\'first; only if not found does it check '/'.
+    // Strip path prefix: check '\\' first (Windows paths), then '/' (POSIX).
+    // Using the last separator ensures deeply nested paths show only the filename.
     let display_name = if let Some(pos) = display_name.rfind('\\') {
         &display_name[pos + 1..]
     } else if let Some(pos) = display_name.rfind('/') {
@@ -121,17 +98,20 @@ pub fn bench_c_level(
         display_name
     };
 
-    // SET_REALTIME_PRIORITY (bench.c line 657); feature-gated.
+    // Raise scheduling priority to reduce OS-induced jitter in measurements.
+    // Gated behind the `realtime-priority` feature to avoid surprising users
+    // who run benchmarks without elevated privileges.
     #[cfg(feature = "realtime-priority")]
     {
-        // SAFETY: setpriority only modifies scheduling priority for this
-        // process; no memory safety implications.
+        // SAFETY: setpriority(2) adjusts only the calling process's scheduling
+        // priority; it has no memory-safety implications.
         unsafe {
             libc::setpriority(libc::PRIO_PROCESS, 0, -20);
         }
     }
 
-    // Mirrors C: if (g_displayLevel == 1 && !g_additionalParam) DISPLAY(...)
+    // At verbosity level 1 with no extra parameters, emit a one-line header
+    // summarising the benchmark run before any per-level output appears.
     if config.display_level == 1 && config.additional_param == 0 {
         eprintln!(
             "bench {} {}: input {} bytes, {} seconds, {} KB blocks",
@@ -143,7 +123,7 @@ pub fn bench_c_level(
         );
     }
 
-    // C: if (cLevelLast < cLevel) cLevelLast = cLevel;
+    // Clamp: if the caller specified a last level below the first, run only the first level.
     let c_level_last = c_level_last.max(c_level);
 
     let mut bench_error = false;
@@ -167,19 +147,18 @@ pub fn bench_c_level(
 
 /// Load multiple files into a single contiguous buffer.
 ///
-/// Migrated from `BMK_loadFiles` (bench.c lines 678–708).
-///
-/// Reads each path in `paths` into a buffer of up to `buffer_size` bytes.
-/// Loading stops early (after the current file is truncated) when the buffer
-/// would overflow, mirroring the C behaviour where `nbFiles` is reduced.
-/// Directories are silently skipped with a message at display level ≥ 2.
+/// Reads each path in `paths` sequentially into a buffer of up to
+/// `buffer_size` bytes. When the buffer would overflow, the current file is
+/// truncated to fit and loading stops — subsequent paths are not read.
+/// Directories are skipped silently; a diagnostic is emitted at display
+/// level ≥ 2.
 ///
 /// Returns `(buffer, file_sizes)` where `file_sizes[i]` is the number of
-/// bytes read for `paths[i]` (0 for skipped directories or unread files).
+/// bytes loaded for `paths[i]` (0 for skipped directories or unread paths).
 ///
 /// # Errors
-/// Returns `Err` if any file cannot be opened or read, or if `total_size == 0`
-/// (mirrors `END_PROCESS(12, "no data to bench")`).
+/// Returns `Err` if any file cannot be opened or read, or if the total bytes
+/// loaded is zero (no data to benchmark).
 pub fn load_files(
     paths: &[&str],
     buffer_size: usize,
@@ -189,7 +168,7 @@ pub fn load_files(
     let mut file_sizes = vec![0usize; paths.len()];
     let mut pos: usize = 0;
     let mut total_size: usize = 0;
-    // nb_files may be reduced when the buffer is full (mirrors C nbFiles=n).
+    // nb_files tracks how many paths to process; reduced when the buffer fills.
     let mut nb_files = paths.len();
 
     for (n, path) in paths.iter().enumerate() {
@@ -197,7 +176,7 @@ pub fn load_files(
             break;
         }
 
-        // Skip directories (mirrors UTIL_isDirectory check, bench.c 687–690).
+        // Skip directories — they carry no compressible data.
         let meta = fs::metadata(path)
             .map_err(|e| io::Error::new(e.kind(), format!("cannot stat {}: {}", path, e)))?;
         if meta.is_dir() {
@@ -213,9 +192,9 @@ pub fn load_files(
             eprint!("Loading {}...       \r", path);
         }
 
-        // Truncate to remaining buffer capacity (mirrors C lines 695–698).
+        // Truncate to remaining buffer capacity.
         let to_read = if file_size_on_disk > buffer_size - pos {
-            // Buffer too small — stop after this file (C: nbFiles=n).
+            // Buffer exhausted — stop processing further files after this one.
             nb_files = n;
             buffer_size - pos
         } else {
@@ -225,7 +204,8 @@ pub fn load_files(
         let mut f = fs::File::open(path)
             .map_err(|e| io::Error::new(e.kind(), format!("impossible to open file {}: {}", path, e)))?;
 
-        // Use read_exact to match C's fread-with-error-check semantics.
+        // read_exact guarantees all requested bytes are read or returns an error,
+        // avoiding silent short reads on slow or network-backed filesystems.
         f.read_exact(&mut buffer[pos..pos + to_read])
             .map_err(|e| io::Error::new(e.kind(), format!("could not read {}: {}", path, e)))?;
 
@@ -234,7 +214,7 @@ pub fn load_files(
         total_size += to_read;
     }
 
-    // C: if (totalSize == 0) END_PROCESS(12, "no data to bench")
+    // Refuse to benchmark an empty corpus — measurements would be meaningless.
     if total_size == 0 {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "no data to bench"));
     }
@@ -247,11 +227,10 @@ pub fn load_files(
 
 /// Benchmark a set of files across a range of compression levels.
 ///
-/// Migrated from `BMK_benchFileTable` (bench.c lines 710–753).
-///
-/// Loads all files into a single contiguous buffer (capped by the memory
-/// estimate from [`find_max_mem`] and by [`LZ4_MAX_INPUT_SIZE`]), then calls
-/// [`bench_c_level`] for each level in `c_level..=c_level_last`.
+/// Computes the total corpus size, derives a safe buffer limit with
+/// [`find_max_mem`] (also capping at [`LZ4_MAX_INPUT_SIZE`]), loads the files
+/// into that buffer with [`load_files`], then delegates to [`bench_c_level`]
+/// for every level in `c_level..=c_level_last`.
 pub fn bench_file_table(
     file_names: &[&str],
     c_level: i32,
@@ -259,7 +238,7 @@ pub fn bench_file_table(
     dict: &[u8],
     config: &BenchConfig,
 ) -> io::Result<()> {
-    // Compute total file size (equivalent to UTIL_getTotalFileSize).
+    // Sum the sizes of all non-directory paths to determine how much data to load.
     let total_size_to_load: u64 = file_names
         .iter()
         .filter_map(|p| fs::metadata(p).ok())
@@ -267,13 +246,13 @@ pub fn bench_file_table(
         .map(|m| m.len())
         .sum();
 
-    // Memory allocation & restrictions (bench.c lines 723–735).
-    // C: benchedSize = BMK_findMaxMem(totalSizeToLoad * 3) / 3
+    // Request 3× the corpus size from find_max_mem (input + compressor + decompressor
+    // buffers), then divide by 3 to obtain the usable input slice.
     let mut benched_size = find_max_mem(total_size_to_load.saturating_mul(3)) / 3;
     if benched_size == 0 {
         return Err(io::Error::new(io::ErrorKind::Other, "not enough memory"));
     }
-    // C: if ((U64)benchedSize > totalSizeToLoad) benchedSize = (size_t)totalSizeToLoad
+    // No need to allocate more than the actual corpus.
     if benched_size as u64 > total_size_to_load {
         benched_size = total_size_to_load as usize;
     }
@@ -290,18 +269,16 @@ pub fn bench_file_table(
         );
     }
 
-    // Load input buffer (bench.c lines 737–738).
     let (src_buffer, file_sizes) = load_files(file_names, benched_size, config)?;
 
-    // Display name: " N files" for multiple files, else the single filename
-    // (bench.c lines 741–742: snprintf(mfName, ..., " %u files")).
+    // Use " N files" as the display label when benchmarking multiple inputs so
+    // per-level output lines remain readable without listing every filename.
     let display_name = if file_names.len() > 1 {
         format!(" {} files", file_names.len())
     } else {
         file_names[0].to_string()
     };
 
-    // Benchmark (bench.c lines 743–747).
     bench_c_level(&src_buffer, &display_name, c_level, c_level_last, config, dict, &file_sizes)
 }
 
@@ -338,8 +315,7 @@ mod tests {
 
     #[test]
     fn bench_c_level_three_levels() {
-        // Verification criterion from migration plan:
-        // "bench_c_level(src, 1, 3, config) calls bench_mem for levels 1, 2, and 3"
+        // Verify that three distinct levels all complete without error.
         let src: Vec<u8> = (0u8..128).cycle().take(64 * 1024).collect();
         let mut config = BenchConfig::default();
         config.set_nb_seconds(0); // single pass — keeps the test fast
@@ -350,7 +326,7 @@ mod tests {
 
     #[test]
     fn bench_c_level_clamped_when_last_lt_first() {
-        // C: if (cLevelLast < cLevel) cLevelLast = cLevel — single level run.
+        // When last < first, the range is clamped so only the first level runs.
         let src: Vec<u8> = (0u8..64).cycle().take(4096).collect();
         let mut config = BenchConfig::default();
         config.set_nb_seconds(0);

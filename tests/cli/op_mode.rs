@@ -7,7 +7,7 @@
 //   - `init_cLevel`     → `init_c_level`
 
 use lz4::cli::op_mode::{
-    determine_op_mode, init_c_level, init_nb_workers, OpMode, LZ4_CLEVEL_DEFAULT,
+    determine_op_mode, init_c_level_from, init_nb_workers_from, OpMode, LZ4_CLEVEL_DEFAULT,
     LZ4_NBWORKERS_DEFAULT,
 };
 
@@ -116,46 +116,31 @@ fn nbworkers_default_is_0() {
 
 #[test]
 fn init_nb_workers_numeric_env_var_is_parsed() {
-    // When LZ4_NBWORKERS contains a numeric string, parse it.
-    // Mirrors init_nbWorkers() which calls readU32FromChar on the env value.
-    std::env::set_var("LZ4_NBWORKERS", "4");
-    let result = init_nb_workers();
-    std::env::remove_var("LZ4_NBWORKERS");
-    assert_eq!(result, 4);
+    // Mirrors init_nbWorkers() when LZ4_NBWORKERS contains a numeric string.
+    assert_eq!(init_nb_workers_from(Some("4")), 4);
 }
 
 #[test]
 fn init_nb_workers_zero_env_var() {
-    std::env::set_var("LZ4_NBWORKERS", "0");
-    let result = init_nb_workers();
-    std::env::remove_var("LZ4_NBWORKERS");
-    assert_eq!(result, 0);
+    assert_eq!(init_nb_workers_from(Some("0")), 0);
 }
 
 #[test]
 fn init_nb_workers_unset_returns_default() {
-    // Unset variable → default value.
-    std::env::remove_var("LZ4_NBWORKERS");
-    assert_eq!(init_nb_workers(), LZ4_NBWORKERS_DEFAULT);
+    // None represents an unset env var.
+    assert_eq!(init_nb_workers_from(None), LZ4_NBWORKERS_DEFAULT);
 }
 
 #[test]
 fn init_nb_workers_non_numeric_returns_default() {
     // Non-numeric string (no leading digit) → default.
-    // Mirrors the C path where readU32FromChar returns 0 on non-digit.
-    std::env::set_var("LZ4_NBWORKERS", "auto");
-    let result = init_nb_workers();
-    std::env::remove_var("LZ4_NBWORKERS");
-    assert_eq!(result, LZ4_NBWORKERS_DEFAULT);
+    assert_eq!(init_nb_workers_from(Some("auto")), LZ4_NBWORKERS_DEFAULT);
 }
 
 #[test]
 fn init_nb_workers_empty_env_var_returns_default() {
     // Empty string has no leading digit → default.
-    std::env::set_var("LZ4_NBWORKERS", "");
-    let result = init_nb_workers();
-    std::env::remove_var("LZ4_NBWORKERS");
-    assert_eq!(result, LZ4_NBWORKERS_DEFAULT);
+    assert_eq!(init_nb_workers_from(Some("")), LZ4_NBWORKERS_DEFAULT);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -164,52 +149,36 @@ fn init_nb_workers_empty_env_var_returns_default() {
 
 #[test]
 fn init_c_level_numeric_env_var_is_parsed() {
-    // When LZ4_CLEVEL contains a numeric string, parse and cast to i32.
-    std::env::set_var("LZ4_CLEVEL", "9");
-    let result = init_c_level();
-    std::env::remove_var("LZ4_CLEVEL");
-    assert_eq!(result, 9_i32);
+    // Mirrors init_cLevel() when LZ4_CLEVEL contains a numeric string.
+    assert_eq!(init_c_level_from(Some("9")), 9_i32);
 }
 
 #[test]
 fn init_c_level_level_12() {
     // High compression level.
-    std::env::set_var("LZ4_CLEVEL", "12");
-    let result = init_c_level();
-    std::env::remove_var("LZ4_CLEVEL");
-    assert_eq!(result, 12_i32);
+    assert_eq!(init_c_level_from(Some("12")), 12_i32);
 }
 
 #[test]
 fn init_c_level_level_1() {
     // Minimum non-zero level.
-    std::env::set_var("LZ4_CLEVEL", "1");
-    let result = init_c_level();
-    std::env::remove_var("LZ4_CLEVEL");
-    assert_eq!(result, 1_i32);
+    assert_eq!(init_c_level_from(Some("1")), 1_i32);
 }
 
 #[test]
 fn init_c_level_unset_returns_default() {
-    // Unset variable → LZ4_CLEVEL_DEFAULT (1).
-    std::env::remove_var("LZ4_CLEVEL");
-    assert_eq!(init_c_level(), LZ4_CLEVEL_DEFAULT);
+    // None represents an unset env var → LZ4_CLEVEL_DEFAULT (1).
+    assert_eq!(init_c_level_from(None), LZ4_CLEVEL_DEFAULT);
 }
 
 #[test]
 fn init_c_level_non_numeric_returns_default() {
     // Non-numeric string → default.
-    std::env::set_var("LZ4_CLEVEL", "fast");
-    let result = init_c_level();
-    std::env::remove_var("LZ4_CLEVEL");
-    assert_eq!(result, LZ4_CLEVEL_DEFAULT);
+    assert_eq!(init_c_level_from(Some("fast")), LZ4_CLEVEL_DEFAULT);
 }
 
 #[test]
 fn init_c_level_empty_env_var_returns_default() {
     // Empty string → default.
-    std::env::set_var("LZ4_CLEVEL", "");
-    let result = init_c_level();
-    std::env::remove_var("LZ4_CLEVEL");
-    assert_eq!(result, LZ4_CLEVEL_DEFAULT);
+    assert_eq!(init_c_level_from(Some("")), LZ4_CLEVEL_DEFAULT);
 }

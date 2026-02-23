@@ -63,11 +63,8 @@ fn round_trip(src: &[u8], compression_level: i32) -> Vec<u8> {
     .expect("compress_filename must succeed");
 
     let compressed = std::fs::read(&dst_path).unwrap();
-    let mut decompressed = Vec::new();
-    let mut decoder = lz4_flex::frame::FrameDecoder::new(compressed.as_slice());
-    std::io::Read::read_to_end(&mut decoder, &mut decompressed)
-        .expect("decompression must succeed");
-    decompressed
+    lz4::frame::decompress_frame_to_vec(&compressed)
+        .expect("decompression must succeed")
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -336,15 +333,11 @@ fn compress_filename_ext_matches_compress_filename() {
     assert_eq!(in_stream_size, data.len() as u64);
 
     // Both outputs must be valid LZ4 frames decompressing to the same content.
-    let mut dec1 = Vec::new();
     let bytes1 = std::fs::read(&dst1).unwrap();
-    let mut d1 = lz4_flex::frame::FrameDecoder::new(bytes1.as_slice());
-    std::io::Read::read_to_end(&mut d1, &mut dec1).unwrap();
+    let dec1 = lz4::frame::decompress_frame_to_vec(&bytes1).unwrap();
 
-    let mut dec2 = Vec::new();
     let bytes2 = std::fs::read(&dst2).unwrap();
-    let mut d2 = lz4_flex::frame::FrameDecoder::new(bytes2.as_slice());
-    std::io::Read::read_to_end(&mut d2, &mut dec2).unwrap();
+    let dec2 = lz4::frame::decompress_frame_to_vec(&bytes2).unwrap();
 
     assert_eq!(dec1, data.as_slice());
     assert_eq!(dec2, data.as_slice());
@@ -484,9 +477,7 @@ fn compress_multiple_filenames_outputs_are_valid_lz4_frames() {
     let out = std::fs::read(dir.path().join("data.bin.lz4")).unwrap();
     assert_eq!(&out[..4], &[0x04, 0x22, 0x4D, 0x18], "LZ4 frame magic mismatch");
 
-    let mut decompressed = Vec::new();
-    let mut dec = lz4_flex::frame::FrameDecoder::new(out.as_slice());
-    std::io::Read::read_to_end(&mut dec, &mut decompressed).unwrap();
+    let decompressed = lz4::frame::decompress_frame_to_vec(&out).unwrap();
     assert_eq!(decompressed.as_slice(), content.as_slice());
 }
 

@@ -1,25 +1,23 @@
-/*
-    bench/compress_strategy.rs — Compression strategy vtable pattern
-    Migrated from lz4-1.10.0/programs/bench.c (lines 152–312)
-
-    Original copyright (C) Yann Collet 2012-2020 — GPL v2 License.
-
-    Migration notes:
-    - C `struct compressionParameters` with init/reset/block/cleanup function
-      pointers → Rust `CompressionStrategy` trait with four concrete types.
-    - Four concrete types map 1-to-1 with the four C function-pointer sets:
-        · `NoStreamFast`  — no dict, fast   (LZ4_compressInitNoStream path)
-        · `NoStreamHC`    — no dict, HC     (LZ4_compressInitNoStream path)
-        · `StreamFast`    — dict + fast     (LZ4_compressInitStream path)
-        · `StreamHC`      — dict + HC       (LZ4_compressInitStreamHC path)
-    - All compression calls now use the native Rust implementations from
-      `crate::block` and `crate::hc` — no FFI or third-party crate dependencies.
-    - `LZ4_isError(errcode) → (errcode==0)` inversion is NOT ported; a zero
-      return from any block compression function is mapped to `Err`.
-    - `LZ4HC_CLEVEL_MIN = 2` (from lz4hc.h line 47); levels ≥ 2 use HC.
-    - C init/cleanup → Rust `new()` / `Drop`; C reset is called inside
-      `compress_block` before each block (mirrors C's LZ4_compressBlockStream).
-*/
+//! Compression strategy selection for the benchmark subsystem.
+//!
+//! Defines the [`CompressionStrategy`] trait and four concrete implementations
+//! covering every combination of dictionary / no-dictionary and fast / HC modes:
+//!
+//! | Type              | Dict | Algorithm |
+//! |-------------------|------|-----------|
+//! | [`NoStreamFast`]  | no   | fast      |
+//! | [`NoStreamHC`]    | no   | HC        |
+//! | [`StreamFast`]    | yes  | fast      |
+//! | [`StreamHC`]      | yes  | HC        |
+//!
+//! All compression is performed through `crate::block` and `crate::hc` — no
+//! FFI or third-party crate dependencies.  A zero return from any block
+//! compression function is treated as an error.
+//!
+//! Use [`build_compression_parameters`] (no dict) or
+//! [`build_compression_parameters_with_dict`] (with dict) to obtain a boxed
+//! strategy.  The threshold [`LZ4HC_CLEVEL_MIN`]` = 2` determines whether the
+//! fast or HC path is selected.
 
 use std::io;
 
@@ -29,24 +27,24 @@ use crate::hc::{
     reset_stream_hc_fast, load_dict_hc, attach_hc_dictionary,
 };
 
-/// LZ4HC minimum compression level (lz4hc.h line 47).
+/// Minimum compression level that activates HC (high-compression) mode.
+/// Levels strictly below this threshold use the fast compression path.
 const LZ4HC_CLEVEL_MIN: i32 = 2;
 
 // ── CompressionStrategy trait ─────────────────────────────────────────────────
 
-/// Vtable-style compression strategy.
+/// A single compression strategy used by the benchmark runner.
 ///
-/// Corresponds to the function-pointer fields of `struct compressionParameters`
-/// in bench.c lines 163–171.  Each concrete implementation owns its stream
-/// state (replacing the C `init` / `cleanup` pair with `new` / `Drop`) and
-/// performs the stream reset inside `compress_block` (replacing the C `reset`
-/// function pointer called at the top of each block function).
+/// Each implementation owns its stream state, initialised in `new` and
+/// released on `Drop`.  The per-block context reset is performed inside
+/// [`compress_block`](CompressionStrategy::compress_block), so callers
+/// require no per-block setup beyond passing source and destination buffers.
 pub trait CompressionStrategy: Send + Sync {
     /// Compress `src` into `dst`.
     ///
-    /// Before writing, `dst` is guaranteed to hold at least
-    /// `LZ4_compressBound(src.len())` bytes.  Returns the number of
-    /// compressed bytes written into `dst`.
+    /// Before writing, `dst` is resized to hold at least
+    /// `compress_bound(src.len())` bytes.  Returns the number of compressed
+    /// bytes written into `dst`.
     fn compress_block(&mut self, src: &[u8], dst: &mut Vec<u8>) -> io::Result<usize>;
 }
 
@@ -63,14 +61,14 @@ fn ensure_dst_capacity(src_len: usize, dst: &mut Vec<u8>) {
 
 // ── Strategy 1: NoStreamFast ──────────────────────────────────────────────────
 
-/// No-dict, fast (non-stream) compression.
+/// Stateless fast compression with no dictionary.
 ///
-/// Corresponds to `LZ4_compressInitNoStream` / `LZ4_compressResetNoStream` /
-/// `LZ4_compressBlockNoStream` / `LZ4_compressCleanupNoStream`
-/// (bench.c lines 174–231).
+/// Each [`compress_block`](CompressionStrategy::compress_block) call is
+/// fully independent — there is no cross-block history.
 ///
-/// Acceleration factor mirrors the C logic:
-/// `acceleration = (cLevel < 0) ? -cLevel + 1 : 1`
+/// The acceleration factor is derived from the compression level:
+/// `acceleration = if c_level < 0 { -c_level + 1 } else { 1 }`.
+/// Negative levels trade compression ratio for higher throughput.
 pub struct NoStreamFast {
     acceleration: i32,
 }
@@ -96,11 +94,10 @@ impl CompressionStrategy for NoStreamFast {
 
 // ── Strategy 2: NoStreamHC ────────────────────────────────────────────────────
 
-/// No-dict, HC (non-stream) compression.
+/// Stateless high-compression (HC) compression with no dictionary.
 ///
-/// Corresponds to `LZ4_compressInitNoStream` / `LZ4_compressResetNoStream` /
-/// `LZ4_compressBlockNoStreamHC` / `LZ4_compressCleanupNoStream`
-/// (bench.c lines 174–264).
+/// Each block is compressed independently using the HC search algorithm.
+/// Intended for levels ≥ [`LZ4HC_CLEVEL_MIN`].
 pub struct NoStreamHC {
     c_level: i32,
 }
@@ -139,15 +136,13 @@ impl CompressionStrategy for NoStreamHC {
 
 // ── Strategy 3: StreamFast ────────────────────────────────────────────────────
 
-/// Dict + fast (stream) compression.
+/// Fast stream compression with an optional pre-loaded dictionary.
 ///
-/// Corresponds to `LZ4_compressInitStream` / `LZ4_compressResetStream` /
-/// `LZ4_compressBlockStream` / `LZ4_compressCleanupStream`
-/// (bench.c lines 183–271).
-///
-/// Uses `Lz4Stream::load_dict_slow` to pre-load the dict into a dedicated
-/// stream; `attach_dictionary` + `compress_fast_continue` are called per block
-/// (mirrors the C reset + block step).
+/// The dictionary is loaded into a dedicated `dict_stream` via
+/// `Lz4Stream::load_dict_slow` at construction time.  On each block,
+/// `attach_dictionary` links the dict stream before calling
+/// `compress_fast_continue`, providing dictionary context without
+/// accumulating cross-block history in the primary stream.
 pub struct StreamFast {
     c_level: i32,
     stream: Box<Lz4Stream>,
@@ -157,14 +152,14 @@ pub struct StreamFast {
 }
 
 impl StreamFast {
-    /// Create a new `StreamFast` strategy, loading `dict` into a dedicated stream.
+    /// Create a `StreamFast` strategy, pre-loading `dict` into a dedicated stream.
     ///
-    /// Mirrors `LZ4_compressInitStream` (bench.c lines 183–191).
+    /// Pass an empty slice for `dict` to compress without a dictionary.
     pub fn new(c_level: i32, dict: &[u8]) -> io::Result<Self> {
         let stream = Lz4Stream::new();
         let mut dict_stream = Lz4Stream::new();
-        // Keep a private copy so the pointer stays valid for the lifetime of
-        // this struct (the C code keeps the original dictBuf pointer alive).
+        // Keep a private copy so the slice pointer passed to load_dict_slow
+        // remains valid for the entire lifetime of this struct.
         let dict_copy: Vec<u8> = dict.to_vec();
         if !dict_copy.is_empty() {
             dict_stream.load_dict_slow(&dict_copy);
@@ -184,15 +179,16 @@ unsafe impl Sync for StreamFast {}
 impl CompressionStrategy for StreamFast {
     fn compress_block(&mut self, src: &[u8], dst: &mut Vec<u8>) -> io::Result<usize> {
         ensure_dst_capacity(src.len(), dst);
-        // acceleration mirrors bench.c line 246
+        // Negative levels trade compression ratio for speed via a higher acceleration value.
         let acceleration = if self.c_level < 0 {
             -self.c_level + 1
         } else {
             1
         };
-        // LZ4_compressResetStream (bench.c lines 210–215)
+        // Reset the compression context before each block to prevent unintended
+        // cross-block history from a previous compress_block call.
         self.stream.reset_fast();
-        // Pass None when no dict was loaded; attach_dictionary(x, None) unsets any prior dict.
+        // When no dictionary was provided, pass None to clear any prior attachment.
         let dict_ptr = if self._dict.is_empty() {
             None
         } else {
@@ -202,7 +198,6 @@ impl CompressionStrategy for StreamFast {
             self.stream.attach_dictionary(dict_ptr);
         }
 
-        // LZ4_compressBlockStream (bench.c lines 241–249)
         let written = self.stream.compress_fast_continue(src, dst, acceleration);
         if written == 0 {
             Err(io::Error::new(
@@ -217,11 +212,12 @@ impl CompressionStrategy for StreamFast {
 
 // ── Strategy 4: StreamHC ──────────────────────────────────────────────────────
 
-/// Dict + HC (stream) compression.
+/// HC stream compression with an optional pre-loaded dictionary.
 ///
-/// Corresponds to `LZ4_compressInitStreamHC` / `LZ4_compressResetStreamHC` /
-/// `LZ4_compressBlockStreamHC` / `LZ4_compressCleanupStreamHC`
-/// (bench.c lines 193–278).
+/// Uses a dedicated `dict_stream_hc` to hold the dictionary context.
+/// Before each block, `reset_stream_hc_fast` reinitialises the primary HC
+/// stream and `attach_hc_dictionary` links the dict context, providing
+/// dictionary-aware compression without persisting cross-block history.
 pub struct StreamHC {
     c_level: i32,
     stream_hc: Box<Lz4StreamHc>,
@@ -231,9 +227,9 @@ pub struct StreamHC {
 }
 
 impl StreamHC {
-    /// Create a new `StreamHC` strategy, loading `dict` into a dedicated HC stream.
+    /// Create a `StreamHC` strategy, pre-loading `dict` into a dedicated HC stream.
     ///
-    /// Mirrors `LZ4_compressInitStreamHC` (bench.c lines 193–202).
+    /// Pass an empty slice for `dict` to compress without a dictionary.
     pub fn new(c_level: i32, dict: &[u8]) -> io::Result<Self> {
         let stream_hc = Lz4StreamHc::create().ok_or_else(|| {
             io::Error::new(io::ErrorKind::Other, "Lz4StreamHc::create failed")
@@ -242,7 +238,7 @@ impl StreamHC {
             io::Error::new(io::ErrorKind::Other, "Lz4StreamHc::create (dict) failed")
         })?;
         let dict_copy: Vec<u8> = dict.to_vec();
-        // Reset dict stream and load dictionary (bench.c lines 200–201)
+        // Initialise the dict stream at the target level before loading the dictionary.
         reset_stream_hc_fast(&mut dict_stream_hc, c_level);
         if !dict_copy.is_empty() {
             unsafe {
@@ -268,10 +264,11 @@ unsafe impl Sync for StreamHC {}
 impl CompressionStrategy for StreamHC {
     fn compress_block(&mut self, src: &[u8], dst: &mut Vec<u8>) -> io::Result<usize> {
         ensure_dst_capacity(src.len(), dst);
-        // LZ4_compressResetStreamHC (bench.c lines 217–222)
+        // Reset the HC stream before each block, discarding cross-block history
+        // and re-applying the compression level.
         reset_stream_hc_fast(&mut self.stream_hc, self.c_level);
-        // Pass None when no dict was loaded; attach_hc_dictionary requires a stream
-        // that was prepared by load_dict_hc — an empty dict stream is not valid.
+        // Only attach a dict stream that was prepared by load_dict_hc;
+        // an uninitialised dict stream must not be passed here.
         let dict_ptr = if self._dict.is_empty() {
             None
         } else {
@@ -281,7 +278,6 @@ impl CompressionStrategy for StreamHC {
             attach_hc_dictionary(&mut self.stream_hc, dict_ptr);
         }
 
-        // LZ4_compressBlockStreamHC (bench.c lines 251–258)
         let written = unsafe {
             compress_hc_continue(
                 &mut self.stream_hc,
@@ -304,16 +300,13 @@ impl CompressionStrategy for StreamHC {
 
 // ── Factory functions ─────────────────────────────────────────────────────────
 
-/// Select the appropriate no-dict compression strategy.
-///
-/// Mirrors the `dictSize == 0` branch of `LZ4_buildCompressionParameters`
-/// (bench.c lines 301–310).
+/// Build a no-dict compression strategy for the given compression level.
 ///
 /// - `c_level < LZ4HC_CLEVEL_MIN (2)` → [`NoStreamFast`]
 /// - `c_level ≥ LZ4HC_CLEVEL_MIN`     → [`NoStreamHC`]
 ///
-/// `_src_size` and `_block_size` are accepted for signature compatibility with
-/// the benchmark loop; the block API does not require them for strategy selection.
+/// `_src_size` and `_block_size` are accepted for API compatibility with the
+/// benchmark loop; strategy selection does not depend on block geometry.
 pub fn build_compression_parameters(
     c_level: i32,
     _src_size: usize,
@@ -326,13 +319,13 @@ pub fn build_compression_parameters(
     }
 }
 
-/// Select the appropriate dict-aware compression strategy.
-///
-/// Mirrors the `dictSize > 0` branch of `LZ4_buildCompressionParameters`
-/// (bench.c lines 289–300).
+/// Build a dict-aware compression strategy for the given level and dictionary.
 ///
 /// - `c_level < LZ4HC_CLEVEL_MIN (2)` → [`StreamFast`]
 /// - `c_level ≥ LZ4HC_CLEVEL_MIN`     → [`StreamHC`]
+///
+/// Pass an empty slice for `dict` to skip dictionary preloading while still
+/// using the streaming code path.
 pub fn build_compression_parameters_with_dict(
     c_level: i32,
     dict: &[u8],

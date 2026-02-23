@@ -1,42 +1,35 @@
-// cli/help.rs — Rust port of lz4cli.c lines 104–260 (declarations #5, #7, #8, #9, #10, #11)
-//
-// Migrated from: lz4-src/lz4-1.10.0/programs/lz4cli.c
-// Task: task-030 — Help Text Functions (Chunk 2)
-//
-// Functions:
-//   errorOut         → pub fn error_out(msg: &str) -> !
-//   usage            → pub fn print_usage(program: &str)
-//   usage_advanced   → pub fn print_usage_advanced(program: &str)
-//   usage_longhelp   → pub fn print_long_help(program: &str)
-//   badusage         → pub fn print_bad_usage(program: &str) -> !
-//   waitEnter        → pub fn wait_enter()
+//! Help and usage text for the `lz4` CLI.
+//!
+//! Provides functions that write brief usage, advanced options, and long-form
+//! help to stderr, along with error-exit and interactive-pause helpers used by
+//! the argument parser.
 
 use std::io::{self, Write};
 
 use crate::cli::constants::{display_level, lz4c_legacy_commands, LZ4_EXTENSION};
 
-// ── Compile-time constants (from lz4hc.h and lz4conf.h) ───────────────────────
-/// Maximum HC compression level — mirrors `LZ4HC_CLEVEL_MAX 12` in lz4hc.h.
+/// Maximum HC compression level (12), corresponding to the `--best` flag.
 const LZ4HC_CLEVEL_MAX: i32 = 12;
 
-/// Default number of worker threads — mirrors `LZ4_NBWORKERS_DEFAULT 0` in lz4conf.h.
+/// Default worker-thread count; 0 means auto-detect at runtime.
 const LZ4_NBWORKERS_DEFAULT: i32 = 0;
 
-/// Default block size ID — mirrors `LZ4_BLOCKSIZEID_DEFAULT 7` in lz4conf.h.
+/// Default block size ID used in the LZ4 frame format (7 → 4 MiB blocks).
 const LZ4_BLOCKSIZEID_DEFAULT: i32 = 7;
 
-/// Standard-input mark — mirrors `stdinmark "stdin"` in lz4io.h.
+/// Sentinel string the CLI treats as a request to read from standard input.
 const STDINMARK: &str = "stdin";
 
-/// Standard-output mark — mirrors `stdoutmark "stdout"` in lz4io.h.
+/// Sentinel string the CLI treats as a request to write to standard output.
 const STDOUTMARK: &str = "stdout";
 
-/// Null output — mirrors `NULL_OUTPUT "null"` in lz4io.h.
+/// Sentinel string that discards all output (useful for integrity testing).
 const NULL_OUTPUT: &str = "null";
 
-// ── errorOut (lz4cli.c lines 104–107) ─────────────────────────────────────────
-/// Print `msg` to stderr (at display level 1) then exit with code 1.
-/// Equivalent to C `static void errorOut(const char* msg)`.
+/// Print `msg` to stderr and exit with code 1.
+///
+/// The message is suppressed when the global display level is below 1
+/// (i.e. when `-qq` has been passed).
 pub fn error_out(msg: &str) -> ! {
     if display_level() >= 1 {
         eprintln!("{} ", msg);
@@ -44,9 +37,7 @@ pub fn error_out(msg: &str) -> ! {
     std::process::exit(1);
 }
 
-// ── usage (lz4cli.c lines 124–141) ────────────────────────────────────────────
-/// Print brief usage to stderr.
-/// Equivalent to C `static int usage(const char* exeName)`.
+/// Print a brief usage summary to stderr.
 pub fn print_usage(program: &str) {
     eprintln!("Usage : ");
     eprintln!("      {} [arg] [input] [output] ", program);
@@ -73,19 +64,17 @@ pub fn print_usage(program: &str) {
     eprintln!(" -h/-H  : display help/long help and exit ");
 }
 
-// ── usage_advanced (lz4cli.c lines 143–185) ───────────────────────────────────
 /// Print the welcome banner followed by brief usage and advanced options to stderr.
-/// Equivalent to C `static int usage_advanced(const char* exeName)`.
 ///
-/// The welcome message is formatted inline here; callers that need the full
-/// formatted string can use `crate::cli::constants::WELCOME_MESSAGE_FMT`.
+/// The banner includes the library version (derived from the compile-time version
+/// number), pointer width, and multi-threading capability.  Legacy `lz4c`
+/// arguments are appended when [`lz4c_legacy_commands`] returns `true`.
 pub fn print_usage_advanced(program: &str) {
-    // WELCOME_MESSAGE — mirrors `DISPLAY(WELCOME_MESSAGE)` at line 145
-    // Use LZ4_versionNumber() to build the same version string that LZ4_versionString() returns,
-    // matching the C source which calls LZ4_versionString() at runtime.
+    // Derive the version string from the compile-time integer so it always
+    // matches the linked library without a separate runtime call.
     let bits = (std::mem::size_of::<*const ()>() * 8) as u32;
     let mt = crate::cli::constants::IO_MT;
-    let ver_num = unsafe { lz4_sys::LZ4_versionNumber() };
+    let ver_num = crate::LZ4_VERSION_NUMBER;
     let ver_str = format!("{}.{}.{}", ver_num / 10000, (ver_num / 100) % 100, ver_num % 100);
     eprintln!(
         "*** {} v{} {}-bit {}, by {} ***",
@@ -131,7 +120,7 @@ pub fn print_usage_advanced(program: &str) {
     eprintln!(" -e#    : test all compression levels from -bX to # (default : 1)");
     eprintln!(" -i#    : minimum evaluation time in seconds (default : 3s) ");
 
-    // Legacy arguments — only shown when invoked as `lz4c` (mirrors lines 177–183)
+    // Legacy arguments are only shown when the binary is invoked as `lz4c`.
     if lz4c_legacy_commands() {
         eprintln!("Legacy arguments : ");
         eprintln!(" -c0    : fast compression ");
@@ -141,9 +130,11 @@ pub fn print_usage_advanced(program: &str) {
     }
 }
 
-// ── usage_longhelp (lz4cli.c lines 187–246) ───────────────────────────────────
 /// Print the full long-form help to stderr.
-/// Equivalent to C `static int usage_longhelp(const char* exeName)`.
+///
+/// Includes everything from [`print_usage_advanced`] plus detailed explanations
+/// of output-naming rules, compression levels, console safety, pipe mode, and
+/// argument aggregation.
 pub fn print_long_help(program: &str) {
     print_usage_advanced(program);
 
@@ -216,7 +207,7 @@ pub fn print_long_help(program: &str) {
     eprintln!("3 : compress data stream from 'generator', send result to 'consumer'");
     eprintln!("          generator | {} | consumer ", program);
 
-    // Legacy warning — mirrors lines 234–244
+    // When running as `lz4c`, warn that legacy flags take precedence over modern ones.
     if lz4c_legacy_commands() {
         eprintln!();
         eprintln!("***** Warning  ***** ");
@@ -230,9 +221,10 @@ pub fn print_long_help(program: &str) {
     }
 }
 
-// ── badusage (lz4cli.c lines 248–253) ─────────────────────────────────────────
-/// Print "Incorrect parameters" to stderr, optionally print brief usage, then exit 1.
-/// Equivalent to C `static int badusage(const char* exeName)`.
+/// Print "Incorrect parameters" to stderr, show brief usage, and exit with code 1.
+///
+/// Both the message and the usage text are suppressed when the display level
+/// is below 1 (i.e. when `-qq` has been passed).
 pub fn print_bad_usage(program: &str) -> ! {
     if display_level() >= 1 {
         eprintln!("Incorrect parameters");
@@ -241,14 +233,14 @@ pub fn print_bad_usage(program: &str) -> ! {
     std::process::exit(1);
 }
 
-// ── waitEnter (lz4cli.c lines 256–260) ────────────────────────────────────────
-/// Print a prompt and wait for the user to press Enter.
-/// Equivalent to C `static void waitEnter(void)`.
+/// Print a prompt to stderr and block until the user presses Enter.
+///
+/// Reads exactly one byte from stdin via `libc::getchar` so that only the
+/// newline is consumed, leaving any remaining buffered input intact.
 pub fn wait_enter() {
     eprint!("Press enter to continue...\n");
     let _ = io::stderr().flush();
-    // Use getchar() to read exactly one character from stdin, matching the C source
-    // behaviour of `(void)getchar()` — avoids consuming more buffered input than expected.
+    // Read a single byte so buffered input beyond the newline is not discarded.
     unsafe { libc::getchar() };
 }
 
@@ -256,14 +248,12 @@ pub fn wait_enter() {
 mod tests {
     use super::*;
 
-    /// Verify the function exists and runs without panic (output goes to stderr).
-    /// Acceptance criterion: print_usage produces non-empty text containing "Usage"
-    /// and "-h/-H".
+    /// Confirm that [`print_usage`] runs to completion without panicking.
+    ///
+    /// Stderr capture requires out-of-process infrastructure; full output
+    /// verification is covered by CLI integration tests.
     #[test]
     fn print_usage_does_not_panic() {
-        // We cannot easily capture stderr in a unit test without additional
-        // infrastructure, so we just confirm the function completes without panic.
-        // Integration / parity tests capture stderr via process invocation.
         print_usage("lz4");
     }
 

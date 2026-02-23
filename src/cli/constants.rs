@@ -1,105 +1,135 @@
-// cli/constants.rs — Rust port of lz4cli.c lines 1–102 (declarations #1, #2, #3, #4, #21)
-//
-// Migrated from: lz4-src/lz4-1.10.0/programs/lz4cli.c
-// Task: task-029 — Constants, Globals, and Display Infrastructure (Chunk 1)
+//! CLI constants, globals, and display macros.
+//!
+//! This module centralises the values and shared mutable state needed across
+//! the CLI layer:
+//!
+//! - Identity strings (`COMPRESSOR_NAME`, `LZ4_EXTENSION`, …)
+//! - Binary size multipliers (`KB`, `MB`, `GB`)
+//! - The verbosity level used by [`displaylevel!`] and friends
+//! - The legacy-command flag that activates `lz4c`-style short options
+//! - The [`displayout!`], [`display!`], [`displaylevel!`], [`debugoutput!`],
+//!   and [`end_process!`] output macros used throughout the CLI
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-// ── String / identity constants (lz4cli.c lines 65–71) ────────────────────────
+// ── Identity strings ────────────────────────────────────────────────────────
+/// Primary compressor name, reported in `--version` output and as the default output extension.
 pub const COMPRESSOR_NAME: &str = "lz4";
+/// Library author credit shown in the welcome banner.
 pub const AUTHOR: &str = "Yann Collet";
+/// Default file extension appended to compressed output files.
 pub const LZ4_EXTENSION: &str = ".lz4";
+/// Canonical name for the decompression-only binary alias.
 pub const LZ4CAT: &str = "lz4cat";
+/// Canonical name for the decompression binary alias.
 pub const UNLZ4: &str = "unlz4";
+/// Name of the legacy `lz4c` binary whose short-option dialect this library supports.
 pub const LZ4_LEGACY: &str = "lz4c";
 
-/// Welcome message format — matches WELCOME_MESSAGE macro in lz4cli.c line 67.
-/// Caller substitutes: compressor name, version string, pointer-width bits, threading mode, author.
+/// Format string for the startup welcome banner.
+///
+/// Positional arguments (in order): compressor name, version, pointer-width in bits,
+/// threading mode string, author name.
 pub const WELCOME_MESSAGE_FMT: &str = "*** {} v{} {}-bit {}, by {} ***\n";
 
-// ── Size multiplier constants (lz4cli.c lines 74–76) ──────────────────────────
-/// 1 KiB  — mirrors `#define KB *(1U<<10)`
+// ── Binary size multipliers ─────────────────────────────────────────────────
+/// 1 KiB (1 024 bytes).
 pub const KB: u64 = 1 << 10;
-/// 1 MiB  — mirrors `#define MB *(1U<<20)`
+/// 1 MiB (1 048 576 bytes).
 pub const MB: u64 = 1 << 20;
-/// 1 GiB  — mirrors `#define GB *(1U<<30)`
+/// 1 GiB (1 073 741 824 bytes).
 pub const GB: u64 = 1 << 30;
 
-// ── Threading-mode label (lz4cli.c lines 60–63) ───────────────────────────────
-/// Corresponds to the `IO_MT` macro: "multithread" when the `multithread` feature is enabled,
-/// "single-thread" otherwise.
+// ── Threading-mode label ────────────────────────────────────────────────────
+/// Human-readable threading mode inserted into the welcome banner.
+///
+/// Resolves to `"multithread"` when the `multithread` Cargo feature is enabled,
+/// or `"single-thread"` otherwise.
 #[cfg(feature = "multithread")]
 pub const IO_MT: &str = "multithread";
 #[cfg(not(feature = "multithread"))]
 pub const IO_MT: &str = "single-thread";
 
-// ── Display level global (lz4cli.c line 85) ───────────────────────────────────
+// ── Verbosity level ──────────────────────────────────────────────────────────
 //
-// In the C source, `static unsigned displayLevel = 2` is a file-scoped global
-// used by the DISPLAYLEVEL macro throughout lz4cli.c.
+// Controls how much output the CLI produces.  Semantics:
+//   0 — completely silent
+//   1 — errors only
+//   2 — normal informational output (default; can be suppressed with -q)
+//   3 — non-suppressible informational messages
+//   4 — verbose / diagnostic
 //
-// In Rust, this is a crate-level atomic so it can be shared across modules.
-// When `crate::io::prefs` is implemented (task-011), `DISPLAY_LEVEL` there
-// will be the authoritative source and this will become a thin alias.
-//
-// 0 = no output; 1 = errors only; 2 = normal (downgradable); 3 = non-downgradable; 4 = verbose
+// Stored as a process-wide atomic so it is accessible from any module without
+// threading through a context struct.
 pub static DISPLAY_LEVEL: AtomicU32 = AtomicU32::new(2);
 
-/// Returns the current display level.
+/// Returns the current verbosity level.
 #[inline]
 pub fn display_level() -> u32 {
     DISPLAY_LEVEL.load(Ordering::Relaxed)
 }
 
-/// Sets the display level.
+/// Sets the verbosity level.  Values outside 0–4 are accepted but have no
+/// additional effect beyond level 4.
 #[inline]
 pub fn set_display_level(level: u32) {
     DISPLAY_LEVEL.store(level, Ordering::Relaxed);
 }
 
-// ── Legacy-command global (lz4cli.c line 72) ──────────────────────────────────
+// ── Legacy lz4c command mode ─────────────────────────────────────────────────
 //
-// `static int g_lz4c_legacy_commands = 0;` — set to 1 when the binary is invoked
-// as "lz4c", enabling alternate short-option spellings (`-c0`, `-c1`, `-hc`, `-y`).
+// When the binary is invoked as "lz4c", this flag is set to enable the
+// alternate short-option dialect: `-c0`, `-c1`, `-hc`, `-y`, etc.
 //
-// Modelled as an atomic bool; callers may also pass this as a function argument
-// to avoid global state in unit tests.
+// Stored as an atomic bool so it is visible across modules.  In unit tests,
+// prefer passing the flag explicitly rather than relying on this global.
 pub static LZ4C_LEGACY_COMMANDS: AtomicBool = AtomicBool::new(false);
 
-/// Returns `true` when legacy lz4c command mode is active.
+/// Returns `true` when the binary is running in legacy `lz4c` command mode.
 #[inline]
 pub fn lz4c_legacy_commands() -> bool {
     LZ4C_LEGACY_COMMANDS.load(Ordering::Relaxed)
 }
 
-/// Enables or disables legacy lz4c command mode.
+/// Enables (`true`) or disables (`false`) legacy `lz4c` command mode.
 #[inline]
 pub fn set_lz4c_legacy_commands(enabled: bool) {
     LZ4C_LEGACY_COMMANDS.store(enabled, Ordering::Relaxed);
 }
 
-// ── Display helpers (lz4cli.c lines 82–85) ────────────────────────────────────
+// ── Output macros ────────────────────────────────────────────────────────────
 //
-// The C macros DISPLAYOUT, DISPLAY, and DISPLAYLEVEL are replaced by these
-// helper macros / inline functions:
-//
-//   DISPLAYOUT(...)      → print!(...) / use `displayout!` macro
-//   DISPLAY(...)         → eprint!(...) / use `display!` macro
-//   DISPLAYLEVEL(l, ...) → if display_level() >= l { eprint!(...) }
+// Three tiers of CLI output:
+//   displayout!  — informational output that belongs on stdout (e.g. decompressed data)
+//   display!     — diagnostic output that always goes to stderr
+//   displaylevel! — conditional stderr output gated on the current verbosity level
 
-/// Print to stdout — equivalent to C `DISPLAYOUT(...)`.
+/// Write a formatted message to **stdout**.
+///
+/// Use this for output that is part of the compressed or decompressed data
+/// stream (e.g. when writing to a pipe), so it does not pollute stderr.
 #[macro_export]
 macro_rules! displayout {
     ($($arg:tt)*) => { print!($($arg)*) };
 }
 
-/// Print to stderr — equivalent to C `DISPLAY(...)`.
+/// Write a formatted message to **stderr** unconditionally.
+///
+/// Prefer [`displaylevel!`] when the message should be suppressible.
 #[macro_export]
 macro_rules! display {
     ($($arg:tt)*) => { eprint!($($arg)*) };
 }
 
-/// Conditionally print to stderr at or above `level` — equivalent to C `DISPLAYLEVEL(l, ...)`.
+/// Write a formatted message to **stderr** if the current verbosity level is
+/// at least `level`.
+///
+/// | `level` | meaning |
+/// |---------|----------------------------|
+/// | 1       | errors only |
+/// | 2       | normal (default) |
+/// | 3       | non-suppressible info |
+/// | 4       | verbose / diagnostic |
 #[macro_export]
 macro_rules! displaylevel {
     ($level:expr, $($arg:tt)*) => {
@@ -109,16 +139,15 @@ macro_rules! displaylevel {
     };
 }
 
-// ── Error / debug macros (lz4cli.c lines 91–102) ─────────────────────────────
+// ── Debug and fatal-error macros ─────────────────────────────────────────────
 //
-// `DEBUGOUTPUT` — prints to stderr only when DEBUG is non-zero.
-// In Rust this is a no-op in release builds and active in debug builds via `cfg(debug_assertions)`.
-//
-// `END_PROCESS(error, ...)` — prints location info, an error message, then exits.
-// In Rust this becomes a function + the `end_process!` macro below.
+// `debugoutput!` — emits to stderr in debug builds only; a no-op in release.
+// `end_process!` — prints a diagnostic then terminates the process, used for
+//                  unrecoverable CLI errors (bad arguments, I/O failures, etc.).
 
-/// Print debug output — equivalent to C `DEBUGOUTPUT(...)`.
-/// Only active in debug builds (mirrors `#ifndef DEBUG / #define DEBUG 0`).
+/// Write a formatted message to **stderr** in debug builds only.
+///
+/// Compiled away entirely in release builds (`--release` / no `debug_assertions`).
 #[macro_export]
 macro_rules! debugoutput {
     ($($arg:tt)*) => {
@@ -127,17 +156,23 @@ macro_rules! debugoutput {
     };
 }
 
-/// Terminate the process with an error code after printing a diagnostic.
-/// Equivalent to the C `END_PROCESS(error, ...)` macro.
+/// Print an error diagnostic and exit the process with the given code.
 ///
-/// Usage: `end_process!(exit_code, "message {}", arg)`
+/// In debug builds, also emits the source file and line number before the
+/// message.  The error message is only printed when the verbosity level is ≥ 1
+/// (i.e. not completely silent).
+///
+/// # Example
+/// ```ignore
+/// end_process!(1, "cannot open '{}'", path);
+/// ```
 #[macro_export]
 macro_rules! end_process {
     ($error:expr, $($arg:tt)*) => {{
-        // Mirror DEBUGOUTPUT("Error in %s, line %i : \n", __FILE__, __LINE__)
+        // In debug builds, include the source location for easier triage.
         #[cfg(debug_assertions)]
         eprint!("Error in {}, line {} : \n", file!(), line!());
-        // Mirror DISPLAYLEVEL(1, "Error %i : ", error)
+        // Respect a verbosity of 0 (fully silent mode).
         if $crate::cli::constants::display_level() >= 1 {
             eprint!("Error {} : ", $error);
             eprint!($($arg)*);

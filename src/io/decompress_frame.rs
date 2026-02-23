@@ -1,51 +1,38 @@
-// decompress_frame.rs — LZ4 frame decompression (ST and MT paths).
-// Migrated from lz4io.c lines 2015–2275 (declarations #19, #20).
-//
-// Source declarations:
-//   #19 – MT: `LZ4FChunkToWrite`, `LZ4IO_writeDecodedLZ4FChunk`,
-//              `LZ4FChunk`, `LZ4IO_decompressLZ4FChunk`,
-//              `LZ4IO_decompressLZ4F` (MT, inside #if LZ4IO_MULTITHREAD)
-//   #20 – ST: `LZ4IO_decompressLZ4F` (ST, inside #else branch)
-//
-// Migration decisions:
-//
-// 1. **Native `crate::frame` API** is used for both the ST decompression path
-//    and the dictionary decompression path.  `lz4f_decompress` mirrors the C
-//    `LZ4F_decompress` loop (lines 2197–2266).  Because the caller has already
-//    consumed the 4-byte magic number from the stream, we re-inject it by
-//    feeding `LZ4IO_MAGICNUMBER.to_le_bytes()` as the first input.
-//
-// 2. **Dictionary decompression**: Uses `lz4f_decompress_using_dict` from the
-//    native `crate::frame` API.  No FFI or external C library needed.
-//
-// 3. **MT path**: The C MT version (lines 2099–2193) uses two single-thread
-//    pools (`TPool_create(1,1)`) to pipeline read→decompress→write.  Because
-//    `dst: &mut impl Write` is not `Send`, this pipeline cannot be reproduced
-//    without changing the function signature.  The MT path therefore uses the
-//    same ST algorithm as `nb_workers == 1`.  The output is byte-for-byte
-//    identical; only the pipeline-parallelism performance benefit is absent.
-//    This deviation is flagged as "needs-review" in the task result.
-//
-// 4. **Sparse writes**: `LZ4IO_fwriteSparse` / `LZ4IO_fwriteSparseEnd` from
-//    sparse.rs require a `&mut std::fs::File`.  The public function accepts
-//    `dst: &mut impl Write`, which may not be a `File`.  Sparse write
-//    optimisation is therefore not applied here.  The calling code
-//    (`decompress_dispatch.rs`, task-020) can invoke `fwrite_sparse` directly
-//    when it has a concrete `File` handle.
-//
-// 5. **Checksum skipping**: The C code builds a `dOpt_skipCrc` options struct
-//    and passes it when both block_checksum and stream_checksum are disabled.
-//    The native frame API supports `DecompressOptions { skip_checksums }`.
-//    By default checksums are validated (stricter / correct behaviour).
-//
-// 6. **Progress display**: `DISPLAYUPDATE(2, …)` in C is rate-limited by
-//    `REFRESH_RATE_NS`.  The Rust version displays progress at the same
-//    notification level (2) using `display_level`, but without rate-limiting
-//    to keep the implementation simple.
-//
-// 7. **Error handling**: `END_PROCESS` in C calls `exit()`.  In Rust, all
-//    errors are returned as `io::Error`, letting the caller decide whether to
-//    abort or recover.
+//! LZ4 frame decompression — single-threaded and dictionary-aware paths.
+//!
+//! This module is called by [`crate::io::decompress_dispatch`] after the
+//! 4-byte LZ4 frame magic number has been consumed from the stream.  The magic
+//! bytes are re-injected here so the [`crate::frame`] API receives a complete,
+//! well-formed frame header.
+//!
+//! # Design notes
+//!
+//! * **`next_hint`-driven read loop** — [`lz4f_decompress`] returns the number
+//!   of additional input bytes the decoder wants before it can make progress.
+//!   Each `src.read()` is sized to exactly that hint, minimising syscalls on
+//!   buffered sources and avoiding wasteful over-reads.
+//!
+//! * **Multi-worker path** — When `prefs.nb_workers > 1` the function uses the
+//!   same single-threaded algorithm as `nb_workers == 1`.  Output is
+//!   byte-for-byte identical.  True read→decompress→write pipelining would
+//!   require `dst` to be `Send`, which conflicts with the current
+//!   `&mut impl Write` signature.
+//!
+//! * **Dictionary decompression** — When `resources.dict_buffer` is `Some`,
+//!   [`decompress_lz4f_st_dict`] is used.  Each [`lz4f_decompress_using_dict`]
+//!   call receives the full dictionary so the decoder can resolve
+//!   cross-dictionary backreferences.
+//!
+//! * **Sparse write optimisation** — Not applied here because `dst` is a
+//!   generic `impl Write`.  Callers that hold a concrete `File` handle can
+//!   invoke [`crate::io::sparse`] directly.
+//!
+//! * **Checksum validation** — Frame and block checksums are verified by
+//!   default.  Pass [`DecompressOptions`] with `skip_checksums = true` to opt
+//!   out (e.g. in latency-sensitive test paths).
+//!
+//! * **Errors** — All failure modes — I/O errors, invalid frames, checksum
+//!   mismatches, truncated input — are surfaced as [`io::Error`].
 
 use std::io::{self, Read, Write};
 
@@ -57,15 +44,14 @@ use crate::frame::types::LZ4F_VERSION;
 use crate::io::decompress_resources::DecompressResources;
 use crate::io::prefs::{display_level, LZ4IO_MAGICNUMBER, DISPLAY_LEVEL, Prefs};
 
-// ---------------------------------------------------------------------------
-// Buffer size for the decompression read loop.
-// Mirrors `LZ4IO_dBufferSize = 64 KB` (lz4io.c line 1901).
-// ---------------------------------------------------------------------------
+// Read/write buffer capacity for the decompression loop (64 KiB).
+// Large enough to amortise syscall overhead; small enough to stay L2-resident
+// on typical hardware.
 const DECOMP_BUF_SIZE: usize = 64 * 1024;
 
-// ---------------------------------------------------------------------------
-// Helper: convert Lz4FError to io::Error
-// ---------------------------------------------------------------------------
+/// Converts an [`Lz4FError`](crate::frame::Lz4FError) into an [`io::Error`]
+/// with [`io::ErrorKind::InvalidData`], suitable for propagation from I/O
+/// functions that return `io::Result`.
 fn lz4f_err_to_io(e: crate::frame::Lz4FError) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, format!("LZ4F error: {e}"))
 }
@@ -96,12 +82,6 @@ fn lz4f_err_to_io(e: crate::frame::Lz4FError) -> io::Error {
 ///
 /// Returns `Err` on I/O failure, invalid/truncated LZ4 frame, or checksum
 /// mismatch.
-///
-/// # Migration notes
-///
-/// Equivalent to the C `static unsigned long long LZ4IO_decompressLZ4F(…)`
-/// (both ST and MT variants).  See module-level comments for migration
-/// decisions.
 pub fn decompress_lz4f(
     src: &mut impl Read,
     dst: &mut impl Write,
@@ -114,9 +94,9 @@ pub fn decompress_lz4f(
         return decompress_lz4f_st_dict(src, dst, prefs, &dict);
     }
 
-    // Dispatch: in C this is a compile-time #ifdef; in Rust we use a runtime
-    // branch on nb_workers.  The MT path is functionally identical to ST (see
-    // migration note 3).
+    // Both branches invoke the same ST implementation. True pipelining for
+    // nb_workers > 1 is not implemented because `dst: &mut impl Write` is not
+    // `Send`. The output is byte-for-byte identical regardless of worker count.
     if prefs.nb_workers > 1 {
         decompress_lz4f_st(src, dst, prefs)
     } else {
@@ -124,12 +104,12 @@ pub fn decompress_lz4f(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Helper: feed a slice to the decompressor, consuming all input.
+// Feeds `input` to the frame decompressor in a loop until the entire slice
+// is consumed or the decoder signals frame completion (`next_hint == 0`).
 //
-// Returns the total number of decompressed bytes produced and the final
-// next_hint value from the last `lz4f_decompress` call.
-// ---------------------------------------------------------------------------
+// Returns the final `next_hint` value: `0` means the frame is complete;
+// any positive value is the number of additional input bytes the decoder
+// wants before it can produce more output.
 fn feed_to_decompressor(
     dctx: &mut Lz4FDCtx,
     input: &[u8],
@@ -178,9 +158,9 @@ fn feed_to_decompressor(
     Ok(next_hint)
 }
 
-// ---------------------------------------------------------------------------
-// Helper: feed a slice to the decompressor with dict, consuming all input.
-// ---------------------------------------------------------------------------
+// Dictionary-aware counterpart of `feed_to_decompressor`. Every
+// `lz4f_decompress_using_dict` call receives the full external dictionary
+// so the decoder can resolve backreferences that cross the dictionary boundary.
 fn feed_to_decompressor_dict(
     dctx: &mut Lz4FDCtx,
     input: &[u8],
@@ -227,13 +207,12 @@ fn feed_to_decompressor_dict(
 }
 
 // ---------------------------------------------------------------------------
-// Single-threaded decompression (lz4io.c lines 2197–2266, declaration #20)
+// Single-threaded decompression path
 // ---------------------------------------------------------------------------
 
-/// Inner ST implementation.  Also used as the MT path (see migration note 3).
-///
-/// Equivalent to the `#else` (non-multithread) branch of
-/// `LZ4IO_decompressLZ4F` in lz4io.c.
+/// Decompresses one LZ4 frame from `src` into `dst` using the
+/// `next_hint`-driven read loop.  Also serves as the implementation for
+/// `nb_workers > 1`; see the module-level note on the multi-worker path.
 fn decompress_lz4f_st(
     src: &mut impl Read,
     dst: &mut impl Write,
@@ -247,15 +226,14 @@ fn decompress_lz4f_st(
     let mut filesize: u64 = 0;
 
     // Re-inject the 4 magic bytes that the caller already consumed from `src`.
-    // C equivalent: `LZ4IO_writeLE32(ress.srcBuffer, LZ4IO_MAGICNUMBER);` then
-    //               `LZ4F_decompress(…, ress.srcBuffer, &inSize=4, …)`
-    // (lz4io.c lines 2211–2221).
+    // The frame decoder needs a complete, contiguous byte stream starting with
+    // the magic number to parse the frame header correctly.
     let magic_bytes = LZ4IO_MAGICNUMBER.to_le_bytes();
     let mut next_hint = feed_to_decompressor(
         &mut dctx, &magic_bytes, &mut dst_buf, dst, prefs, &mut filesize,
     )?;
 
-    // Main loop — mirrors lz4io.c lines 2224–2256.
+    // Drive the decoder with hint-sized reads until the frame is complete.
     while next_hint != 0 {
         let to_read = next_hint.min(src_buf.len());
         let read_n = src.read(&mut src_buf[..to_read]).map_err(|e| {
@@ -270,7 +248,7 @@ fn decompress_lz4f_st(
         )?;
     }
 
-    // C line 2262: truncated-frame check.
+    // A non-zero next_hint after EOF means the frame was cut short.
     if next_hint != 0 {
         return Err(io::Error::new(
             io::ErrorKind::UnexpectedEof,
@@ -282,14 +260,15 @@ fn decompress_lz4f_st(
 }
 
 // ---------------------------------------------------------------------------
-// Dictionary decompression using native crate::frame API
+// Dictionary-aware decompression path
 // ---------------------------------------------------------------------------
 
-/// Dictionary-aware decompression using `lz4f_decompress_using_dict`.
-/// Called when `resources.dict_buffer` is `Some`.
+/// Decompresses one LZ4 frame from `src` into `dst` using an external
+/// dictionary. Uses the same `next_hint`-driven read loop as
+/// [`decompress_lz4f_st`], but passes `dict` to every decompressor call
+/// so the decoder can resolve cross-dictionary backreferences.
 ///
-/// Mirrors the ST `LZ4IO_decompressLZ4F` loop (lz4io.c lines 2197–2266)
-/// closely, using `next_hint` to size each `src.read()` call.
+/// Called by [`decompress_lz4f`] when `resources.dict_buffer` is `Some`.
 fn decompress_lz4f_st_dict(
     src: &mut impl Read,
     dst: &mut impl Write,
@@ -309,7 +288,7 @@ fn decompress_lz4f_st_dict(
         &mut dctx, &magic_bytes, dict, &mut dst_buf, dst, prefs, &mut filesize,
     )?;
 
-    // Main loop — mirrors lz4io.c lines 2224–2256.
+    // Drive the decoder with hint-sized reads until the frame is complete.
     while next_hint != 0 {
         let to_read = next_hint.min(src_buf.len());
         let read_n = src.read(&mut src_buf[..to_read]).map_err(|e| {
@@ -324,7 +303,7 @@ fn decompress_lz4f_st_dict(
         )?;
     }
 
-    // C line 2262: truncated-frame check.
+    // A non-zero next_hint after EOF means the frame was cut short.
     if next_hint != 0 {
         return Err(io::Error::new(
             io::ErrorKind::UnexpectedEof,

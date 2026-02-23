@@ -1,12 +1,19 @@
 //! LZ4 block constants, memory helpers, copy primitives, and hash-table types.
 //!
-//! Translated from lz4.c v1.10.0, lines 239–740:
-//!   - Common constants (MINMATCH, WILDCOPYLENGTH, …)
-//!   - Memory read/write helpers (unaligned, portable)
-//!   - Wildcard-copy and offset-copy primitives
-//!   - `INC32TABLE` / `DEC64TABLE` lookup arrays
-//!   - `nb_common_bytes` and `count` (match-length helpers)
-//!   - Hash-table types and operations (`hash4`, `hash5`, put/get/prepare)
+//! This module is the low-level engine shared by both the one-shot and
+//! streaming block-compression paths.  It provides:
+//!
+//!   - Common constants (`MINMATCH`, `WILDCOPYLENGTH`, …) that govern the
+//!     LZ4 block format — see `doc/lz4_Block_format.md`.
+//!   - Unaligned memory read/write helpers (`read16`, `read32`, `read_arch`, …).
+//!   - Wildcard-copy and offset/overlapping-copy primitives (`wild_copy8`,
+//!     `memcpy_using_offset`, …).
+//!   - `INC32TABLE` / `DEC64TABLE` lookup tables for the overlapping-copy
+//!     fast paths.
+//!   - Word-at-a-time match-length counting (`nb_common_bytes`, `count`).
+//!   - Hash-table types and operations (`hash4`, `hash5`, put/get/prepare).
+//!
+//! Corresponds to `lz4.c` v1.10.0, lines 239–740.
 
 use core::ptr;
 
@@ -42,8 +49,11 @@ pub const FASTLOOP_SAFE_DISTANCE: usize = 64;
 /// Minimum input length that may produce any match at all.
 pub const LZ4_MIN_LENGTH: usize = MFLIMIT + 1;
 
+/// 1 kibibyte (2¹⁰ bytes).
 pub const KB: usize = 1 << 10;
+/// 1 mebibyte (2²⁰ bytes).
 pub const MB: usize = 1 << 20;
+/// 1 gibibyte (2³⁰ bytes).
 pub const GB: usize = 1 << 30;
 
 /// Maximum back-reference distance supported by the LZ4 format.
@@ -51,9 +61,13 @@ pub const LZ4_DISTANCE_ABSOLUTE_MAX: u32 = 65_535;
 /// Maximum back-reference distance used in this build (≤ LZ4_DISTANCE_ABSOLUTE_MAX).
 pub const LZ4_DISTANCE_MAX: u32 = LZ4_DISTANCE_ABSOLUTE_MAX;
 
+/// Number of bits in the match-length nibble of an LZ4 token byte.
 pub const ML_BITS: u32 = 4;
+/// Mask for the 4-bit match-length field of a token byte (`0x0F`).
 pub const ML_MASK: u32 = (1u32 << ML_BITS) - 1;
+/// Number of bits in the literal-run nibble of an LZ4 token byte (`= 8 - ML_BITS`).
 pub const RUN_BITS: u32 = 8 - ML_BITS;
+/// Mask for the 4-bit literal-run field of a token byte (`0x0F`).
 pub const RUN_MASK: u32 = (1u32 << RUN_BITS) - 1;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -110,6 +124,9 @@ pub enum TableType {
 }
 
 impl From<u32> for TableType {
+    /// Deserialise the `table_type` field stored as a `u32` in
+    /// [`StreamStateInternal`].  Any unrecognised value is treated as
+    /// [`TableType::ClearedTable`] so that stale or zeroed state is safe.
     fn from(v: u32) -> Self {
         match v {
             1 => TableType::ByPtr,
@@ -134,11 +151,14 @@ pub enum DictDirective {
     UsingDictCtx = 3,
 }
 
-/// Whether the dictionary is smaller than a full 64 KB window.
+/// Whether the active dictionary covers the full 64 KB back-reference window.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u32)]
 pub enum DictIssueDirective {
+    /// The dictionary covers the full 64 KB window; no special handling needed.
     NoDictIssue = 0,
+    /// The dictionary is smaller than 64 KB; hash-table slots that fall outside
+    /// the dictionary must be treated as invalid back-references.
     DictSmall = 1,
 }
 
@@ -373,7 +393,9 @@ pub unsafe fn memcpy_using_offset_base(
 ) {
     debug_assert!(src.add(offset) == dst);
     if offset < 8 {
-        // Write 0 first to silence potential uninitialized-memory tools when offset==0.
+        // Pre-zero the first four bytes so that bytes dst[4..7] are defined
+        // even for small offsets where the INC32TABLE advancement may not
+        // cover all of them — suppresses tools like Valgrind / MIRI.
         write32(dst, 0);
         *dst = *src;
         *dst.add(1) = *src.add(1);

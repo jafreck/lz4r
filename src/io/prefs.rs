@@ -1,33 +1,29 @@
-// prefs.rs — LZ4IO preferences, display globals, and timing helpers.
-// Migrated from lz4io.c lines 1–345 and lz4io.h (lz4-1.10.0/programs).
-//
-// Migration decisions:
-// - `g_displayLevel` (global int, not thread-safe in C) →
-//   `static DISPLAY_LEVEL: AtomicI32` for safe concurrent access.
-// - `g_time` (module-level TIME_t) → removed; callers pass a local TimeT.
-// - `LZ4IO_prefs_s` (heap-allocated opaque struct in C) → `Prefs` value type;
-//   allocation/free are handled by the Rust ownership model.
-// - `LZ4IO_defaultNbWorkers` → `default_nb_workers()` gated on the
-//   `multithread` Cargo feature (equivalent to LZ4IO_MULTITHREAD).
-// - `cpuLoad_sec` (platform-specific) → `cpu_load_sec()` using `libc::clock()`
-//   on Unix and Windows `GetProcessTimes` via `winapi` / `libc` on Windows.
-//   Behavioural equivalence is preserved via cfg attributes.
-// - Setter return types: C returns the new field value (int/size_t).
-//   Rust setters use `&mut self` and return the same logical value.
+//! I/O preferences, display globals, and timing helpers for the `io` subsystem.
+//!
+//! This module defines:
+//!
+//! - [`Prefs`] — a plain value type holding all tunable compression and
+//!   decompression parameters (block size, checksum policy, worker count, etc.).
+//! - [`DISPLAY_LEVEL`] / [`set_notification_level`] — an atomic global controlling
+//!   how much diagnostic output the library emits to stderr.
+//! - [`display_level`] — a conditional stderr printer keyed on that level.
+//! - [`cpu_load_sec`] / [`final_time_display`] — platform-specific CPU-time
+//!   accounting used to report compression and decompression throughput.
+//! - Assorted numeric constants (magic numbers, buffer sizes, and SI units).
 
 use std::sync::atomic::{AtomicI32, Ordering};
 
 use crate::timefn::{clock_span_ns, DurationNs, TimeT};
 
 // ---------------------------------------------------------------------------
-// Numeric constants (C: KB/MB/GB macros, lz4io.c lines 69–71)
+// Numeric constants
 // ---------------------------------------------------------------------------
 pub const KB: usize = 1 << 10;
 pub const MB: usize = 1 << 20;
 pub const GB: usize = 1 << 30;
 
 // ---------------------------------------------------------------------------
-// Magic numbers (lz4io.c lines 79–83)
+// Magic numbers
 // ---------------------------------------------------------------------------
 pub const MAGICNUMBER_SIZE: usize = 4;
 pub const LZ4IO_MAGICNUMBER: u32 = 0x184D2204;
@@ -36,7 +32,7 @@ pub const LZ4IO_SKIPPABLEMASK: u32 = 0xFFFF_FFF0;
 pub const LEGACY_MAGICNUMBER: u32 = 0x184C2102;
 
 // ---------------------------------------------------------------------------
-// Other constants (lz4io.c lines 85–89)
+// Buffer-size and format constants
 // ---------------------------------------------------------------------------
 pub const CACHELINE: usize = 64;
 pub const LEGACY_BLOCKSIZE: usize = 8 * MB;
@@ -45,23 +41,23 @@ pub const LZ4IO_BLOCKSIZEID_DEFAULT: u32 = 7;
 pub const LZ4_MAX_DICT_SIZE: usize = 64 * KB;
 
 // ---------------------------------------------------------------------------
-// Display / notification globals (lz4io.c lines 100, 109)
+// Display / notification globals
 // ---------------------------------------------------------------------------
 
 /// Global notification level. 0 = silent, 1 = errors only, 2 = results +
-/// warnings, 3 = progress, 4+ = verbose. Equivalent to `g_displayLevel`.
+/// warnings, 3 = progress, 4+ = verbose.
 pub static DISPLAY_LEVEL: AtomicI32 = AtomicI32::new(0);
 
-/// Refresh interval for progress updates (200 ms in nanoseconds).
-/// Equivalent to C `static const Duration_ns refreshRate = 200000000`.
+/// Refresh interval for progress updates (200 ms expressed as nanoseconds).
 pub const REFRESH_RATE_NS: DurationNs = 200_000_000;
 
 // ---------------------------------------------------------------------------
-// Display helpers (mirrors C DISPLAYLEVEL / DISPLAY macros)
+// Display helpers
 // ---------------------------------------------------------------------------
 
-/// Write `msg` to stderr if the current notification level is ≥ `level`.
-/// Flushes stderr when level ≥ 4 (matches the C `DISPLAYLEVEL` macro).
+/// Writes `msg` to stderr if the current notification level is ≥ `level`.
+/// Flushes stderr unconditionally when the level is ≥ 4 to ensure progress
+/// output is visible in real time.
 #[inline]
 pub fn display_level(level: i32, msg: &str) {
     if DISPLAY_LEVEL.load(Ordering::Relaxed) >= level {
@@ -75,14 +71,14 @@ pub fn display_level(level: i32, msg: &str) {
 }
 
 // ---------------------------------------------------------------------------
-// CPU-load helper (lz4io.c lines 112–124)
+// CPU-load helper
 // ---------------------------------------------------------------------------
 
-/// Returns seconds of CPU time consumed since `cpu_start`.
-/// On non-Windows platforms uses the C `clock()` function / CLOCKS_PER_SEC.
-/// On Windows uses `GetProcessTimes` kernel + user time in 100-ns units.
+/// Returns the seconds of CPU time consumed since `cpu_start`.
 ///
-/// Equivalent to `static double cpuLoad_sec(clock_t cpuStart)`.
+/// On POSIX platforms reads `clock()` and divides by `CLOCKS_PER_SEC`
+/// (1 000 000 on SUSv2/macOS).  On Windows reads kernel + user time from
+/// `GetProcessTimes` in 100-nanosecond intervals and converts to seconds.
 pub fn cpu_load_sec(cpu_start: libc::clock_t) -> f64 {
     #[cfg(not(target_os = "windows"))]
     {
@@ -114,7 +110,8 @@ pub fn cpu_load_sec(cpu_start: libc::clock_t) -> f64 {
             );
             let k = kernel.assume_init();
             let u = user.assume_init();
-            // Assert dwHighDateTime == 0, matching C source assert() calls.
+            // The high 32-bit word should never be set for realistic process
+            // lifetimes; assert in debug builds to catch unexpected overflow.
             debug_assert_eq!(k.dwHighDateTime, 0, "kernel time dwHighDateTime unexpected non-zero");
             debug_assert_eq!(u.dwHighDateTime, 0, "user time dwHighDateTime unexpected non-zero");
             ((k.dwLowDateTime as f64) + (u.dwLowDateTime as f64)) * 100.0 / 1_000_000_000.0
@@ -123,14 +120,15 @@ pub fn cpu_load_sec(cpu_start: libc::clock_t) -> f64 {
 }
 
 // ---------------------------------------------------------------------------
-// Final timing display (lz4io.c lines 126–141)
+// Final timing display
 // ---------------------------------------------------------------------------
 
-/// Prints a "Done in … s ==> … MiB/s (cpu load: …%)" line to stderr at
+/// Prints a `"Done in … s ==> … MiB/s (cpu load: …%)"` line to stderr at
 /// notification level 3.
 ///
-/// Equivalent to `static void LZ4IO_finalTimeDisplay(TIME_t, clock_t, ull)`.
-/// `g_time` is not used here — the caller passes `time_start` directly.
+/// `time_start` is a wall-clock snapshot taken before the operation began;
+/// `cpu_start` is the corresponding `clock()` value; `size` is the number
+/// of bytes processed.
 pub fn final_time_display(time_start: TimeT, cpu_start: libc::clock_t, size: u64) {
     #[cfg(feature = "multithread")]
     {
@@ -156,28 +154,27 @@ pub fn final_time_display(time_start: TimeT, cpu_start: libc::clock_t, size: u64
 }
 
 // ---------------------------------------------------------------------------
-// Block mode enum (lz4io.h lines 104–105)
+// Block mode enum
 // ---------------------------------------------------------------------------
 
-/// Whether LZ4 blocks are linked (depend on the previous block) or independent.
-/// Equivalent to `LZ4IO_blockMode_t`.
+/// Whether LZ4 blocks are linked (sharing a 64 KB sliding window) or
+/// compressed independently.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BlockMode {
-    /// Blocks share a 64 KB dictionary window. Equivalent to `LZ4IO_blockLinked = 0`.
+    /// Blocks share a 64 KB dictionary window with the preceding block.
     Linked = 0,
-    /// Each block is compressed independently. Equivalent to `LZ4IO_blockIndependent`.
+    /// Each block is compressed with no dependency on preceding blocks.
     Independent = 1,
 }
 
 // ---------------------------------------------------------------------------
-// Preferences struct (lz4io.c lines 183–199)
+// Preferences struct
 // ---------------------------------------------------------------------------
 
 /// All tunable parameters for LZ4 compression and decompression.
 ///
-/// Equivalent to `struct LZ4IO_prefs_s` / `LZ4IO_prefs_t`.
-/// In C this is heap-allocated and accessed through a pointer; in Rust it is
-/// a plain value type that the caller owns directly.
+/// `Prefs` is a plain value type. Callers create one with [`Prefs::default`]
+/// and apply setters as needed before passing it to the I/O routines.
 #[derive(Clone, Debug)]
 pub struct Prefs {
     /// Pass compressed data through without decompressing. Default: false.
@@ -213,16 +210,14 @@ pub struct Prefs {
 }
 
 // ---------------------------------------------------------------------------
-// Default worker-count calculation (lz4io.c lines 167–177)
+// Default worker-count calculation
 // ---------------------------------------------------------------------------
 
 /// Returns the default number of compression worker threads.
 ///
-/// When the `multithread` feature is enabled, uses the available CPU count
-/// (equivalent to `UTIL_countCores()`) and reserves a fraction for other work.
-/// Without the feature, always returns 1.
-///
-/// Equivalent to `int LZ4IO_defaultNbWorkers(void)`.
+/// When the `multithread` feature is enabled, detects the number of physical
+/// cores and reserves a fraction (`1 + cores >> 3`) for other system work,
+/// returning at least 1.  Without the feature, always returns 1.
 pub fn default_nb_workers() -> i32 {
     #[cfg(feature = "multithread")]
     {
@@ -241,11 +236,10 @@ pub fn default_nb_workers() -> i32 {
 }
 
 // ---------------------------------------------------------------------------
-// Default implementation (lz4io.c lines 206–226)
+// Default implementation
 // ---------------------------------------------------------------------------
 
 impl Default for Prefs {
-    /// Returns the same defaults as `LZ4IO_defaultPreferences()` in C.
     fn default() -> Self {
         Prefs {
             pass_through: false,
@@ -268,7 +262,7 @@ impl Default for Prefs {
 }
 
 // ---------------------------------------------------------------------------
-// Preference setters (lz4io.c lines 228–344)
+// Preference setters
 // ---------------------------------------------------------------------------
 
 impl Prefs {
@@ -277,11 +271,7 @@ impl Prefs {
         Self::default()
     }
 
-    // ------------------------------------------------------------------
-    // LZ4IO_setNbWorkers (lz4io.c lines 228–234)
-    // ------------------------------------------------------------------
-
-    /// Sets the number of worker threads, clamped to [1, NB_WORKERS_MAX].
+    /// Sets the number of worker threads, clamped to `[1, NB_WORKERS_MAX]`.
     /// Returns the actual value stored.
     pub fn set_nb_workers(&mut self, nb_workers: i32) -> i32 {
         let clamped = nb_workers
@@ -291,21 +281,13 @@ impl Prefs {
         clamped
     }
 
-    // ------------------------------------------------------------------
-    // LZ4IO_setDictionaryFilename (lz4io.c lines 236–241)
-    // ------------------------------------------------------------------
-
     /// Sets the dictionary file path. Passing `None` clears the dictionary.
-    /// Returns true if a dictionary is now active.
+    /// Returns `true` if a dictionary is now active.
     pub fn set_dictionary_filename(&mut self, filename: Option<&str>) -> bool {
         self.dictionary_filename = filename.map(|s| s.to_owned());
         self.use_dictionary = self.dictionary_filename.is_some();
         self.use_dictionary
     }
-
-    // ------------------------------------------------------------------
-    // LZ4IO_setPassThrough (lz4io.c lines 244–248)
-    // ------------------------------------------------------------------
 
     /// Enables or disables pass-through mode. Returns the new value.
     pub fn set_pass_through(&mut self, yes: bool) -> bool {
@@ -313,29 +295,17 @@ impl Prefs {
         yes
     }
 
-    // ------------------------------------------------------------------
-    // LZ4IO_setOverwrite (lz4io.c lines 251–255)
-    // ------------------------------------------------------------------
-
     /// Enables or disables destination-file overwrite. Returns the new value.
     pub fn set_overwrite(&mut self, yes: bool) -> bool {
         self.overwrite = yes;
         yes
     }
 
-    // ------------------------------------------------------------------
-    // LZ4IO_setTestMode (lz4io.c lines 258–262)
-    // ------------------------------------------------------------------
-
-    /// Enables or disables test mode (decompress, discard). Returns the new value.
+    /// Enables or disables test mode (decompress and discard output). Returns the new value.
     pub fn set_test_mode(&mut self, yes: bool) -> bool {
         self.test_mode = yes;
         yes
     }
-
-    // ------------------------------------------------------------------
-    // LZ4IO_setBlockSizeID (lz4io.c lines 265–274)
-    // ------------------------------------------------------------------
 
     /// Sets the block-size ID (4–7). Returns the corresponding block size in
     /// bytes, or 0 if the ID is out of range.
@@ -353,19 +323,15 @@ impl Prefs {
         self.block_size
     }
 
-    // ------------------------------------------------------------------
-    // LZ4IO_setBlockSize (lz4io.c lines 276–291)
-    // ------------------------------------------------------------------
-
-    /// Sets the block size in bytes, clamped to [32, 4 MB].
-    /// Also derives and stores the closest standard block-size ID.
+    /// Sets the block size in bytes, clamped to `[32, 4 MB]`.
+    /// Also derives and stores the closest standard block-size ID (4–7).
     /// Returns the clamped block size.
     pub fn set_block_size(&mut self, block_size: usize) -> usize {
         const MIN_BLOCK_SIZE: usize = 32;
         const MAX_BLOCK_SIZE: usize = 4 * MB;
         let block_size = block_size.max(MIN_BLOCK_SIZE).min(MAX_BLOCK_SIZE);
         self.block_size = block_size;
-        // Replicate the C bit-shift loop to find the closest block-size ID.
+        // Count bit-pair positions to find the closest standard block-size ID.
         let mut bsid: u32 = 0;
         let mut bs = block_size - 1;
         while { bs >>= 2; bs != 0 } {
@@ -378,19 +344,11 @@ impl Prefs {
         block_size
     }
 
-    // ------------------------------------------------------------------
-    // LZ4IO_setBlockMode (lz4io.c lines 294–298)
-    // ------------------------------------------------------------------
-
     /// Sets block linking mode. Returns `true` if blocks are now independent.
     pub fn set_block_mode(&mut self, mode: BlockMode) -> bool {
         self.block_independence = mode == BlockMode::Independent;
         self.block_independence
     }
-
-    // ------------------------------------------------------------------
-    // LZ4IO_setBlockChecksumMode (lz4io.c lines 301–305)
-    // ------------------------------------------------------------------
 
     /// Enables or disables per-block checksums. Returns the new value.
     pub fn set_block_checksum_mode(&mut self, enable: bool) -> bool {
@@ -398,63 +356,45 @@ impl Prefs {
         enable
     }
 
-    // ------------------------------------------------------------------
-    // LZ4IO_setStreamChecksumMode (lz4io.c lines 308–312)
-    // ------------------------------------------------------------------
-
     /// Enables or disables the whole-stream checksum. Returns the new value.
     pub fn set_stream_checksum_mode(&mut self, enable: bool) -> bool {
         self.stream_checksum = enable;
         enable
     }
 
-    // ------------------------------------------------------------------
-    // LZ4IO_setSparseFile (lz4io.c lines 322–326)
-    // ------------------------------------------------------------------
-
     /// Enables or disables forced sparse-file mode.
-    /// Returns the internal value: 0 = off, 2 = forced on (mirrors C `2*(enable!=0)`).
+    /// Returns the internal sparse-file mode value: 0 = disabled, 2 = forced on.
     pub fn set_sparse_file(&mut self, enable: bool) -> i32 {
         self.sparse_file_support = if enable { 2 } else { 0 };
         self.sparse_file_support
     }
 
-    // ------------------------------------------------------------------
-    // LZ4IO_setContentSize (lz4io.c lines 329–333)
-    // ------------------------------------------------------------------
-
-    /// Enables or disables embedding the content size in the frame header.
-    /// Returns the new value.
+    /// Enables or disables embedding the uncompressed content size in the frame
+    /// header. Returns the new value.
     pub fn set_content_size(&mut self, enable: bool) -> bool {
         self.content_size_flag = enable;
         enable
     }
 
-    // ------------------------------------------------------------------
-    // LZ4IO_favorDecSpeed (lz4io.c lines 336–339)
-    // ------------------------------------------------------------------
-
-    /// Enables or disables favour-decompression-speed mode (HC levels only).
+    /// Enables or disables favour-decompression-speed mode.
+    ///
+    /// When enabled, the HC compressor optimises for decompression throughput
+    /// at the cost of compression ratio. Has no effect at non-HC levels.
     pub fn favor_dec_speed(&mut self, favor: bool) {
         self.favor_dec_speed = favor;
     }
 
-    // ------------------------------------------------------------------
-    // LZ4IO_setRemoveSrcFile (lz4io.c lines 341–344)
-    // ------------------------------------------------------------------
-
-    /// Enables or disables removal of the source file after processing.
+    /// Enables or disables removal of the source file after successful processing.
     pub fn set_remove_src_file(&mut self, flag: bool) {
         self.remove_src_file = flag;
     }
 }
 
 // ---------------------------------------------------------------------------
-// LZ4IO_setNotificationLevel — global setter (lz4io.c lines 315–319)
+// Global notification-level setter
 // ---------------------------------------------------------------------------
 
-/// Sets the global notification level. Returns the value stored.
-/// Equivalent to `int LZ4IO_setNotificationLevel(int level)`.
+/// Sets the global notification level and returns the value stored.
 pub fn set_notification_level(level: i32) -> i32 {
     DISPLAY_LEVEL.store(level, Ordering::Relaxed);
     level

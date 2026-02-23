@@ -14,23 +14,12 @@ use lz4::bench::compress_strategy::{
     build_compression_parameters, build_compression_parameters_with_dict,
     CompressionStrategy, NoStreamFast, NoStreamHC, StreamFast, StreamHC,
 };
-use std::ffi::c_char;
-use std::ffi::c_int;
 
 // ── Helper: decompress and verify ────────────────────────────────────────────
 
 fn lz4_decompress(compressed: &[u8], original_len: usize) -> Vec<u8> {
-    let mut out = vec![0u8; original_len];
-    let n = unsafe {
-        lz4_sys::LZ4_decompress_safe(
-            compressed.as_ptr() as *const c_char,
-            out.as_mut_ptr() as *mut c_char,
-            compressed.len() as c_int,
-            out.len() as c_int,
-        )
-    };
-    assert!(n > 0, "LZ4_decompress_safe failed (returned {})", n);
-    assert_eq!(n as usize, original_len);
+    let out = lz4::block::decompress_block_to_vec(compressed, original_len);
+    assert_eq!(out.len(), original_len);
     out
 }
 

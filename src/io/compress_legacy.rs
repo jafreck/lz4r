@@ -1,30 +1,24 @@
-// compress_legacy.rs — LZ4 legacy format compression.
-// Migrated from lz4io.c lines 764–977 (declaration #9) and lz4io.h
-// (lz4-1.10.0/programs).
-//
-// Migration decisions:
-// - `LZ4IO_writeLE32` → Rust's `u32::to_le_bytes()`.
-// - The C implementation uses a multi-threaded TPool + WriteRegister +
-//   ReadTracker pipeline even for the legacy path.  The Rust port provides a
-//   functionally equivalent single-threaded loop that produces byte-identical
-//   output (blocks are independently compressed and written in order).  A
-//   future refactor could add rayon parallelism; the public API is stable.
-// - `CompressLegacyState.cLevel` → local variable `clevel: i32`.
-// - `LZ4IO_compressBlockLegacy_fast` / `_HC` → private `compress_block_fast`
-//   / `compress_block_hc` (same logic; LE32 header written inline).
-// - `LZ4IO_compressLegacy_internal` → private `compress_legacy_internal`
-//   returning `io::Result<LegacyResult>`.
-// - `LZ4IO_compressFilename_Legacy` → `compress_filename_legacy`.
-// - `LZ4IO_compressMultipleFilenames_Legacy` →
-//   `compress_multiple_filenames_legacy`.
-// - C `END_PROCESS(code, msg)` (exits the process) → `io::Error` + early
-//   return, preserving recoverability.
-// - Timing: `TIME_getTime` / `clock()` → `crate::timefn::get_time` /
-//   `libc::clock()`; `LZ4IO_finalTimeDisplay` → `crate::io::prefs::final_time_display`.
-// - `FNSPACE` / manual realloc loop for dst filename → `String` allocation.
-// - For HC block compression the Rust port of `LZ4_compress_HC`
-//   (`crate::hc::api::compress_hc`) is used; this avoids an FFI dependency
-//   on `lz4-sys` while preserving bit-identical output.
+//! Legacy LZ4 format compression.
+//!
+//! The LZ4 legacy format predates the modern LZ4 frame format.  A legacy
+//! archive is a 4-byte little-endian magic number (`0x184C2102`) followed by
+//! a sequence of independently compressed blocks, each preceded by a 4-byte
+//! LE block size.  There is no content checksum, no content-size field, and
+//! no end-of-stream marker; decoders reconstruct the original data by
+//! decompressing blocks until EOF.
+//!
+//! This module provides:
+//! - [`compress_filename_legacy`] — compress a single file to legacy LZ4 format.
+//! - [`compress_multiple_filenames_legacy`] — compress a batch of files.
+//! - [`LegacyResult`] — byte-count statistics returned by a successful run.
+//!
+//! The compressor selects between two block-compression strategies based on
+//! the requested compression level: the fast path
+//! ([`crate::block::compress::compress_fast`]) for levels below 3, and the
+//! HC (high-compression) path ([`crate::hc::api::compress_hc`]) for level 3
+//! and above.  Blocks are compressed and written sequentially; the format
+//! requires no cross-block state, so parallelism is straightforward to add
+//! without changing the public API.
 
 use std::io::{self, Read, Write};
 
@@ -38,8 +32,8 @@ extern "C" {
     fn clock() -> libc::clock_t;
 }
 
-// The 4-byte little-endian size field that precedes each compressed block in
-// the legacy format (lz4io.c line 760).
+// Each compressed block is prefixed by a 4-byte little-endian field
+// containing the compressed size of that block.
 const LEGACY_BLOCK_HEADER_SIZE: usize = 4;
 
 // ---------------------------------------------------------------------------
@@ -47,8 +41,6 @@ const LEGACY_BLOCK_HEADER_SIZE: usize = 4;
 // ---------------------------------------------------------------------------
 
 /// Statistics produced by a successful legacy-format compression run.
-///
-/// Equivalent to the (readSize, wr.totalCSize) pair from C.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LegacyResult {
     /// Total uncompressed bytes read from the source.
@@ -63,13 +55,12 @@ pub struct LegacyResult {
 
 /// Compress one block using the fast (non-HC) compressor.
 ///
-/// Equivalent to `LZ4IO_compressBlockLegacy_fast` (lz4io.c lines 778–795).
-///
-/// Writes a 4-byte LE size prefix into `dst[..4]`, then compressed data from
-/// `dst[4..]`.  `dst` is resized to exactly hold the result.
-/// Returns the total byte count written (header + compressed payload).
+/// Writes a 4-byte LE size prefix into `dst[..4]`, then the compressed
+/// payload into `dst[4..]`.  `dst` is resized to exactly hold the result.
+/// Returns the total byte count written (4-byte header + compressed payload).
 fn compress_block_fast(src: &[u8], dst: &mut Vec<u8>, clevel: i32) -> io::Result<usize> {
-    // acceleration = (-clevel) when clevel < 0, else 0  (mirrors C line 788)
+    // Negative levels trade compression ratio for speed; the magnitude becomes
+    // the acceleration factor passed to the fast compressor.
     let acceleration = if clevel < 0 { -clevel } else { 0 };
 
     let bound = compress_bound(src.len() as i32) as usize;
@@ -83,18 +74,16 @@ fn compress_block_fast(src: &[u8], dst: &mut Vec<u8>, clevel: i32) -> io::Result
             )
         })?;
 
-    // Write LE32 compressed-block size (lz4io.c line 792)
+    // Write the compressed-block size as a 4-byte little-endian prefix.
     dst[..4].copy_from_slice(&(c_size as u32).to_le_bytes());
     Ok(c_size + LEGACY_BLOCK_HEADER_SIZE)
 }
 
 /// Compress one block using the HC compressor.
 ///
-/// Equivalent to `LZ4IO_compressBlockLegacy_HC` (lz4io.c lines 797–814).
-///
-/// Writes a 4-byte LE size prefix into `dst[..4]`, then compressed data from
-/// `dst[4..]`.  `dst` is resized to exactly hold the result.
-/// Returns the total byte count written (header + compressed payload).
+/// Writes a 4-byte LE size prefix into `dst[..4]`, then the compressed
+/// payload into `dst[4..]`.  `dst` is resized to exactly hold the result.
+/// Returns the total byte count written (4-byte header + compressed payload).
 fn compress_block_hc(src: &[u8], dst: &mut Vec<u8>, clevel: i32) -> io::Result<usize> {
     let bound = compress_bound(src.len() as i32) as usize;
     dst.resize(bound + LEGACY_BLOCK_HEADER_SIZE, 0);
@@ -118,7 +107,7 @@ fn compress_block_hc(src: &[u8], dst: &mut Vec<u8>, clevel: i32) -> io::Result<u
     }
 
     let c_size = c_size as usize;
-    // Write LE32 compressed-block size (lz4io.c line 811)
+    // Write the compressed-block size as a 4-byte little-endian prefix.
     dst[..4].copy_from_slice(&(c_size as u32).to_le_bytes());
     Ok(c_size + LEGACY_BLOCK_HEADER_SIZE)
 }
@@ -127,12 +116,15 @@ fn compress_block_hc(src: &[u8], dst: &mut Vec<u8>, clevel: i32) -> io::Result<u
 // Private: internal compression loop
 // ---------------------------------------------------------------------------
 
-/// Core legacy-format compression implementation.
+/// Core legacy-format compression loop.
 ///
-/// Equivalent to `LZ4IO_compressLegacy_internal` (lz4io.c lines 820–900).
+/// Opens `input_filename` for reading and `output_filename` for writing, then
+/// repeatedly reads up to [`LEGACY_BLOCKSIZE`] bytes, compresses each chunk,
+/// and writes the 4-byte LE compressed-block size followed by the compressed
+/// data.  The 4-byte legacy magic number is written before the first block.
 ///
-/// Dispatches to `compress_block_fast` when `compressionlevel < 3`, otherwise
-/// to `compress_block_hc` (mirrors C line 827).
+/// Dispatches to [`compress_block_fast`] for levels below 3, or
+/// [`compress_block_hc`] for level 3 and above.
 fn compress_legacy_internal(
     input_filename: &str,
     output_filename: &str,
@@ -142,7 +134,7 @@ fn compress_legacy_internal(
     let mut src_reader = open_src_file(input_filename)?;
     let mut dst_file = open_dst_file(output_filename, prefs)?;
 
-    // Write archive header: 4-byte LE magic (lz4io.c lines 854–858)
+    // Write the 4-byte little-endian legacy magic number that opens the archive.
     let magic_bytes = LEGACY_MAGICNUMBER.to_le_bytes();
     dst_file.write_all(&magic_bytes)?;
 
@@ -155,7 +147,7 @@ fn compress_legacy_internal(
         compress_bound(LEGACY_BLOCKSIZE as i32) as usize + LEGACY_BLOCK_HEADER_SIZE,
     );
 
-    // Use fast or HC compressor based on level (mirrors C line 827)
+    // Select compression strategy: fast for level < 3, HC for level >= 3.
     let use_hc = compressionlevel >= 3;
 
     loop {
@@ -176,7 +168,6 @@ fn compress_legacy_internal(
 
         bytes_read += total_read as u64;
 
-        // Compress the chunk
         let chunk = &src_buf[..total_read];
         let written = if use_hc {
             compress_block_hc(chunk, &mut cmp_buf, compressionlevel)?
@@ -184,14 +175,14 @@ fn compress_legacy_internal(
             compress_block_fast(chunk, &mut cmp_buf, compressionlevel)?
         };
 
-        // Write header + compressed data
+        // `written` includes the 4-byte size prefix; emit the whole slice.
         dst_file.write_all(&cmp_buf[..written])?;
         bytes_written += written as u64;
     }
 
     dst_file.flush()?;
 
-    // Status display (lz4io.c lines 884–888)
+    // Report the compression ratio to the user.
     let ratio = if bytes_read == 0 {
         100.0
     } else {
@@ -224,11 +215,10 @@ fn compress_legacy_internal(
 
 /// Compress a single file to legacy LZ4 format.
 ///
-/// If `dst` is the `"stdout"` sentinel, output is written to stdout.
+/// Reads from `src` and writes to `dst`.  If `dst` is the `"stdout"`
+/// sentinel, output is directed to stdout.
 ///
-/// Equivalent to `LZ4IO_compressFilename_Legacy` (lz4io.c lines 907–918).
-///
-/// Returns `Ok(LegacyResult)` with byte statistics on success, or an
+/// Returns `Ok(`[`LegacyResult`]`)` with byte statistics on success, or an
 /// `io::Error` on failure.
 pub fn compress_filename_legacy(
     src: &str,
@@ -241,8 +231,7 @@ pub fn compress_filename_legacy(
 
     let result = compress_legacy_internal(src, dst, compressionlevel, prefs);
 
-    // Always display timing (lz4io.c line 916), using bytes_read on success
-    // or 0 on failure (mirrors C: `LZ4IO_finalTimeDisplay(timeStart, cpuStart, processed)`).
+    // Report elapsed time regardless of success or failure; use 0 bytes on failure.
     let processed = result.as_ref().map(|r| r.bytes_read).unwrap_or(0);
     final_time_display(time_start, cpu_start, processed);
 
@@ -251,12 +240,12 @@ pub fn compress_filename_legacy(
 
 /// Compress multiple files to legacy LZ4 format.
 ///
-/// Each input file `srcs[i]` is compressed to `srcs[i] + suffix`.  If
-/// `suffix` is the `"stdout"` sentinel, all output is written to stdout.
+/// Each input file `srcs[i]` is compressed to a destination formed by
+/// appending `suffix` to the source path.  If `suffix` is the `"stdout"`
+/// sentinel, all compressed output is written to stdout.
 ///
-/// Returns the number of files that could not be compressed (0 on complete
-/// success), mirroring `LZ4IO_compressMultipleFilenames_Legacy` (lz4io.c
-/// lines 924–973).
+/// Returns `Ok(())` when every file succeeds, or an `io::Error` reporting
+/// the count of files that could not be compressed.
 pub fn compress_multiple_filenames_legacy(
     srcs: &[&str],
     suffix: &str,
@@ -274,7 +263,7 @@ pub fn compress_multiple_filenames_legacy(
         let dst: String = if suffix_is_stdout {
             STDOUT_MARK.to_owned()
         } else {
-            // Build destination filename: src + suffix (mirrors C lines 952–959)
+            // Append the suffix to the source path to form the destination name.
             format!("{}{}", src, suffix)
         };
 
@@ -284,7 +273,7 @@ pub fn compress_multiple_filenames_legacy(
         }
     }
 
-    // Display cumulative timing (lz4io.c line 969)
+    // Report cumulative wall-clock and CPU time across all files.
     final_time_display(time_start, cpu_start, total_processed);
 
     if missed_files > 0 {
@@ -306,7 +295,7 @@ mod tests {
     use super::*;
     use crate::io::prefs::Prefs;
 
-    // Helper: compress `data` in legacy format and return the raw bytes.
+    // Compress `data` in legacy format, writing to a temp file and reading it back.
     fn compress_to_bytes(data: &[u8], clevel: i32) -> Vec<u8> {
         let dir = tempfile::tempdir().unwrap();
         let src_path = dir.path().join("input.bin");
@@ -380,7 +369,7 @@ mod tests {
 
         let compressed_block = &compressed[8..8 + block_size];
         let decompressed =
-            lz4_flex::block::decompress(compressed_block, original.len() * 2).unwrap();
+            crate::block::decompress_block_to_vec(compressed_block, original.len() * 2);
         assert_eq!(&decompressed[..original.len()], original);
     }
 
@@ -397,7 +386,7 @@ mod tests {
 
         let compressed_block = &compressed[8..8 + block_size];
         let decompressed =
-            lz4_flex::block::decompress(compressed_block, original.len() * 2).unwrap();
+            crate::block::decompress_block_to_vec(compressed_block, original.len() * 2);
         assert_eq!(&decompressed[..original.len()], original);
     }
 

@@ -1,27 +1,13 @@
-/*
-    bench/config.rs — Benchmark configuration constants and setters
-    Migrated from lz4-1.10.0/programs/bench.c (lines 1–145) and bench.h
+//! Benchmark configuration: constants and runtime parameters for the `bench` subsystem.
+//!
+//! [`BenchConfig`] holds all tuneable settings for a benchmark run — duration, block
+//! size, verbosity, and mode flags. Its builder-style setters allow callers to
+//! construct a configuration incrementally before passing it to the benchmark runner.
+//!
+//! The timing and size constants defined here are shared across the compression and
+//! decompression timing loops in [`super::runner`].
 
-    Original copyright (C) Yann Collet 2012-2020 — GPL v2 License.
-
-    Migration notes:
-    - C module-level globals are encapsulated in `BenchConfig`.
-    - `g_displayLevel` (U32) → `display_level: u32`
-    - `g_nbSeconds` (U32, default 3) → `nb_seconds: u32`
-    - `g_blockSize` (size_t, default 0) → `block_size: usize`
-    - `g_additionalParam` (int, default 0) → `additional_param: i32`
-    - `g_benchSeparately` (int, default 0) → `bench_separately: bool`
-    - `g_decodeOnly` (int, default 0) → `decode_only: bool`
-    - `g_skipChecksums` (unsigned, default 0) → `skip_checksums: bool`
-    - Setter methods mirror the BMK_set* functions and return `&mut Self`
-      so they can be chained.
-    - `LZ4_isError(errcode)` was `(errcode==0)` in C — the block API returns
-      0 on failure (not a negative value). This inverted semantic must NOT
-      be carried into Rust. With `lz4_flex`, block compression returns
-      `Err(...)` on failure; check with `.is_err()`.
-*/
-
-// ── Timing constants (mirrors bench.c lines 68–72) ────────────────────────────
+// ── Timing constants ─────────────────────────────────────────────────────────
 
 /// Minimum benchmark duration in seconds.
 pub const NBSECONDS: u32 = 3;
@@ -38,10 +24,11 @@ pub const ACTIVEPERIOD_NANOSEC: u64 = 70 * 1_000_000_000;
 /// Cool-down period between active benchmark windows (seconds).
 pub const COOLPERIOD_SEC: u64 = 10;
 
-/// Decompression is timed DECOMP_MULT times longer than compression.
+/// Multiplier applied to decompression timing budget relative to compression.
+/// A value of 1 means both phases receive equal wall-clock time.
 pub const DECOMP_MULT: u32 = 1;
 
-// ── Size multiplier constants (mirrors bench.c lines 74–76) ──────────────────
+// ── Size multiplier constants ───────────────────────────────────────────────
 
 pub const KB: usize = 1 << 10;
 pub const MB: usize = 1 << 20;
@@ -51,8 +38,10 @@ pub const GB: usize = 1 << 30;
 pub const LZ4_MAX_DICT_SIZE: usize = 64 * KB;
 
 /// Maximum memory the benchmark will attempt to allocate.
-/// Mirrors bench.c line 80:
-///   (sizeof(size_t)==4) ? (2 GB - 64 MB) : (1ULL << (sizeof(size_t)*8 - 31))
+///
+/// On 32-bit targets this is capped at 2 GiB − 64 MiB to stay within addressable
+/// space. On 64-bit targets the cap is `1 << (pointer_bits − 31)`, leaving ample
+/// headroom while preventing runaway allocation.
 pub const MAX_MEMORY: usize = if usize::BITS == 32 {
     (2 * GB) - (64 * MB)
 } else {
@@ -61,10 +50,10 @@ pub const MAX_MEMORY: usize = if usize::BITS == 32 {
 
 // ── BenchConfig struct ────────────────────────────────────────────────────────
 
-/// Runtime benchmark parameters.
+/// Runtime parameters controlling a single benchmark session.
 ///
-/// Encapsulates the C module-level globals `g_*` from bench.c (lines 122–127)
-/// and the `g_displayLevel` static (line 90).
+/// Construct via [`Default`] and then adjust with the builder-style setters,
+/// or set fields directly. All fields are `pub` for convenient inspection.
 #[derive(Debug, Clone)]
 pub struct BenchConfig {
     /// Verbosity level: 0 = silent, 1 = errors, 2 = results+warnings (default),
@@ -75,31 +64,31 @@ pub struct BenchConfig {
     pub nb_seconds: u32,
 
     /// Block size for splitting input into independent chunks.
-    /// 0 means "use file size" (default: 0).
+    /// `0` means "use the full file as one block" (default: 0).
     pub block_size: usize,
 
-    /// Hidden parameter influencing output format for Python parsing
-    /// (mirrors `g_additionalParam`, default: 0).
+    /// Auxiliary parameter that influences output formatting for machine-readable
+    /// consumers (e.g. Python scripts parsing benchmark results). Default: 0.
     pub additional_param: i32,
 
-    /// When true, benchmark each input file separately and report one result
-    /// per file (mirrors `g_benchSeparately`, default: false).
+    /// When `true`, benchmark each input file independently and emit one result
+    /// line per file rather than aggregating across all inputs. Default: `false`.
     pub bench_separately: bool,
 
-    /// When true, only benchmark decompression; input must be valid LZ4 frame
-    /// data (mirrors `g_decodeOnly`, default: false).
+    /// When `true`, only benchmark decompression; input files must contain valid
+    /// LZ4 frame data. Default: `false`.
     pub decode_only: bool,
 
-    /// When true, skip checksum verification during decode-only benchmarking
-    /// (mirrors `g_skipChecksums`, default: false).
+    /// When `true`, skip checksum verification during decode-only benchmarking
+    /// to isolate pure decompression throughput. Default: `false`.
     pub skip_checksums: bool,
 }
 
 impl Default for BenchConfig {
-    /// Returns a `BenchConfig` with the same defaults as the C globals:
-    /// - `display_level` = 2
-    /// - `nb_seconds`    = 3 (`NBSECONDS`)
-    /// - `block_size`    = 0
+    /// Returns a `BenchConfig` with sensible defaults:
+    /// - `display_level` = 2 (results + warnings)
+    /// - `nb_seconds`    = 3 ([`NBSECONDS`])
+    /// - `block_size`    = 0 (full file)
     /// - `additional_param` = 0
     /// - `bench_separately` = false
     /// - `decode_only`   = false
@@ -118,50 +107,62 @@ impl Default for BenchConfig {
 }
 
 impl BenchConfig {
-    // ── Setters (mirror the BMK_set* / BMK_skip* functions, bench.c 129–145) ──
+    // ── Setters ───────────────────────────────────────────────────────────────
 
-    /// Set verbosity level (mirrors `BMK_setNotificationLevel`).
+    /// Set the verbosity level for benchmark output.
+    ///
+    /// `0` = silent, `1` = errors only, `2` = results + warnings (default),
+    /// `3` = progress, `4` = full diagnostic output.
     pub fn set_notification_level(&mut self, level: u32) -> &mut Self {
         self.display_level = level;
         self
     }
 
-    /// Set the hidden additional-param field (mirrors `BMK_setAdditionalParam`).
+    /// Set the auxiliary output-format parameter (see [`BenchConfig::additional_param`]).
     pub fn set_additional_param(&mut self, additional_param: i32) -> &mut Self {
         self.additional_param = additional_param;
         self
     }
 
-    /// Set minimum benchmark duration in seconds (mirrors `BMK_setNbSeconds`).
+    /// Set the minimum benchmark duration in seconds.
     ///
-    /// In the C source, this setter also printed a DISPLAYLEVEL(3, …) message.
-    /// That side-effect is omitted here; callers should log if needed.
+    /// Each compression and decompression phase runs for at least this many
+    /// seconds before the result is recorded. Callers may log the new value
+    /// at verbosity level 3 if desired.
     pub fn set_nb_seconds(&mut self, nb_seconds: u32) -> &mut Self {
         self.nb_seconds = nb_seconds;
         self
     }
 
-    /// Set the block-split size in bytes (mirrors `BMK_setBlockSize`).
+    /// Set the block size used to split input data into independently compressed chunks.
+    ///
+    /// Pass `0` to compress each input file as a single block.
     pub fn set_block_size(&mut self, block_size: usize) -> &mut Self {
         self.block_size = block_size;
         self
     }
 
-    /// Set whether each file is benchmarked separately (mirrors
-    /// `BMK_setBenchSeparately`). Mirrors the `(separate!=0)` cast.
+    /// Set whether each input file is benchmarked independently.
+    ///
+    /// When `true`, results are reported per-file rather than aggregated.
     pub fn set_bench_separately(&mut self, separate: bool) -> &mut Self {
         self.bench_separately = separate;
         self
     }
 
-    /// Set decode-only mode (mirrors `BMK_setDecodeOnlyMode`).
+    /// Enable or disable decode-only mode.
+    ///
+    /// In decode-only mode the benchmark skips compression entirely; input
+    /// files must already contain valid LZ4 frame data.
     pub fn set_decode_only(&mut self, set: bool) -> &mut Self {
         self.decode_only = set;
         self
     }
 
-    /// Set whether checksums are skipped in decode-only mode
-    /// (mirrors `BMK_skipChecksums`).
+    /// Set whether content-checksum verification is skipped during decoding.
+    ///
+    /// Disabling checksum verification isolates raw decompression throughput from
+    /// the cost of the xxHash content check. Only meaningful in decode-only mode.
     pub fn set_skip_checksums(&mut self, skip: bool) -> &mut Self {
         self.skip_checksums = skip;
         self

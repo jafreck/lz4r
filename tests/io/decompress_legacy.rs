@@ -36,14 +36,14 @@ fn mt_prefs() -> Prefs {
 }
 
 /// Compresses `data` in legacy format (4-byte LE block sizes + raw lz4 blocks)
-/// using `lz4_flex::block::compress`.  Does NOT prepend the magic number —
+/// using `lz4::block::compress_block_to_vec`.  Does NOT prepend the magic number —
 /// callers receive the raw block payload that `decode_legacy_stream` expects.
 ///
 /// Mirrors the stream format produced by `LZ4IO_compressFilename_Legacy`.
 fn make_legacy_payload(data: &[u8]) -> Vec<u8> {
     let mut payload = Vec::new();
     for chunk in data.chunks(LEGACY_BLOCKSIZE) {
-        let compressed = lz4_flex::block::compress(chunk);
+        let compressed = lz4::block::compress_block_to_vec(chunk);
         let block_size = compressed.len() as u32;
         payload.extend_from_slice(&block_size.to_le_bytes());
         payload.extend_from_slice(&compressed);
@@ -175,7 +175,7 @@ fn st_corrupted_block_data_returns_error() {
 #[test]
 fn st_truncated_mid_block_returns_error() {
     let original = b"some data to compress";
-    let compressed = lz4_flex::block::compress(original);
+    let compressed = lz4::block::compress_block_to_vec(original);
     // Promise the full block size but only supply half the bytes.
     let block_size = compressed.len() as u32;
     let mut payload = Vec::new();
@@ -269,7 +269,7 @@ fn mt_decompress_more_than_nb_buffsets_blocks() {
     let block_data: Vec<u8> = vec![0xA5u8; 64];
     let mut payload = Vec::new();
     for _ in 0..6 {
-        let compressed = lz4_flex::block::compress(&block_data);
+        let compressed = lz4::block::compress_block_to_vec(&block_data);
         payload.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
         payload.extend_from_slice(&compressed);
     }
@@ -326,7 +326,7 @@ fn mt_corrupted_block_data_returns_error() {
 #[test]
 fn mt_truncated_mid_block_returns_error() {
     let original = b"mt data to compress";
-    let compressed = lz4_flex::block::compress(original);
+    let compressed = lz4::block::compress_block_to_vec(original);
     let block_size = compressed.len() as u32;
     let mut payload = Vec::new();
     payload.extend_from_slice(&block_size.to_le_bytes());
@@ -384,7 +384,7 @@ fn st_and_mt_produce_identical_output_multi_batch() {
     let block: Vec<u8> = vec![0x7Bu8; 128];
     let mut payload = Vec::new();
     for _ in 0..10 {
-        let compressed = lz4_flex::block::compress(&block);
+        let compressed = lz4::block::compress_block_to_vec(&block);
         payload.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
         payload.extend_from_slice(&compressed);
     }

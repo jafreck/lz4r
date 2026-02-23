@@ -1,41 +1,23 @@
-// file_info.rs — LZ4IO file info display (--list).
-// Migrated from lz4io.c lines 2557–2897 (declarations #22, #23).
-//
-// Migration decisions:
-// - `LZ4IO_frameType_e` → `pub enum FrameType` (local; distinct from `lz4_sys::FrameType`).
-// - `LZ4IO_frameInfo_t` → private `FrameInfo` struct.
-// - `LZ4IO_cFileInfo_t` → `pub struct CompressedFileInfo`.
-// - `LZ4IO_infoResult` → private `InfoResult` enum.
-// - `LZ4IO_displayCompressedFilesInfo` → `pub fn display_compressed_files_info(paths: &[&str])`.
-// - `LZ4IO_getCompressedFileInfo` → private `get_compressed_file_info`.
-// - `LZ4IO_skipBlocksData` / `LZ4IO_skipLegacyBlocksData` → private helpers.
-// - `LZ4IO_blockTypeID` → `pub fn block_type_id` (returns `String`; C uses a caller-owned buffer).
-// - `LZ4IO_toHuman` / `LZ4IO_baseName` → private helpers.
-// - Files are opened directly as `std::fs::File` (not `open_src_file`) because block-skipping
-//   requires `Seek`.  The caller already validates the file is a regular file before calling
-//   `get_compressed_file_info`, matching the C pre-check.
-// - `UTIL_getOpenFileSize` → `file.metadata().map(|m| m.len())`.
-// - `UTIL_isRegFile` → `fs::metadata(path).map(|m| m.file_type().is_file())`.
-// - `UTIL_isRegFD(0)` → `nix::sys::stat::fstat(0)` on Unix; `false` on other platforms.
-// - `LZ4F_headerSize` is not exposed by lz4-sys; it is declared as `extern "C"` here.
-//   lz4-sys statically compiles liblz4, so the symbol is available at link time.
-// - All other lz4F functions (createDecompressionContext, getFrameInfo, freeDecompressionContext)
-//   are also declared directly as `extern "C"` using raw pointers to avoid lz4-sys ownership
-//   model conflicts (LZ4FDecompressionContext is move-only, which breaks the C create/use/free
-//   pattern).
-// - `fseek_u32` (C workaround for 32-bit fseek) → `Seek::seek(SeekFrom::Current(i64))`,
-//   which is 64-bit on all supported platforms.
-// - `DISPLAYOUT` (stdout) → `print!`/`println!`.
-// - `DISPLAYLEVEL` (stderr) → `eprint!`/`eprintln!` gated on `DISPLAY_LEVEL`.
-// - `END_PROCESS(n, ...)` → `eprintln!` then `std::process::exit(n)`.
-// - lz4_sys enum types (`BlockSize`, `BlockMode`, etc.) do not derive `PartialEq`; comparisons
-//   are performed by casting discriminants to `u32`.
+//! File information display for the `--list` flag.
+//!
+//! Walks the frames of one or more LZ4-compressed files without decompressing
+//! them and prints a summary table: frame count, frame type, block
+//! configuration, compressed/uncompressed sizes, and compression ratio.
+//!
+//! All three frame families are recognised: standard LZ4 frames
+//! (`LZ4IO_MAGICNUMBER`), legacy frames, and skippable frames.
+//!
+//! Entry point: [`display_compressed_files_info`].
 
 use std::fs;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::sync::atomic::Ordering;
 
-use lz4_sys::{BlockChecksum, BlockMode, BlockSize, ContentChecksum, LZ4FFrameInfo};
+use crate::frame::{lz4f_create_decompression_context, lz4f_get_frame_info, lz4f_header_size};
+use crate::frame::types::{
+    BlockChecksum, BlockMode, BlockSizeId, ContentChecksum,
+    FrameInfo as NativeFrameInfo, FrameType as NativeFrameType,
+};
 
 use crate::io::file_io::STDIN_MARK;
 use crate::io::prefs::{
@@ -44,7 +26,7 @@ use crate::io::prefs::{
 };
 
 // ---------------------------------------------------------------------------
-// LZ4 frame format constants (lz4frame.h — not re-exported by lz4-sys)
+// LZ4 frame format constants (lz4frame.h)
 // ---------------------------------------------------------------------------
 
 /// Minimum LZ4 frame header size in bytes (includes 4-byte magic number).
@@ -68,46 +50,14 @@ const LEGACY_BLOCK_HEADER_SIZE: usize = 4;
 /// Maximum block payload size for legacy frames (8 MiB).
 const LEGACY_BLOCK_SIZE_MAX: usize = 8 * MB;
 
-/// lz4frame library version passed to `LZ4F_createDecompressionContext`.
+/// lz4frame library version passed to `lz4f_create_decompression_context`.
 const LZ4F_VERSION: u32 = 100;
 
 // ---------------------------------------------------------------------------
-// lz4F FFI — declared directly to avoid lz4-sys ownership model limitations.
-// lz4-sys links liblz4 statically, so every lz4 symbol is available.
+// FrameType
 // ---------------------------------------------------------------------------
 
-extern "C" {
-    /// Returns total header size (including 4-byte magic) from the first few bytes of a frame.
-    fn LZ4F_headerSize(src: *const libc::c_void, src_size: libc::size_t) -> libc::size_t;
-
-    /// Returns non-zero if `code` represents an lz4F error code.
-    fn LZ4F_isError(code: libc::size_t) -> libc::c_uint;
-
-    /// Allocates a decompression context; writes its pointer into `*ctx_ptr`.
-    fn LZ4F_createDecompressionContext(
-        ctx_ptr: *mut *mut libc::c_void,
-        version: libc::c_uint,
-    ) -> libc::size_t;
-
-    /// Frees a decompression context.
-    fn LZ4F_freeDecompressionContext(ctx: *mut libc::c_void) -> libc::size_t;
-
-    /// Reads frame parameters from `src_buffer` into `*frame_info_ptr`.
-    /// `*src_size_ptr` is updated to the number of header bytes consumed.
-    fn LZ4F_getFrameInfo(
-        ctx: *mut libc::c_void,
-        frame_info_ptr: *mut LZ4FFrameInfo,
-        src_buffer: *const u8,
-        src_size_ptr: *mut libc::size_t,
-    ) -> libc::size_t;
-}
-
-// ---------------------------------------------------------------------------
-// FrameType enum (lz4io.c lines 2557–2562: LZ4IO_frameType_e)
-// ---------------------------------------------------------------------------
-
-/// Classifies the type of a compressed frame for display purposes.
-/// Equivalent to C's `LZ4IO_frameType_e`.
+/// Classifies the type of a compressed frame encountered during `--list` scanning.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FrameType {
     Lz4Frame = 0,
@@ -116,7 +66,7 @@ pub enum FrameType {
 }
 
 impl FrameType {
-    /// Human-readable name (mirrors `LZ4IO_frameTypeNames[]`).
+    /// Human-readable label used in the printed summary table.
     fn name(self) -> &'static str {
         match self {
             FrameType::Lz4Frame => "LZ4Frame",
@@ -127,28 +77,27 @@ impl FrameType {
 }
 
 // ---------------------------------------------------------------------------
-// FrameInfo (lz4io.c lines 2564–2567: LZ4IO_frameInfo_t)
+// FrameInfo
 // ---------------------------------------------------------------------------
 
-/// Combines lz4-sys frame info with the local `FrameType` classifier.
-/// Equivalent to C's `LZ4IO_frameInfo_t`.
+/// Combines native frame metadata with the local [`FrameType`] classifier.
 struct FrameInfo {
-    lz4_frame_info: LZ4FFrameInfo,
+    lz4_frame_info: NativeFrameInfo,
     frame_type: FrameType,
 }
 
 impl FrameInfo {
-    /// Mirrors `LZ4IO_INIT_FRAMEINFO` — zero content size, lz4Frame type, default block settings.
+    /// Returns a zeroed instance: content size 0, standard LZ4 frame type, default block settings.
     fn new() -> Self {
         FrameInfo {
-            lz4_frame_info: LZ4FFrameInfo {
-                block_size_id: BlockSize::Max64KB,
+            lz4_frame_info: NativeFrameInfo {
+                block_size_id: BlockSizeId::Max64Kb,
                 block_mode: BlockMode::Linked,
-                content_checksum_flag: ContentChecksum::NoChecksum,
-                frame_type: lz4_sys::FrameType::Frame,
+                content_checksum_flag: ContentChecksum::Disabled,
+                frame_type: NativeFrameType::Frame,
                 content_size: 0,
                 dict_id: 0,
-                block_checksum_flag: BlockChecksum::NoBlockChecksum,
+                block_checksum_flag: BlockChecksum::Disabled,
             },
             frame_type: FrameType::Lz4Frame,
         }
@@ -156,11 +105,13 @@ impl FrameInfo {
 }
 
 // ---------------------------------------------------------------------------
-// CompressedFileInfo (lz4io.c lines 2571–2579: LZ4IO_cFileInfo_t)
+// CompressedFileInfo
 // ---------------------------------------------------------------------------
 
-/// Accumulated metadata about a compressed file's frames.
-/// Equivalent to C's `LZ4IO_cFileInfo_t`.
+/// Accumulated metadata about all frames in a single compressed file.
+///
+/// Populated by [`get_compressed_file_info`] as it walks the frame stream,
+/// then consumed by [`display_compressed_files_info`] to format the table row.
 pub struct CompressedFileInfo {
     /// Display name (basename of the file path).
     pub file_name: String,
@@ -179,7 +130,7 @@ pub struct CompressedFileInfo {
 }
 
 impl CompressedFileInfo {
-    /// Mirrors `LZ4IO_INIT_CFILEINFO`.
+    /// Returns a zeroed, default-initialised instance.
     fn new() -> Self {
         CompressedFileInfo {
             file_name: String::new(),
@@ -194,7 +145,7 @@ impl CompressedFileInfo {
 }
 
 // ---------------------------------------------------------------------------
-// InfoResult (lz4io.c line 2583: LZ4IO_infoResult)
+// InfoResult
 // ---------------------------------------------------------------------------
 
 #[derive(PartialEq, Eq, Debug)]
@@ -209,7 +160,6 @@ enum InfoResult {
 // ---------------------------------------------------------------------------
 
 /// Reads four bytes from `buf` as a little-endian `u32`.
-/// Mirrors `LZ4IO_readLE32` (lz4io.c lines 1583–1591).
 #[inline]
 fn read_le32(buf: &[u8]) -> u32 {
     u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]])
@@ -222,13 +172,14 @@ fn is_skippable_magic_number(magic: u32) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// skip_blocks_data (lz4io.c lines 2593–2625: LZ4IO_skipBlocksData)
+// skip_blocks_data
 // ---------------------------------------------------------------------------
 
-/// Reads block headers and seeks past block data for a single LZ4 frame.
-/// Returns total bytes occupied by blocks (including headers and checksums),
-/// or `0` on I/O error.  Assumes the file cursor is positioned immediately
-/// after the frame header.
+/// Reads block headers and seeks past block payloads for a single standard LZ4 frame.
+///
+/// Returns the total byte count of all blocks (headers + payloads + optional
+/// per-block checksums + optional content checksum), or `0` on I/O error.
+/// The file cursor must be positioned immediately after the frame header on entry.
 fn skip_blocks_data(file: &mut fs::File, block_checksum: bool, content_checksum: bool) -> u64 {
     let mut buf = [0u8; LZ4F_BLOCK_HEADER_SIZE];
     let mut total: u64 = 0;
@@ -267,17 +218,17 @@ fn skip_blocks_data(file: &mut fs::File, block_checksum: bool, content_checksum:
 }
 
 // ---------------------------------------------------------------------------
-// skip_legacy_blocks_data (lz4io.c lines 2635–2670: LZ4IO_skipLegacyBlocksData)
+// skip_legacy_blocks_data
 // ---------------------------------------------------------------------------
 
-/// Sentinel value returned by `skip_legacy_blocks_data` on error.
-/// Mirrors `legacyFrameUndecodable = (0ULL-1)`.
+/// Sentinel value returned by [`skip_legacy_blocks_data`] on I/O or format error.
 const LEGACY_FRAME_UNDECODABLE: u64 = u64::MAX;
 
-/// Reads legacy block headers and seeks past block data.
-/// Returns total bytes for all blocks (including 4-byte headers),
-/// or `LEGACY_FRAME_UNDECODABLE` on error.
-/// Assumes the file cursor is positioned immediately after the legacy magic number.
+/// Reads legacy block headers and seeks past block payloads.
+///
+/// Returns the total byte count of all blocks (4-byte headers + payloads),
+/// or [`LEGACY_FRAME_UNDECODABLE`] on I/O or format error.
+/// The file cursor must be positioned immediately after the legacy magic number on entry.
 fn skip_legacy_blocks_data(file: &mut fs::File) -> u64 {
     let mut buf = [0u8; LEGACY_BLOCK_HEADER_SIZE];
     let mut total: u64 = 0;
@@ -329,19 +280,19 @@ fn skip_legacy_blocks_data(file: &mut fs::File) -> u64 {
 }
 
 // ---------------------------------------------------------------------------
-// block_type_id (lz4io.c lines 2675–2683: LZ4IO_blockTypeID)
+// block_type_id
 // ---------------------------------------------------------------------------
 
-/// Returns a human-readable block type string such as `"B7I"` or `"B4D"`.
+/// Returns a compact block-type label such as `"B7I"` or `"B4D"`.
 ///
-/// Format: `B` + block size digit (4–7) + `I` (independent) or `D` (dependent/linked).
-/// Equivalent to `LZ4IO_blockTypeID`.
-pub fn block_type_id(size_id: &BlockSize, block_mode: &BlockMode) -> String {
+/// Format: `B` + block-size digit (`4`–`7`, mapping 64 KB–4 MB)
+/// + `I` (independent blocks) or `D` (dependent/linked blocks).
+pub fn block_type_id(size_id: &BlockSizeId, block_mode: &BlockMode) -> String {
     let id_digit = match size_id {
-        BlockSize::Max64KB | BlockSize::Default => b'4',
-        BlockSize::Max256KB => b'5',
-        BlockSize::Max1MB => b'6',
-        BlockSize::Max4MB => b'7',
+        BlockSizeId::Max64Kb | BlockSizeId::Default => b'4',
+        BlockSizeId::Max256Kb => b'5',
+        BlockSizeId::Max1Mb => b'6',
+        BlockSizeId::Max4Mb => b'7',
     };
     let mode_char = match block_mode {
         BlockMode::Independent => b'I',
@@ -352,11 +303,11 @@ pub fn block_type_id(size_id: &BlockSize, block_mode: &BlockMode) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// to_human (lz4io.c lines 2686–2693: LZ4IO_toHuman)
+// to_human
 // ---------------------------------------------------------------------------
 
-/// Formats a byte count using the largest applicable SI prefix (K/M/G/T/P/E/Z/Y).
-/// Mirrors `LZ4IO_toHuman` which uses `long double` and `sprintf("%.2Lf%c")`.
+/// Formats a byte count using the largest applicable binary SI prefix (K/M/G/T/P/E/Z/Y)
+/// with two decimal places, e.g. `"3.14M"`.
 fn to_human(mut size: f64) -> String {
     const UNITS: &[char] = &['\0', 'K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];
     let mut i = 0usize;
@@ -372,11 +323,11 @@ fn to_human(mut size: f64) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// base_name (lz4io.c lines 2696–2702: LZ4IO_baseName)
+// base_name
 // ---------------------------------------------------------------------------
 
-/// Returns the filename component after the last `/` or `\` separator.
-/// Equivalent to `LZ4IO_baseName`.
+/// Returns the filename component after the last `/` or `\` path separator,
+/// or the full string if no separator is present.
 fn base_name(path: &str) -> &str {
     path.rfind('/')
         .or_else(|| path.rfind('\\'))
@@ -385,11 +336,11 @@ fn base_name(path: &str) -> &str {
 }
 
 // ---------------------------------------------------------------------------
-// Platform check for stdin being a regular file (UTIL_isRegFD)
+// Platform check for stdin being a regular file
 // ---------------------------------------------------------------------------
 
-/// Returns `true` if fd 0 (stdin) is backed by a regular file.
-/// Equivalent to `UTIL_isRegFD(0)`.
+/// Returns `true` if file descriptor 0 (stdin) refers to a regular file
+/// rather than a pipe, device, or socket.
 #[cfg(unix)]
 fn is_stdin_regular_file() -> bool {
     use nix::sys::stat::fstat;
@@ -406,13 +357,15 @@ fn is_stdin_regular_file() -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// get_compressed_file_info (lz4io.c lines 2709–2842)
+// get_compressed_file_info
 // ---------------------------------------------------------------------------
 
-/// Walks all frames in `path` without decompressing them.
-/// Fills `cfinfo` with frame counts, file size, type summary, etc.
-/// If `display_now` is `true`, prints per-frame detail lines (verbose mode).
-/// Mirrors `LZ4IO_getCompressedFileInfo`.
+/// Walks every frame in `path` without decompressing any data.
+///
+/// Populates `cfinfo` with aggregate statistics: frame count, file size,
+/// frame-type and block-type consistency flags, and accumulated content size.
+/// When `display_now` is `true`, a detail row is printed for each frame
+/// (verbose `--list` mode).
 fn get_compressed_file_info(
     cfinfo: &mut CompressedFileInfo,
     path: &str,
@@ -480,16 +433,11 @@ fn get_compressed_file_info(
                 }
 
                 // Determine full header size from the first LZ4F_HEADER_SIZE_MIN bytes
-                let h_size_raw = unsafe {
-                    LZ4F_headerSize(
-                        buf.as_ptr() as *const libc::c_void,
-                        LZ4F_HEADER_SIZE_MIN,
-                    )
+                let h_size_raw = match lz4f_header_size(&buf[..LZ4F_HEADER_SIZE_MIN]) {
+                    Ok(n) => n,
+                    Err(_) => break 'frame_loop,
                 };
-                if unsafe { LZ4F_isError(h_size_raw) } != 0 {
-                    break 'frame_loop;
-                }
-                let mut h_size = h_size_raw; // will be updated by LZ4F_getFrameInfo
+                let mut h_size = h_size_raw;
 
                 // If the header is larger than what we've already read, fetch the rest.
                 // Condition mirrors the C code exactly (LZ4F_HEADER_SIZE_MIN + MAGICNUMBER_SIZE).
@@ -509,34 +457,26 @@ fn get_compressed_file_info(
                     }
                 }
 
-                // Create a decompression context and extract frame info
-                let mut dctx: *mut libc::c_void = std::ptr::null_mut();
-                let create_err =
-                    unsafe { LZ4F_createDecompressionContext(&mut dctx, LZ4F_VERSION) };
-                if unsafe { LZ4F_isError(create_err) } != 0 {
-                    break 'frame_loop;
-                }
-
-                // LZ4FFrameInfo must be zeroed before passing (C initialises with a literal)
-                let mut lz4_fi: LZ4FFrameInfo = unsafe { std::mem::zeroed() };
-                let get_info_ret = unsafe {
-                    LZ4F_getFrameInfo(dctx, &mut lz4_fi, buf.as_ptr(), &mut h_size)
+                // Create a native decompression context and extract frame info.
+                let mut dctx = match lz4f_create_decompression_context(LZ4F_VERSION) {
+                    Ok(ctx) => ctx,
+                    Err(_) => break 'frame_loop,
                 };
-                unsafe { LZ4F_freeDecompressionContext(dctx) };
-
-                if unsafe { LZ4F_isError(get_info_ret) } != 0 {
-                    break 'frame_loop;
-                }
-                frame_info.lz4_frame_info = lz4_fi;
+                let (native_fi, consumed, _hint) =
+                    match lz4f_get_frame_info(&mut dctx, &buf[..h_size]) {
+                        Ok(t) => t,
+                        Err(_) => break 'frame_loop,
+                    };
+                // dctx is dropped here; the decompression context owns no file state.
+                frame_info.lz4_frame_info = native_fi;
+                h_size = consumed; // update to actual bytes consumed by frame header
 
                 // Check block-type consistency across frames
                 if cfinfo.frame_count != 0 {
                     let prev = &cfinfo.frame_summary.lz4_frame_info;
                     let curr = &frame_info.lz4_frame_info;
-                    let size_changed = (prev.block_size_id.clone() as u32)
-                        != (curr.block_size_id.clone() as u32);
-                    let mode_changed = (prev.block_mode.clone() as u32)
-                        != (curr.block_mode.clone() as u32);
+                    let size_changed = prev.block_size_id != curr.block_size_id;
+                    let mode_changed = prev.block_mode != curr.block_mode;
                     if size_changed || mode_changed {
                         cfinfo.eq_block_types = false;
                     }
@@ -545,11 +485,11 @@ fn get_compressed_file_info(
                 // Skip block data; file cursor is now after the frame header
                 let block_checksum = matches!(
                     frame_info.lz4_frame_info.block_checksum_flag,
-                    BlockChecksum::BlockChecksumEnabled
+                    BlockChecksum::Enabled
                 );
                 let content_checksum = matches!(
                     frame_info.lz4_frame_info.content_checksum_flag,
-                    ContentChecksum::ChecksumEnabled
+                    ContentChecksum::Enabled
                 );
                 let total_blocks_size =
                     skip_blocks_data(&mut file, block_checksum, content_checksum);
@@ -577,8 +517,8 @@ fn get_compressed_file_info(
                         if display_now {
                             println!(" {:>20} {:>20} {:>9.2}%", compressed, uncompressed, ratio);
                         }
-                        // Accumulate total content size into frame_info (matches C comment:
-                        // "Now we've consumed frameInfo we can use it to store the total contentSize")
+                        // Accumulate running content-size total into frame_info before
+                        // moving it into cfinfo.frame_summary at the end of the loop.
                         frame_info.lz4_frame_info.content_size +=
                             cfinfo.frame_summary.lz4_frame_info.content_size;
                     } else {
@@ -702,16 +642,17 @@ fn get_compressed_file_info(
 }
 
 // ---------------------------------------------------------------------------
-// display_compressed_files_info (lz4io.c lines 2845–2897)
+// display_compressed_files_info
 // ---------------------------------------------------------------------------
 
-/// Prints a compressed-file summary table (the `--list` feature).
+/// Prints a compressed-file summary table for the `--list` flag.
 ///
-/// In non-verbose mode (`DISPLAY_LEVEL < 3`) prints a one-line summary per file.
-/// In verbose mode (`DISPLAY_LEVEL >= 3`) prints per-frame detail.
+/// In non-verbose mode (`DISPLAY_LEVEL < 3`) a single summary row is printed
+/// per file. In verbose mode (`DISPLAY_LEVEL >= 3`) per-frame detail rows are
+/// printed first, followed by the summary.
 ///
-/// Returns `Ok(())` on success; returns `Err` on the first problematic file.
-/// Equivalent to `int LZ4IO_displayCompressedFilesInfo(const char** inFileNames, size_t ifnIdx)`.
+/// Returns `Ok(())` if every file was processed successfully, or the first
+/// `Err` encountered (unrecognised format or non-regular file).
 pub fn display_compressed_files_info(paths: &[&str]) -> io::Result<()> {
     let display_level = DISPLAY_LEVEL.load(Ordering::Relaxed);
 

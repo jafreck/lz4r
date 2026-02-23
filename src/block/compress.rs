@@ -1,14 +1,30 @@
-//! LZ4 block compression functions.
+//! LZ4 block compression — one-shot and streaming APIs.
 //!
-//! Translated from lz4.c v1.10.0, lines 924–1524:
-//!   - `LZ4_compress_generic_validated` (core compression loop, ~410 lines)
-//!   - `LZ4_compress_generic` (null-input dispatcher)
-//!   - One-shot public API: `compress_fast_ext_state`, `compress_fast`,
-//!     `compress_default`, `compress_dest_size`
+//! Implements the core LZ4 block-format encoder, corresponding to the following
+//! functions in the reference implementation (`lz4.c` v1.10.0):
 //!
-//! All `goto _last_literals` are replaced with `break 'compress`.
-//! All `goto _next_match` are replaced with `continue 'next_match`.
-//! Capacity-exceeded errors return `Err(Lz4Error::OutputTooSmall)` rather than 0.
+//! | Rust function                        | C equivalent                          |
+//! |--------------------------------------|---------------------------------------|
+//! | [`compress_generic_validated`]       | `LZ4_compress_generic_validated`      |
+//! | [`compress_generic`]                 | `LZ4_compress_generic`                |
+//! | [`compress_fast_ext_state`]          | `LZ4_compress_fast_extState`          |
+//! | [`compress_fast`]                    | `LZ4_compress_fast`                   |
+//! | [`compress_default`]                 | `LZ4_compress_default`                |
+//! | [`compress_dest_size`]               | `LZ4_compress_destSize`               |
+//!
+//! The encoder uses a hash table to find back-references (matches) within a
+//! sliding window of up to [`LZ4_DISTANCE_MAX`] bytes.  Each compressed
+//! sequence consists of a literal run followed by a match (offset + length);
+//! bytes that cannot be matched are emitted as a final literal run.
+//!
+//! Capacity-exceeded conditions are signalled as [`Err(Lz4Error::OutputTooSmall)`]
+//! rather than returning 0, which makes error handling unambiguous at call sites.
+//!
+//! See the [LZ4 block format specification] for the authoritative description
+//! of the on-disk layout.
+//!
+//! [LZ4 block format specification]: https://github.com/lz4/lz4/blob/dev/doc/lz4_Block_format.md
+//! [`LZ4_DISTANCE_MAX`]: super::types::LZ4_DISTANCE_MAX
 
 use core::ptr;
 
@@ -66,8 +82,7 @@ pub fn compress_bound(input_size: i32) -> i32 {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Core compression — compress_generic_validated
-// (lz4.c:930–1338)
+// Core compression loop
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Inner core of LZ4 block compression.
@@ -105,7 +120,6 @@ pub unsafe fn compress_generic_validated(
     // `base` maps an absolute offset back to a source pointer:  source == base + startIndex
     let base: *const u8 = source.wrapping_sub(start_index as usize);
 
-    // Resolve dictionary fields
     let dict_ctx = cctx_ref.dict_ctx as *const StreamStateInternal;
     let dictionary: *const u8 = if dict_directive == DictDirective::UsingDictCtx && !dict_ctx.is_null() {
         (*dict_ctx).dictionary
@@ -124,6 +138,9 @@ pub unsafe fn compress_generic_validated(
         0
     };
 
+    // True when the match may lie in an external dictionary.  In that case
+    // the encoded back-reference offset cannot be derived by simple pointer
+    // subtraction and must be tracked explicitly in `offset`.
     let maybe_ext_mem = matches!(
         dict_directive,
         DictDirective::UsingExtDict | DictDirective::UsingDictCtx
@@ -188,11 +205,12 @@ pub unsafe fn compress_generic_validated(
     cctx_ref.table_type = table_type as u32;
 
     // ── Main compression body ────────────────────────────────────────────────
-    // `break 'compress` replaces every `goto _last_literals` in the C source.
+    // Breaking out of 'compress at any point skips to the trailing-literals
+    // epilogue that follows, which encodes any remaining unmatched bytes.
     'compress: {
         // Input too small to compress — emit everything as literals.
         if input_size < LZ4_MIN_LENGTH as i32 {
-            break 'compress; // → _last_literals
+            break 'compress;
         }
 
         // ── First byte ───────────────────────────────────────────────────────
@@ -234,7 +252,7 @@ pub unsafe fn compress_generic_validated(
                     search_match_nb = search_match_nb.wrapping_add(1);
 
                     if forward_ip > mflimit_plus_one {
-                        break 'compress; // → _last_literals
+                        break 'compress; // not enough room for a match + trailing literals
                     }
 
                     match_ptr = get_position_on_hash(
@@ -275,7 +293,7 @@ pub unsafe fn compress_generic_validated(
                     search_match_nb = search_match_nb.wrapping_add(1);
 
                     if forward_ip > mflimit_plus_one {
-                        break 'compress; // → _last_literals
+                        break 'compress; // not enough room for a match + trailing literals
                     }
 
                     // Resolve match pointer from match_index
@@ -373,7 +391,7 @@ pub unsafe fn compress_generic_validated(
                         > olimit
                 {
                     op = token; // undo token reservation (op--)
-                    break 'compress; // → _last_literals
+                    break 'compress; // output full — emit remaining bytes as trailing literals
                 }
 
                 // Write literal length into the high nibble of the token byte
@@ -396,15 +414,17 @@ pub unsafe fn compress_generic_validated(
                 op = op.add(lit_length);
             }
 
-            // ── _next_match: encode one match, then try immediate re-match ───
-            // `continue 'next_match` replaces `goto _next_match` in the C code.
+            // ── Encode match, then opportunistically test the next position ──
+            // If the byte immediately after the current match also matches,
+            // we stay in this inner loop, writing a zero-literal token and
+            // re-encoding without returning to the expensive find-match scan.
             'next_match: loop {
                 // fillOutput: bail if there's no room for offset + token + min trailing literals
                 if output_directive == LimitedOutputDirective::FillOutput
                     && op.add(2 + 1 + MFLIMIT - MINMATCH) > olimit
                 {
                     op = token; // rewind
-                    break 'compress; // → _last_literals
+                    break 'compress; // output full — emit remaining bytes as trailing literals
                 }
 
                 // ── Encode match offset ───────────────────────────────────────
@@ -500,7 +520,7 @@ pub unsafe fn compress_generic_validated(
 
                 // ── Test end of input chunk ───────────────────────────────────
                 if ip >= mflimit_plus_one {
-                    break 'compress; // → _last_literals (main loop exit)
+                    break 'compress; // too close to end for another match — emit trailing literals
                 }
 
                 // ── Fill hash table (ip-2) ────────────────────────────────────
@@ -542,7 +562,7 @@ pub unsafe fn compress_generic_validated(
                         *op = 0;
                         op = op.add(1);
                         match_ptr = m;
-                        continue 'next_match; // goto _next_match
+                        continue 'next_match;
                     }
                 } else {
                     // ByU32 / ByU16
@@ -608,7 +628,7 @@ pub unsafe fn compress_generic_validated(
                         if maybe_ext_mem {
                             offset = current.wrapping_sub(m_index);
                         }
-                        continue 'next_match; // goto _next_match
+                        continue 'next_match;
                     }
                 }
 
@@ -618,9 +638,12 @@ pub unsafe fn compress_generic_validated(
                 break 'next_match; // back to 'main (find-match)
             } // end 'next_match
         } // end 'main
-    } // end 'compress  (= _last_literals entry point)
+    } // end 'compress
 
-    // ── _last_literals: encode trailing bytes as literals ────────────────────
+    // ── Trailing-literals epilogue ───────────────────────────────────────────
+    // Encode all remaining bytes between `anchor` and `iend` as a literal run.
+    // Every LZ4 block ends here, whether we fell out of the loop normally or
+    // broke early because the output buffer was full (FillOutput mode).
     {
         let mut last_run = iend as usize - anchor as usize;
 
@@ -667,8 +690,7 @@ pub unsafe fn compress_generic_validated(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// compress_generic — null-input dispatcher
-// (lz4.c:1344–1379)
+// Null-input / zero-input dispatcher
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Dispatcher that handles `src == NULL` / `srcSize == 0` and then delegates
@@ -727,7 +749,6 @@ pub unsafe fn compress_generic(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // One-shot public API
-// (lz4.c:1382–1524)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Compress `src` into `dst` using an externally-provided (caller-managed) state.

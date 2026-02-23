@@ -1,13 +1,10 @@
-/*  threadpool.rs — Rust port of lz4-1.10.0/programs/threadpool.c
- *  Copyright (C) Yann Collet 2023 (original C)
- *  GPL v2 License
- *
- *  Migration note: the C implementation used pthreads (POSIX) or Windows IOCP.
- *  In Rust we replace both with `rayon::ThreadPool`, which provides equivalent
- *  fixed-size work-stealing parallelism without any unsafe OS primitives.
- *  The bounded-queue / blocking-submit semantics of `TPool_submitJob` are
- *  preserved via a `crossbeam_channel::bounded` semaphore channel.
- */
+//! Fixed-size work-stealing thread pool.
+//!
+//! Provides the same API as the `TPool` family of functions from the LZ4
+//! reference implementation (`threadpool.c`), backed by `rayon::ThreadPool`
+//! rather than pthreads / Windows IOCP.  Bounded-queue / blocking-submit
+//! semantics are preserved via a `crossbeam_channel::bounded` semaphore channel.
+//!
 
 use crossbeam_channel::{bounded, Receiver, Sender};
 use rayon::ThreadPool as RayonPool;

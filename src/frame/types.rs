@@ -1,17 +1,18 @@
-//! LZ4 Frame format types, constants, and error handling.
+//! Core types, constants, and error codes for the LZ4 frame format.
 //!
-//! Translated from lz4frame.c v1.10.0, lines 234–330 and related
-//! portions of lz4frame.h / lz4frame_static.h.
+//! This module defines the shared vocabulary used across LZ4 frame compression
+//! and decompression.  Every type corresponds to a struct, enum, or constant from
+//! `lz4frame.h` / `lz4frame.c` v1.10.0; the C equivalents are noted in each item's
+//! doc comment so behaviour can be cross-checked against the reference implementation.
 //!
 //! Covers:
-//! - Frame format constants (`LZ4F_BLOCKUNCOMPRESSED_FLAG`, `BHSize`, `BFSize`, etc.)
-//! - Public enums from lz4frame.h: `BlockSizeId`, `BlockMode`, `ContentChecksum`, etc.
-//! - `FrameInfo` / `Preferences` structs (lz4frame.h:175-198)
-//! - Internal enums: `BlockCompressMode` (`LZ4F_BlockCompressMode_e`),
-//!   `CtxType` (`LZ4F_CtxType_e`) — lz4frame.c:262-263
-//! - `Lz4FCCtx` struct (`LZ4F_cctx_s`) — lz4frame.c:265-283
-//! - `DecompressStage` enum (`dStage_t`) — lz4frame.c:1248-1258
-//! - `Lz4FError` enum with `Display` + `Error` impls (LZ4F_errorStrings[]) — lz4frame.c:286-316
+//! - Frame format constants ([`LZ4F_BLOCKUNCOMPRESSED_FLAG`], [`BH_SIZE`], [`BF_SIZE`], …)
+//! - Frame parameter enums: [`BlockSizeId`], [`BlockMode`], [`ContentChecksum`], …
+//! - [`FrameInfo`] / [`Preferences`] — user-facing frame header configuration
+//! - Internal enums: [`BlockCompressMode`], [`CtxType`]
+//! - [`Lz4FCCtx`] — streaming compression context state
+//! - [`DecompressStage`] — decompression state-machine stages
+//! - [`Lz4FError`] — error code enum with `Display` and `Error` impls
 
 use core::fmt;
 use crate::xxhash::Xxh32State;
@@ -165,8 +166,11 @@ pub struct CustomMem {
     pub opaque: *mut (),
 }
 
-// SAFETY: The C API treats CustomMem as a plain-data struct passed by value.
-// We only expose it in unsafe contexts through compression/decompression contexts.
+// SAFETY: `CustomMem` contains raw function pointers and an opaque `*mut ()` state
+// pointer.  The caller must guarantee that all pointers remain valid for the entire
+// lifetime of any compression or decompression context that holds this value.
+// Rust cannot verify those constraints statically, so `Send + Sync` are asserted
+// here under that contract — consistent with how the C API treats this as plain data.
 unsafe impl Send for CustomMem {}
 unsafe impl Sync for CustomMem {}
 
@@ -314,53 +318,53 @@ pub enum DecompressStage {
 /// omitted here; the equivalent boundary is encoded in `lz4f_is_error`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lz4FError {
-    /// Index 0 — no error.
+    /// Operation succeeded — not a true error condition.
     OkNoError,
-    /// Index 1
+    /// A non-specific, catch-all internal error.
     Generic,
-    /// Index 2
+    /// The requested `BlockSizeId` value is outside the valid range (4–7).
     MaxBlockSizeInvalid,
-    /// Index 3
+    /// `BlockMode` value is not one of `Linked` or `Independent`.
     BlockModeInvalid,
-    /// Index 4
+    /// One or more compression or frame parameters are out of range.
     ParameterInvalid,
-    /// Index 5
+    /// The requested compression level is not valid for the chosen codec.
     CompressionLevelInvalid,
-    /// Index 6
+    /// Frame magic number does not match any recognised LZ4 frame version.
     HeaderVersionWrong,
-    /// Index 7
+    /// Block checksum computed during decompression does not match the stored value.
     BlockChecksumInvalid,
-    /// Index 8
+    /// A reserved header flag bit is set; the frame is not decodable.
     ReservedFlagSet,
-    /// Index 9
+    /// Memory allocation for a compression or decompression context failed.
     AllocationFailed,
-    /// Index 10
+    /// Uncompressed source size exceeds the maximum supported by this build.
     SrcSizeTooLarge,
-    /// Index 11
+    /// Destination buffer is too small to hold even the smallest possible output.
     DstMaxSizeTooSmall,
-    /// Index 12
+    /// Fewer bytes than `MIN_FH_SIZE` (7) were available to read the frame header.
     FrameHeaderIncomplete,
-    /// Index 13
+    /// Frame magic number is neither a standard LZ4 frame nor a skippable frame.
     FrameTypeUnknown,
-    /// Index 14
+    /// The content-size field in the frame header does not match actual decoded output.
     FrameSizeWrong,
-    /// Index 15
+    /// Source pointer passed to a decompression call is `NULL` / invalid.
     SrcPtrWrong,
-    /// Index 16
+    /// LZ4 block decompression returned an error (malformed compressed data).
     DecompressionFailed,
-    /// Index 17
+    /// Header checksum byte does not match the computed XXH32 over the header fields.
     HeaderChecksumInvalid,
-    /// Index 18
+    /// End-of-frame content checksum does not match XXH32 of all decompressed output.
     ContentChecksumInvalid,
-    /// Index 19
+    /// `decompress_begin` was called on a context that already started decoding a frame.
     FrameDecodingAlreadyStarted,
-    /// Index 20
+    /// An operation requiring an initialised compression context was called before `compress_begin`.
     CompressionStateUninitialized,
-    /// Index 21
+    /// A required pointer parameter was `NULL`.
     ParameterNull,
-    /// Index 22
+    /// An I/O write operation on the underlying sink failed.
     IoWrite,
-    /// Index 23
+    /// An I/O read operation on the underlying source failed.
     IoRead,
 }
 

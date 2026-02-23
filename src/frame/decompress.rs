@@ -1,6 +1,20 @@
-//! LZ4 Frame decompression.
+//! LZ4 frame decompression: context lifecycle, header parsing, and the
+//! streaming block-state machine.
 //!
-//! Translated from lz4frame.c v1.10.0, lines 1244–2136.
+//! The central entry point is [`lz4f_decompress`], which accepts arbitrarily
+//! fragmented input and writes decoded bytes into a caller-supplied buffer.  It
+//! corresponds to `LZ4F_decompress` in the LZ4 reference implementation.
+//!
+//! The decoder fully supports:
+//! - Standard LZ4 frames (magic `0x184D2204`)
+//! - Skippable frames (magic range `0x184D2A50`–`0x184D2A5F`)
+//! - Linked (streaming) and independent block modes
+//! - Per-block and whole-frame XXH32 checksum verification
+//! - Predefined-dictionary decompression via [`lz4f_decompress_using_dict`]
+//!
+//! The implementation follows the LZ4 frame format spec and mirrors the
+//! `lz4frame.c` reference implementation (v1.10.0), but is pure Rust with no
+//! unsafe code outside of the deliberate raw-pointer zero-copy paths.
 
 use crate::block::decompress_api::decompress_safe_using_dict;
 use crate::frame::header::{lz4f_get_block_size, lz4f_header_checksum, read_le32, read_le64};
@@ -782,9 +796,17 @@ pub fn lz4f_decompress(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helper: process block header bytes (shared by GetBlockHeader + StoreBlockHeader)
+// Block-header dispatch (shared by GetBlockHeader + StoreBlockHeader)
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Parse a four-byte block header and advance `dctx` to the appropriate next
+/// stage.
+///
+/// A zero header signals the end-of-stream marker; a non-zero header encodes
+/// either a compressed block (MSB clear) or an uncompressed block (MSB set in
+/// `LZ4F_BLOCKUNCOMPRESSED_FLAG`).  `src_pos`, `next_hint`, and `do_another`
+/// are updated in place to control the outer state-machine loop in
+/// [`lz4f_decompress`].
 fn process_block_header(
     dctx: &mut Lz4FDCtx,
     bh: [u8; BH_SIZE],
@@ -826,9 +848,12 @@ fn process_block_header(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helper: decompress a block and write to dst or tmp_out_buffer
+// Block decompression and dispatch
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Decompress a validated LZ4 block and route the output to either the
+/// caller's destination buffer or the internal `tmp_out_buffer`.
+///
 /// Called from GetCBlock/StoreCBlock with the validated compressed block data.
 /// Decides whether to decode directly into dst (if space allows) or into
 /// `tmp_out_buffer`, sets `dctx.stage`, updates checksums and dict.
@@ -921,6 +946,10 @@ fn decompress_and_dispatch(
 // Content-checksum verification
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Verify the four-byte little-endian XXH32 content checksum stored at the
+/// end of a standard LZ4 frame.  Returns `Lz4FError::ContentChecksumInvalid`
+/// if the stored value does not match the running `dctx.xxh` digest.  A no-op
+/// when `dctx.skip_checksum` is `true`.
 fn verify_content_checksum(dctx: &mut Lz4FDCtx, crc4: [u8; 4]) -> Result<(), Lz4FError> {
     if !dctx.skip_checksum {
         let read_crc = u32::from_le_bytes(crc4);

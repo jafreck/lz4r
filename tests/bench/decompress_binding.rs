@@ -10,16 +10,13 @@
 //   - skip_checksums flag is accepted and does not panic or error
 
 use lz4::bench::decompress_binding::{DecFunctionF, FrameDecompressor, decompress_frame_block};
-use lz4_flex::frame::FrameEncoder;
 use std::io;
 
-// ── Helper ────────────────────────────────────────────────────────────────────
+// ── Helper ──────────────────────────────────────────────────────────────────────────────────
 
 /// Compress `data` to a valid LZ4 frame.
 fn compress_frame(data: &[u8]) -> Vec<u8> {
-    let mut enc = FrameEncoder::new(Vec::new());
-    io::copy(&mut io::Cursor::new(data), &mut enc).unwrap();
-    enc.finish().unwrap()
+    lz4::frame::compress_frame_to_vec(data)
 }
 
 // ── FrameDecompressor construction ───────────────────────────────────────────
@@ -175,11 +172,11 @@ fn invalid_frame_returns_error() {
 }
 
 #[test]
-#[ignore = "parity gap: lz4_flex FrameDecoder returns Ok(0) on empty input instead of Err; \
+#[ignore = "parity gap: native FrameDecompressor returns Ok(0) on empty input instead of Err; \
             C LZ4F_decompress returns an error code. Needs manual review."]
 fn empty_input_returns_error() {
     // An empty slice is not a valid LZ4 frame; C returns -1 (error).
-    // lz4_flex FrameDecoder treats empty input as success (0 bytes) rather than Err,
+    // The native FrameDecompressor treats empty input as success (0 bytes) rather than Err,
     // so this test documents the divergence and is marked #[ignore] (not a skip,
     // so it still shows up in --ignored runs for manual verification).
     let mut dec = FrameDecompressor::new();

@@ -1,6 +1,9 @@
-// lorem.rs — Lorem ipsum text generator
-// Translated from lz4-1.10.0/programs/lorem.c
-// Copyright (C) Yann Collet 2024 — GPL v2
+//! Deterministic lorem ipsum text generator.
+//!
+//! Produces pseudo-random Latin text from a fixed word pool, seeded by an
+//! arbitrary `u32`.  The same seed always produces the same output, making
+//! this suitable for repeatable compression benchmarks.
+//!
 
 use std::sync::OnceLock;
 
@@ -62,8 +65,8 @@ static K_WORDS: &[&str] = &[
     "laboris",      "aliquip",    "duis",        "aute",         "irure",
 ];
 
-/// Weight by word-length index (clamped to last entry for len >= 5).
-/// Mirrors: static const int kWeights[] = { 0, 8, 6, 4, 3, 2 };
+/// Sampling weight by word length (index clamped to the last entry for `len ≥ 5`).
+/// Shorter words are selected more often to mimic natural language frequency.
 static K_WEIGHTS: &[i32] = &[0, 8, 6, 4, 3, 2];
 
 // ---------------------------------------------------------------------------
@@ -84,13 +87,15 @@ fn get_pool() -> &'static WordPool {
         let nb_weights = K_WEIGHTS.len();
         let word_lens: Vec<usize> = K_WORDS.iter().map(|w| w.len()).collect();
 
-        // countFreqs equivalent
+        // Total number of distribution slots (sum of weights across all words).
         let distrib_count: usize = word_lens
             .iter()
             .map(|&len| K_WEIGHTS[len.min(nb_weights - 1)].max(0) as usize)
             .sum();
 
-        // init_word_distrib equivalent
+        // Build a weighted distribution table: each word appears as many times
+        // as its weight, so uniformly sampling an index yields length-weighted
+        // word selection.
         let mut distrib = Vec::with_capacity(distrib_count);
         for (w, &len) in word_lens.iter().enumerate() {
             let lmax = K_WEIGHTS[len.min(nb_weights - 1)].max(0) as usize;
@@ -115,7 +120,10 @@ struct GenCtx<'a> {
 }
 
 impl<'a> GenCtx<'a> {
-    /// LOREM_rand: custom 32-bit PRNG (XOR-rotation hash).
+    /// Custom 32-bit PRNG using multiply-then-XOR-rotate operations.
+    ///
+    /// Returns a pseudo-random value in `[0, range)`.  The state advances
+    /// with every call, so consecutive calls produce different values.
     #[inline]
     fn lorem_rand(&mut self, range: u32) -> u32 {
         const PRIME1: u32 = 2_654_435_761;
@@ -128,13 +136,13 @@ impl<'a> GenCtx<'a> {
         ((r as u64 * range as u64) >> 32) as u32
     }
 
-    /// about(target) = LOREM_rand(target) + LOREM_rand(target) + 1
+    /// Returns a value distributed approximately around `target` (minimum 1).
     #[inline]
     fn about(&mut self, target: u32) -> u32 {
         self.lorem_rand(target) + self.lorem_rand(target) + 1
     }
 
-    /// writeLastCharacters: fill remaining buffer with `. <spaces>\n`.
+    /// Fill remaining buffer space with `. <spaces>\n` and advance to `max_chars`.
     fn write_last_characters(&mut self) {
         debug_assert!(self.max_chars >= self.nb_chars);
         let last_chars = self.max_chars - self.nb_chars;
@@ -153,7 +161,8 @@ impl<'a> GenCtx<'a> {
         self.nb_chars = self.max_chars;
     }
 
-    /// generateLastWord: write a word then flush remaining characters.
+    /// Write `word` if it fits, then fill remaining space via
+    /// [`Self::write_last_characters`].
     fn generate_last_word(&mut self, word: &[u8], up_case: bool) {
         let word_len = word.len();
         if self.nb_chars + word_len + 2 > self.max_chars {
@@ -170,12 +179,14 @@ impl<'a> GenCtx<'a> {
         self.write_last_characters();
     }
 
-    /// generateWord: write a word + separator; falls back to generateLastWord
-    /// when near the end of the buffer.
+    /// Write one word followed by `sep` into the buffer.
     ///
-    /// The C version copies 16 bytes unconditionally (perf trick) but only
-    /// advances nb_chars by wordLen; copying exactly wordLen bytes is
-    /// behaviourally equivalent for the visible output.
+    /// Falls back to [`Self::generate_last_word`] when the remaining space is
+    /// too small for a full word plus two bytes of headroom.
+    ///
+    /// The reference C implementation unconditionally writes 16 bytes as a
+    /// micro-optimisation; this version copies exactly `word.len()` bytes,
+    /// which is behaviourally equivalent for the visible output.
     fn generate_word(&mut self, word: &[u8], sep: &[u8], up_case: bool) {
         let word_len = word.len();
         let sep_len = sep.len();
@@ -186,19 +197,20 @@ impl<'a> GenCtx<'a> {
             return;
         }
         let dst = self.nb_chars;
-        // Copy word (C copies 16 bytes; we copy exactly wordLen — same result)
+        // See doc comment: the reference C version writes 16 bytes; we write wordLen.
         self.buf[dst..dst + word_len].copy_from_slice(word);
         if up_case {
             self.buf[dst] = self.buf[dst].wrapping_sub(32);
         }
         self.nb_chars += word_len;
-        // C always memcpy(sep, 2) then advances by sepLen; we copy exactly sepLen
+        // Append separator (reference C always writes exactly 2 separator bytes).
         let sdst = self.nb_chars;
         self.buf[sdst..sdst + sep_len].copy_from_slice(sep);
         self.nb_chars += sep_len;
     }
 
-    /// generateSentence
+    /// Emit one sentence of `nb_words` words, randomly inserting commas and
+    /// optionally ending with `?` instead of `.`.
     fn generate_sentence(&mut self, nb_words: u32, pool: &WordPool) {
         let comma_pos = self.about(9);
         let comma2 = comma_pos + self.about(7);
@@ -219,7 +231,7 @@ impl<'a> GenCtx<'a> {
         }
     }
 
-    /// generateParagraph
+    /// Emit one paragraph of `nb_sentences` sentences followed by a blank line.
     fn generate_paragraph(&mut self, nb_sentences: u32, pool: &WordPool) {
         for _ in 0..nb_sentences {
             let words_per_sentence = self.about(11);
@@ -235,7 +247,8 @@ impl<'a> GenCtx<'a> {
         }
     }
 
-    /// generateFirstSentence: always starts with "Lorem ipsum dolor sit amet, ..."
+    /// Emit the canonical opening sentence ("Lorem ipsum dolor sit amet, …")
+    /// using the first 19 words of the fixed word pool.
     fn generate_first_sentence(&mut self, pool: &WordPool) {
         for i in 0..18usize {
             let sep: &[u8] = if i == 4 || i == 7 { b", " } else { b" " };

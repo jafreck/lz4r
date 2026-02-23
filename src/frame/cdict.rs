@@ -1,11 +1,12 @@
-//! LZ4F CDict — compressed dictionary support for frame compression.
+//! Pre-digested compression dictionaries for LZ4 frame encoding.
 //!
-//! Translated from lz4frame.c v1.10.0, lines 527–590.
+//! Provides [`Lz4FCDict`], a dictionary pre-loaded into both the fast (LZ4)
+//! and high-compression (LZ4HC) stream contexts so it can be reused across
+//! many independent frame-compression operations without repeating the
+//! dictionary initialisation cost on every call.
 //!
-//! # Coverage
-//! - [`Lz4FCDict`] struct (mirrors `LZ4F_CDict_s`)
-//! - [`Lz4FCDict::create`] (mirrors `LZ4F_createCDict` / `LZ4F_createCDict_advanced`)
-//! - `Drop` impl (mirrors `LZ4F_freeCDict`)
+//! Corresponds to `LZ4F_CDict` / `LZ4F_CDict_s` in `lz4frame.c` v1.10.0
+//! (lines 531–590).
 //!
 //! # Design notes
 //! The C `LZ4F_CDict_s` struct holds three heap-allocated members:
@@ -31,7 +32,8 @@ use crate::hc::api::{
 use crate::hc::types::LZ4HC_CLEVEL_DEFAULT;
 
 // Maximum dictionary size the frame format retains (64 KB).
-// Mirrors the `64 KB` trim in `LZ4F_createCDict_advanced` (lz4frame.c:546-549).
+// Dictionaries longer than this are trimmed to their last 64 KB before use;
+// see the trim logic in `LZ4F_createCDict_advanced` (lz4frame.c:546-549).
 const MAX_DICT_SIZE: usize = 64 * 1024;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -95,7 +97,7 @@ impl Lz4FCDict {
             dict
         };
 
-        // Copy dictionary content (lz4frame.c:558: memcpy).
+        // Copy the trimmed dictionary bytes into owned storage (lz4frame.c:558).
         let dict_content: Vec<u8> = trimmed.to_vec();
 
         // Initialise fast stream and load dictionary (lz4frame.c:559-560).
@@ -126,9 +128,10 @@ impl Lz4FCDict {
     }
 }
 
-// Drop is automatically derived: all three fields (Vec<u8>, Box<Lz4Stream>,
-// Box<Lz4StreamHc>) free their heap allocations when dropped, faithfully
-// mirroring `LZ4F_freeCDict` (lz4frame.c:581-588).
+// No explicit `Drop` impl is needed: the compiler inserts implicit drops for
+// all three fields (`Vec<u8>`, `Box<Lz4Stream>`, `Box<Lz4StreamHc>`), freeing
+// their heap allocations in declaration order — equivalent to `LZ4F_freeCDict`
+// (lz4frame.c:581-588).
 
 #[cfg(test)]
 mod tests {

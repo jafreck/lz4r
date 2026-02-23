@@ -1,6 +1,8 @@
 //! Public LZ4 block decompression API.
 //!
-//! Translated from lz4.c v1.10.0, lines 2448–2760:
+//! Implements the LZ4 block decompression functions from `lz4.c` v1.10.0
+//! (lines 2448–2760):
+//!
 //!   - One-shot decompression: `decompress_safe`, `decompress_safe_partial`
 //!   - Dictionary decompression: `decompress_safe_using_dict`,
 //!     `decompress_safe_partial_using_dict`, `decompress_safe_force_ext_dict`,
@@ -10,10 +12,10 @@
 //!   - Streaming decode context: [`Lz4StreamDecode`]
 //!   - Streaming API: `decompress_safe_continue`
 //!
-//! # Deprecated / omitted
+//! # Not implemented
 //!
-//! The `LZ4_decompress_fast*` family is **not** migrated — it is deprecated
-//! in C and inherently unsafe (no output-size bound).
+//! The `LZ4_decompress_fast*` family is **not** included — it is deprecated
+//! in the reference C implementation and inherently unsafe (no output-size bound).
 //!
 //! # Safety model
 //!

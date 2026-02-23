@@ -8,7 +8,7 @@
 //       lz4c    → lz4c_legacy flag
 
 use lz4::cli::init::detect_alias;
-use lz4::cli::op_mode::OpMode;
+use lz4::cli::op_mode::{OpMode, LZ4_CLEVEL_DEFAULT, LZ4_NBWORKERS_DEFAULT};
 use lz4::cli::constants::{set_display_level, set_lz4c_legacy_commands};
 use lz4::io::file_io::STDOUT_MARK;
 
@@ -272,33 +272,62 @@ fn unknown_binary_no_flags_set() {
 // CliInit struct — c_level and nb_workers initialised from environment
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Subprocess helper: called only when `LZ4_TEST_CLEVEL_WIRING` is set by the
+/// parent test. Calls `detect_alias` in a fresh process whose environment
+/// already has `LZ4_CLEVEL` set, so there is no race with other test threads.
 #[test]
-fn detect_alias_includes_c_level_from_env() {
-    // c_level comes from LZ4_CLEVEL env var (mirrors init_cLevel in lz4cli.c)
-    std::env::remove_var("LZ4_CLEVEL");
+fn subprocess_helper_clevel_wiring() {
+    if let Ok(expected) = std::env::var("LZ4_TEST_CLEVEL_WIRING") {
+        let expected: i32 = expected.parse().expect("LZ4_TEST_CLEVEL_WIRING must be numeric");
+        reset_globals();
+        let init = detect_alias("lz4");
+        assert_eq!(
+            init.c_level, expected,
+            "detect_alias must propagate LZ4_CLEVEL into c_level"
+        );
+    }
+}
+
+#[test]
+fn detect_alias_c_level_defaults_to_lz4_clevel_default() {
+    // detect_alias wires c_level from init_c_level(); verify the default value
+    // is propagated. Exhaustive parsing of LZ4_CLEVEL is covered by
+    // init_c_level_from tests in op_mode — no env mutation needed here.
     reset_globals();
     let init = detect_alias("lz4");
-    // Default is 1 (LZ4_CLEVEL_DEFAULT from lz4conf.h)
-    assert_eq!(init.c_level, 1);
+    // When LZ4_CLEVEL is not overridden, c_level must equal LZ4_CLEVEL_DEFAULT (1).
+    assert_eq!(init.c_level, LZ4_CLEVEL_DEFAULT);
 }
 
 #[test]
 fn detect_alias_c_level_reads_env_var() {
-    std::env::set_var("LZ4_CLEVEL", "9");
-    reset_globals();
-    let init = detect_alias("lz4");
-    std::env::remove_var("LZ4_CLEVEL");
-    assert_eq!(init.c_level, 9);
+    // Verifies the integration: detect_alias actually calls init_c_level() and
+    // wires the env-var result into c_level (not just hardcoding the default).
+    // Uses a subprocess so LZ4_CLEVEL=9 is isolated to a single-threaded child
+    // process with no risk of racing against other concurrent test threads.
+    let exe = std::env::current_exe().expect("could not find test executable");
+    let output = std::process::Command::new(&exe)
+        .args(["init::subprocess_helper_clevel_wiring", "--exact", "--nocapture"])
+        .env("LZ4_CLEVEL", "9")
+        .env("LZ4_TEST_CLEVEL_WIRING", "9")
+        .output()
+        .expect("failed to spawn subprocess");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "detect_alias must read LZ4_CLEVEL=9 into c_level"
+    );
 }
 
 #[test]
-fn detect_alias_includes_nb_workers_from_env() {
-    // nb_workers comes from LZ4_NBWORKERS env var (mirrors init_nbWorkers in lz4cli.c)
-    std::env::remove_var("LZ4_NBWORKERS");
+fn detect_alias_nb_workers_defaults_to_lz4_nbworkers_default() {
+    // detect_alias wires nb_workers from init_nb_workers(); verify the default value
+    // is propagated. Exhaustive parsing of LZ4_NBWORKERS is covered by
+    // init_nb_workers_from tests in op_mode — no env mutation needed here.
     reset_globals();
     let init = detect_alias("lz4");
-    // Default is 0 (LZ4_NBWORKERS_DEFAULT)
-    assert_eq!(init.nb_workers, 0);
+    // When LZ4_NBWORKERS is not overridden, nb_workers must equal LZ4_NBWORKERS_DEFAULT (0).
+    assert_eq!(init.nb_workers, LZ4_NBWORKERS_DEFAULT);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

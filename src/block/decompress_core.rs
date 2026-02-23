@@ -1,6 +1,6 @@
 //! LZ4 block decompression core engine.
 //!
-//! Translated from lz4.c v1.10.0, lines 1969–2447:
+//! Implements the algorithms in lz4.c v1.10.0 (lines 1969–2447):
 //!   - `read_variable_length` — bounded variable-length integer decoder
 //!   - `decompress_generic`   — the main, security-critical safe decompression loop
 //!
@@ -36,7 +36,8 @@ pub enum DecompressError {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Shorthand for the error path (mirrors C `goto _output_error`)
+// Returns the decompression error for all invalid-input, out-of-bounds, and
+// truncation conditions.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[inline(always)]
@@ -72,7 +73,7 @@ unsafe fn read_variable_length(ip: &mut *const u8, ilimit: *const u8, initial_ch
     let mut length: usize = 0;
 
     if initial_check && *ip >= ilimit {
-        // SAFETY: caller guarantees ip and ilimit are within the same buffer.
+        // No bytes remain before the limit before the first byte is read.
         return RVL_ERROR;
     }
 
@@ -83,7 +84,7 @@ unsafe fn read_variable_length(ip: &mut *const u8, ilimit: *const u8, initial_ch
     length += s;
 
     if *ip > ilimit {
-        // SAFETY: pointer comparison within the same buffer.
+        // The pointer advanced past the limit after consuming the first byte.
         return RVL_ERROR;
     }
 
@@ -346,6 +347,10 @@ pub unsafe fn decompress_generic(
                     ip = ip.add(lit_length);
                     op = cpy;
 
+                    // Break when output is full or input is exhausted (need at least
+                    // 2 bytes for a match offset).  The `!partial_decoding` guard is
+                    // always false in this branch; it mirrors the C source's unified
+                    // condition and is left for structural clarity.
                     if !partial_decoding || cpy == oend || ip >= iend.sub(2) {
                         break 'decode;
                     }

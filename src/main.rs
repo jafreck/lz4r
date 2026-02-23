@@ -1,28 +1,19 @@
-// src/main.rs — Rust port of lz4cli.c lines 704-887 (task-035: cli:dispatch-cleanup)
-//
-// Migrated from: lz4-src/lz4-1.10.0/programs/lz4cli.c
-// Task: task-035 — main — Post-Parse Dispatch and Cleanup (Chunk 7)
-//
-// Covers declaration #22 (final): post-parse validation, recursive directory
-// expansion, default filename resolution, operation dispatch, and cleanup.
-//
-// Migration decisions:
-//   - `goto _cleanup` pattern → early `return` / natural end-of-function drop
-//     (RAII).  `_cleanup` body (free, LZ4IO_freePreferences) is implicit drop.
-//   - `dynNameSpace` (calloc/free) → `Option<String>` (`output_filename_storage`)
-//     freed automatically when `run()` returns.
-//   - `UTIL_createFileList` (UTIL_HAS_CREATEFILELIST) → `lz4::util::create_file_list`
-//     gated behind the `recursive` Cargo feature.
-//   - `BMK_setNotificationLevel(displayLevel)` global side-effect →
-//     `bench_config.set_notification_level(display_level())` before dispatch.
-//   - `LZ4IO_setNbWorkers` → `prefs.set_nb_workers(nb_workers)` gated on
-//     `multithread` Cargo feature (mirrors `#if LZ4IO_MULTITHREAD`).
-//   - `IS_CONSOLE(stdin/stdout)` → `std::io::IsTerminal` trait (Rust 1.70+).
-//   - Exit codes: `std::process::exit(1)` on immediate-exit paths (matches C
-//     `exit(1)`); `run()` returns `i32` (the C `operationResult`).
-//   - `LZ4IO_setTestMode`, `LZ4IO_setDictionaryFilename` → methods on `Prefs`.
-//   - `DEFAULT_COMPRESSOR` → `lz4::io::compress_filename`
-//     `DEFAULT_DECOMPRESSOR` → `lz4::io::decompress_filename`
+//! Binary entry point for the `lz4` command-line tool.
+//!
+//! Handles post-parse validation, recursive directory expansion, automatic
+//! output filename resolution, and operation dispatch (compress, decompress,
+//! list, benchmark).  Corresponds to the post-argument-parsing section of
+//! `main()` in `lz4cli.c` (LZ4 v1.10.0, lines 704–893).
+//!
+//! # Control flow
+//!
+//! 1. [`detect_alias`] inspects `argv[0]` to infer an initial mode
+//!    (e.g. `unlz4` implies decompress).
+//! 2. [`parse_args`] processes all flags and builds a [`ParsedArgs`] value.
+//! 3. [`run`] dispatches to the appropriate I/O operation and returns an exit code.
+//!
+//! All heap allocations are released by Rust’s RAII; there is no explicit
+//! `free` or `goto _cleanup`.
 
 use std::io::IsTerminal;
 
@@ -42,8 +33,8 @@ use lz4::io::{
 
 /// Execute the operation selected by argument parsing.
 ///
-/// Equivalent to the post-argument-parsing section of C `main()` (lines 704–887)
-/// converted from `goto _cleanup` to natural Rust control flow with RAII cleanup.
+/// Corresponds to the post-argument-parsing section of C `main()` (lz4cli.c lines 704–887).
+/// All resources are released automatically via Rust's RAII drop.
 ///
 /// Returns the process exit code (0 = success, non-zero = error).
 fn run(args: ParsedArgs) -> i32 {
@@ -136,7 +127,7 @@ fn run(args: ParsedArgs) -> i32 {
         prefs.set_dictionary_filename(Some(dict.as_str()));
     }
 
-    // ── Bench mode dispatch (lz4cli.c lines 750–756; goto _cleanup) ────────
+    // ── Bench mode dispatch ──────────────────────────────────────────────────
     if op_mode == OpMode::Bench {
         bench_config.set_notification_level(display_level());
         let file_refs: Vec<&str> = in_file_names.iter().map(|s| s.as_str()).collect();
@@ -355,11 +346,11 @@ fn run(args: ParsedArgs) -> i32 {
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 fn main() {
-    // argv[0] → alias detection (lz4cli.c lines 412–439, task-033).
+    // argv[0] → alias detection (lz4cli.c lines 412–439).
     let argv0 = std::env::args().next().unwrap_or_else(|| "lz4".to_owned());
     let init = detect_alias(&argv0);
 
-    // Argument parsing loop (lz4cli.c lines 442–703, task-034).
+    // Argument parsing loop (lz4cli.c lines 442–703).
     let args = match parse_args(init) {
         Ok(a) => a,
         Err(e) => {
@@ -373,7 +364,7 @@ fn main() {
         std::process::exit(0);
     }
 
-    // Post-parse dispatch and cleanup (lz4cli.c lines 704–893, task-035).
+    // Post-parse dispatch and cleanup (lz4cli.c lines 704–893).
     let exit_code = run(args);
     std::process::exit(exit_code);
 }

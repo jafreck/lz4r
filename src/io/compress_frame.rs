@@ -1,29 +1,32 @@
-// compress_frame.rs — LZ4 frame compression resources and single-threaded (ST) compression.
-// Migrated from lz4io.c lines 978–1157 and 1366–1582 (declarations #10, #11, #13).
-//
-// Migration decisions:
-// - `cRess_t` (lz4io.c:978-988) → `CompressResources`. Thread-pool fields (tPool/wPool)
-//   are not stored here; they belong to the MT path (task-019).
-// - Dictionary loading: `LZ4IO_createDict` (circular-buffer last-64KB logic) →
-//   `load_dict_file`. Behaviour is preserved exactly, including the circular-buffer
-//   reassembly for files larger than 64 KB.
-// - `LZ4IO_createCDict` → `create_cdict` returning `Option<Box<Lz4FCDict>>`.
-// - `LZ4IO_compressFrameChunk` → `compress_frame_chunk`.
-//   The C function creates a temporary cctx, calls compressBegin (initialising state
-//   and writing a header that is then overwritten by compressUpdate), then returns only
-//   the compressUpdate output size.  This unusual pattern is preserved exactly.
-// - `LZ4IO_compressFilename_extRess_ST` → `compress_filename_st` (private).
-// - `LZ4IO_compressFilename_extRess` dispatcher always calls ST here;
-//   when the `multithread` feature is enabled, callers should dispatch to
-//   `io::compress_mt::compress_filename_mt` (task-019) for `nb_workers > 1`.
-// - `LZ4IO_compressFilename` → `compress_filename` (public).
-// - `LZ4IO_compressMultipleFilenames` → `compress_multiple_filenames` (public).
-// - `END_PROCESS(code, msg)` (exits the process) → `io::Error` + early return.
-// - Timing: `TIME_getTime` / `clock()` → `crate::timefn::get_time` /
-//   `libc::clock()`; `LZ4IO_finalTimeDisplay` → `crate::io::prefs::final_time_display`.
-// - Content-size flag: the source file is stat-ted before opening the reader
-//   (instead of using UTIL_getOpenFileSize on the FILE*).
-// - `FNSPACE` / realloc dst filename loop → `String::new()` with `format!`.
+//! Single-threaded LZ4 frame-format compression.
+//!
+//! This module implements frame-format compression for the `lz4r` I/O pipeline
+//! (see the [LZ4 frame format specification](https://github.com/lz4/lz4/blob/dev/doc/lz4_Frame_format.md)).
+//! It exposes:
+//!
+//! - [`CompressResources`] — a reusable bundle of I/O buffers, a streaming
+//!   compression context ([`Lz4FCCtx`]), and an optional pre-digested
+//!   compression dictionary ([`Lz4FCDict`]).  Allocated once and shared across
+//!   all files in a single invocation.
+//! - [`CfcParameters`] — lightweight parameter struct passed to
+//!   [`compress_frame_chunk`], the per-chunk primitive also consumed by the
+//!   multi-threaded path in `io::compress_mt`.
+//! - [`compress_filename`] — end-to-end single-file compression.
+//! - [`compress_multiple_filenames`] — batch compression with a shared suffix.
+//!
+//! # Single-threaded vs multi-threaded
+//!
+//! [`compress_filename_ext`] always calls the single-threaded path.  When the
+//! `multithread` feature is enabled and `nb_workers > 1`, callers should
+//! dispatch to `io::compress_mt::compress_filename_mt` instead.
+//!
+//! # Dictionary support
+//!
+//! A dictionary file is read once via `load_dict_file`, which uses a circular
+//! buffer to retain only the final 64 KB regardless of the file's total size
+//! (matching the 64-KB sliding-window limit of LZ4's block format).  The raw
+//! bytes are then digested into an [`Lz4FCDict`] for efficient reuse across
+//! all compressed files.
 
 use std::fs;
 use std::io::{self, Read, Write};
@@ -73,8 +76,8 @@ pub struct CompressStats {
 }
 
 // ---------------------------------------------------------------------------
-// CfcParameters — LZ4IO_CfcParameters (lz4io.c lines 1115-1118)
-// Parameters passed to compress_frame_chunk (used by the MT path, task-019).
+// CfcParameters — parameters for compress_frame_chunk.
+// Also consumed by the multi-threaded path in io::compress_mt.
 // ---------------------------------------------------------------------------
 
 /// Parameters for `compress_frame_chunk`, equivalent to `LZ4IO_CfcParameters`.
@@ -96,8 +99,8 @@ unsafe impl<'a> Sync for CfcParameters<'a> {}
 
 /// Compression resources allocated once and reused across multiple files.
 ///
-/// Equivalent to `cRess_t` in C. Thread-pool fields (`tPool`, `wPool`) are
-/// omitted here; they are managed in `io::compress_mt` (task-019).
+/// Equivalent to `cRess_t` in the reference implementation.  Thread-pool
+/// fields (`tPool`, `wPool`) are not stored here; they belong to `io::compress_mt`.
 pub struct CompressResources {
     /// Source I/O buffer (CHUNK_SIZE = 4 MB). Equivalent to `srcBuffer`.
     pub src_buffer: Vec<u8>,
@@ -579,9 +582,10 @@ fn compress_filename_st(
 // compress_filename_ext — LZ4IO_compressFilename_extRess (lz4io.c 1490-1501)
 // ---------------------------------------------------------------------------
 
-/// Dispatcher: calls ST path here; MT callers should use `io::compress_mt`
-/// directly (task-019) when `io_prefs.nb_workers > 1` and the `multithread`
-/// feature is enabled.
+/// Compresses a single file using external [`CompressResources`], dispatching
+/// to the single-threaded path.  When `io_prefs.nb_workers > 1` and the
+/// `multithread` feature is enabled, callers should use `io::compress_mt`
+/// instead.
 ///
 /// Equivalent to `LZ4IO_compressFilename_extRess`.
 pub fn compress_filename_ext(
@@ -592,9 +596,8 @@ pub fn compress_filename_ext(
     compression_level: i32,
     io_prefs: &Prefs,
 ) -> io::Result<()> {
-    // When LZ4IO_MULTITHREAD is defined in C, this calls the MT path.
-    // In Rust the MT path lives in io::compress_mt (task-019).
-    // Here we always fall through to ST, matching the !LZ4IO_MULTITHREAD branch.
+    // The multi-threaded path lives in io::compress_mt; this function always
+    // delegates to the single-threaded path.
     compress_filename_st(in_stream_size, ress, src_filename, dst_filename, compression_level, io_prefs)
 }
 
@@ -789,10 +792,8 @@ mod tests {
         assert!(compressed.len() >= 7, "must be at least header size");
         assert_eq!(&compressed[..4], &[0x04, 0x22, 0x4D, 0x18], "must start with LZ4 magic");
 
-        // Decompress with lz4_flex to verify round-trip.
-        let mut decompressed = Vec::new();
-        let mut decoder = lz4_flex::frame::FrameDecoder::new(compressed.as_slice());
-        std::io::copy(&mut decoder, &mut decompressed).expect("decompression must succeed");
+        // Decompress to verify round-trip.
+        let decompressed = crate::frame::decompress_frame_to_vec(&compressed).expect("decompression must succeed");
         assert_eq!(decompressed.as_slice(), original.as_slice());
     }
 
@@ -820,9 +821,7 @@ mod tests {
         .expect("compress_filename large should succeed");
 
         let compressed = std::fs::read(&dst_path).unwrap();
-        let mut decompressed = Vec::new();
-        let mut decoder = lz4_flex::frame::FrameDecoder::new(compressed.as_slice());
-        std::io::copy(&mut decoder, &mut decompressed).expect("decompression must succeed");
+        let decompressed = crate::frame::decompress_frame_to_vec(&compressed).expect("decompression must succeed");
         assert_eq!(decompressed, original);
     }
 

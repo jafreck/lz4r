@@ -1,13 +1,11 @@
 //! HC sequence encoder.
 //!
-//! Translated from lz4hc.c v1.10.0, lines 262–355:
-//!   `LZ4HC_encodeSequence` → `encode_sequence`
+//! Provides [`encode_sequence`], the low-level routine that serialises one
+//! complete LZ4 sequence — literal run, token byte, extended-length bytes,
+//! 16-bit back-reference offset, and match-length extension — into the output
+//! buffer.  Called once per match during HC compression.
 //!
-//! Writes one LZ4 sequence (literal run + match token + extended lengths +
-//! offset) into the output buffer. The C source uses `#define ip/op/anchor`
-//! macro aliases for triple-indirected pointer parameters; this Rust
-//! translation uses `&mut *const u8` / `&mut *mut u8` references instead,
-//! removing all macro aliasing.
+//! Corresponds to `LZ4HC_encodeSequence` in `lz4hc.c` (v1.10.0, lines 262–355).
 
 use crate::block::types::{
     wild_copy8, write_le16, LimitedOutputDirective, LZ4_DISTANCE_MAX, LASTLITERALS, MINMATCH,
@@ -80,8 +78,9 @@ pub unsafe fn encode_sequence(
     *op = (*op).add(1);
 
     // ── Output-limit check for literal run ───────────────────────────────
-    // Mirroring the C check:
-    //   op + (length/255) + length + (2 + 1 + LASTLITERALS) > oend
+    // Worst-case space needed before the match data:
+    //   ceil(length/255) extension bytes + length literal bytes
+    //   + 2-byte offset + 1 remaining token byte + LASTLITERALS reserved.
     if limit == LimitedOutputDirective::LimitedOutput {
         let needed = literal_length / 255 + literal_length + (2 + 1 + LASTLITERALS);
         if (*op).add(needed) > oend {
@@ -134,7 +133,8 @@ pub unsafe fn encode_sequence(
     if ml_remaining >= ML_MASK as usize {
         *token += ML_MASK as u8;
         ml_remaining -= ML_MASK as usize;
-        // Fast path: write pairs of 255 bytes (mirrors the C `>= 510` loop).
+        // Unrolled: emit two 255-byte extension bytes per iteration when
+        // the remaining length is ≥ 510, halving branch-and-advance overhead.
         while ml_remaining >= 510 {
             **op = 255u8;
             *(*op).add(1) = 255u8;

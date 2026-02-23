@@ -1,28 +1,28 @@
-//! HC strategy dispatcher and external dictionary handling.
+//! Strategy dispatcher and external-dictionary management for HC compression.
 //!
-//! Translated from lz4hc.c v1.10.0:
-//!   - Lines 1373–1415: `LZ4HC_compress_generic_internal`
-//!   - Lines 1419–1432: `LZ4HC_compress_generic_noDictCtx`
-//!   - Lines 1434–1439: `isStateCompatible`
-//!   - Lines 1441–1465: `LZ4HC_compress_generic_dictCtx`
-//!   - Lines 1467–1483: `LZ4HC_compress_generic`
-//!   - Lines 1660–1678: `LZ4HC_setExternalDict`
+//! This module is the central routing layer for HC (High Compression) in lz4r.
+//! Given a compression level it selects one of three strategies:
 //!
-//! ## Function Map
+//! | Strategy               | Delegates to            | Character                          |
+//! |------------------------|-------------------------|---------------------------------|
+//! | [`HcStrategy::Lz4Mid`] | [`lz4mid_compress`]     | Fast mid-level hash-chain pass  |
+//! | [`HcStrategy::Lz4Hc`]  | [`compress_hash_chain`] | Classic HC hash-chain search    |
+//! | [`HcStrategy::Lz4Opt`] | [`compress_optimal`]    | Optimal parser, highest ratio   |
 //!
-//! | C function                          | Rust                                  |
-//! |-------------------------------------|---------------------------------------|
-//! | `LZ4HC_compress_generic_internal`   | [`compress_generic_internal`]         |
-//! | `LZ4HC_compress_generic_noDictCtx`  | [`compress_generic_no_dict_ctx`]      |
-//! | `isStateCompatible`                 | [`HcCCtxInternal::is_compatible`]     |
-//! | `LZ4HC_compress_generic_dictCtx`    | [`compress_generic_dict_ctx`]         |
-//! | `LZ4HC_compress_generic`            | [`compress_generic`]                  |
-//! | `LZ4HC_setExternalDict`             | [`set_external_dict`]                 |
+//! It also manages the two dictionary modes supported by LZ4 HC:
 //!
-//! ## Strategy Dispatch
+//! - **External dictionary** ([`set_external_dict`]): rotates the current prefix
+//!   window into an ext-dict slot, retaining back-references up to 64 KB behind
+//!   the new block boundary.
+//! - **Dict-context** ([`compress_generic_dict_ctx`]): attaches a pre-built
+//!   [`HcCCtxInternal`] as a dictionary, automatically promoting it to ext-dict
+//!   mode when the position is zero and the source exceeds 4 KB.
 //!
-//! The C `if/else` chain on `cParam.strat` is replaced by a Rust
-//! `match c_param.strat { HcStrategy::Lz4Mid => …, Lz4Hc => …, Lz4Opt => … }`.
+//! The public entry point for most callers is [`compress_generic`], which routes
+//! to the no-dict or dict-ctx path based on `ctx.dict_ctx`.
+//!
+//! The algorithm here corresponds to `LZ4HC_compress_generic*` and
+//! `LZ4HC_setExternalDict` in `lz4hc.c` v1.10.0.
 
 use crate::block::compress::LZ4_MAX_INPUT_SIZE;
 use crate::block::types::LimitedOutputDirective;
@@ -33,22 +33,21 @@ use super::types::{
     DictCtxDirective, HcCCtxInternal, HcStrategy, LZ4HC_CLEVEL_MAX, get_clevel_params,
 };
 
-/// 64 KB boundary used in dict-ctx position check.
+/// Maximum back-reference distance at which a dict-ctx is still usable.
+/// Beyond 64 KB the LZ4 format cannot encode the offset, so the dict is discarded.
 const KB_64: usize = 64 * 1024;
 
-/// Minimum source size (> 4 KB) before promoting dict-ctx → ext-dict.
+/// Minimum source size required before promoting a dict-ctx to ext-dict mode.
+/// Small inputs are not worth the overhead of a full context copy.
 const KB_4: usize = 4 * 1024;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// isStateCompatible  (lz4hc.c:1434–1439)
-// ─────────────────────────────────────────────────────────────────────────────
-
 impl HcCCtxInternal {
-    /// Returns `true` if `self` and `other` belong to the same strategy
-    /// category (both lz4mid, or both non-lz4mid).
+    /// Returns `true` if `self` and `other` use the same strategy family
+    /// (both lz4mid, or both non-lz4mid), meaning their internal hash tables
+    /// are laid out compatibly for a dict-ctx copy.
     ///
-    /// Equivalent to `isStateCompatible`.  The C expression
-    /// `!(isMid1 ^ isMid2)` is equivalent to `isMid1 == isMid2`.
+    /// Derived from the reference condition `!(isMid1 ^ isMid2)`, which is
+    /// logically equivalent to `isMid1 == isMid2`.
     #[inline]
     pub fn is_compatible(&self, other: &Self) -> bool {
         let is_mid_self  = get_clevel_params(self.compression_level as i32).strat == HcStrategy::Lz4Mid;
@@ -57,29 +56,31 @@ impl HcCCtxInternal {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// LZ4HC_setExternalDict  (lz4hc.c:1660–1678)
-// ─────────────────────────────────────────────────────────────────────────────
-
 /// Rotate the current prefix window into the external-dictionary slot and
 /// begin a fresh prefix at `new_block`.
 ///
-/// If the prefix is long enough (≥ 4 bytes) and the strategy is not lz4mid,
-/// the last few prefix positions are inserted into the hash/chain tables so
-/// they remain referenceable from the new block.
+/// LZ4 HC supports one ext-dict segment at a time.  Calling this function
+/// discards any previously attached dict-ctx and slides the current prefix
+/// into the ext-dict slot so that the next block can reference bytes from the
+/// previous one as long as the offset stays within 64 KB.
 ///
-/// Equivalent to `LZ4HC_setExternalDict`.
+/// If the existing prefix is ≥ 4 bytes long and the strategy is not lz4mid,
+/// the last few prefix positions are inserted into the hash/chain tables
+/// before sliding — this ensures those positions remain referenceable from
+/// the new block without a separate `insert` call there.
+///
+/// Corresponds to `LZ4HC_setExternalDict` in `lz4hc.c`.
 ///
 /// # Safety
 /// - `ctx` must be a valid, exclusively-accessible `HcCCtxInternal`.
 /// - `new_block` must point to the start of the next input block and remain
 ///   valid for the lifetime of all subsequent operations on `ctx`.
 pub unsafe fn set_external_dict(ctx: &mut HcCCtxInternal, new_block: *const u8) {
-    // Reference the last few prefix bytes into the hash table (if applicable).
+    // If the prefix has at least 4 bytes and we are not in lz4mid mode, insert
+    // the last 3 prefix positions so they stay reachable after the window slides.
     if ctx.end >= ctx.prefix_start.add(4)
         && get_clevel_params(ctx.compression_level as i32).strat != HcStrategy::Lz4Mid
     {
-        // `LZ4HC_Insert(ctxPtr, ctxPtr->end - 3)`
         insert(ctx, ctx.end.sub(3));
     }
 
@@ -92,30 +93,28 @@ pub unsafe fn set_external_dict(ctx: &mut HcCCtxInternal, new_block: *const u8) 
     );
     ctx.prefix_start    = new_block;
     ctx.end             = new_block;
-    ctx.next_to_update  = ctx.dict_limit; // match referencing resumes here
+    ctx.next_to_update  = ctx.dict_limit; // resume match-referencing at the new dict boundary
 
-    // Cannot hold both an ext-dict and a dict-ctx simultaneously.
+    // An ext-dict and a dict-ctx are mutually exclusive in LZ4 HC.
     ctx.dict_ctx = core::ptr::null();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// LZ4HC_compress_generic_internal  (lz4hc.c:1373–1415)
-// ─────────────────────────────────────────────────────────────────────────────
-
 /// Core strategy dispatcher.
 ///
-/// Validates the inputs, advances `ctx.end`, selects the compression strategy
-/// from the level table, and delegates to the appropriate compressor:
+/// Validates inputs, advances `ctx.end` to include the new source block,
+/// resolves the compression parameters for `c_level`, and delegates to the
+/// appropriate compressor:
 ///
-/// | `cParam.strat`      | Delegates to             |
-/// |---------------------|--------------------------|
-/// | `HcStrategy::Lz4Mid`  | [`lz4mid_compress`]    |
-/// | `HcStrategy::Lz4Hc`   | [`compress_hash_chain`]|
-/// | `HcStrategy::Lz4Opt`  | [`compress_optimal`]   |
+/// | `c_param.strat`        | Delegates to             |
+/// |------------------------|---------------------------|
+/// | `HcStrategy::Lz4Mid`  | [`lz4mid_compress`]      |
+/// | `HcStrategy::Lz4Hc`   | [`compress_hash_chain`]  |
+/// | `HcStrategy::Lz4Opt`  | [`compress_optimal`]     |
 ///
 /// Returns the number of bytes written to `dst`, or `0` on failure.
+/// On failure the context is marked dirty so callers can detect corruption.
 ///
-/// Equivalent to `LZ4HC_compress_generic_internal`.
+/// Corresponds to `LZ4HC_compress_generic_internal` in `lz4hc.c`.
 ///
 /// # Safety
 /// - `src` must be readable for `*src_size_ptr` bytes.
@@ -200,16 +199,12 @@ pub unsafe fn compress_generic_internal(
     result
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// LZ4HC_compress_generic_noDictCtx  (lz4hc.c:1419–1432)
-// ─────────────────────────────────────────────────────────────────────────────
-
 /// Compress without a dictionary context.
 ///
-/// Asserts that `ctx.dict_ctx` is null, then delegates to
-/// [`compress_generic_internal`] with `DictCtxDirective::NoDictCtx`.
+/// Asserts (in debug builds) that `ctx.dict_ctx` is null, then delegates to
+/// [`compress_generic_internal`] with [`DictCtxDirective::NoDictCtx`].
 ///
-/// Equivalent to `LZ4HC_compress_generic_noDictCtx`.
+/// Corresponds to `LZ4HC_compress_generic_noDictCtx` in `lz4hc.c`.
 ///
 /// # Safety
 /// Same as [`compress_generic_internal`].  `ctx.dict_ctx` must be null.
@@ -238,23 +233,21 @@ pub unsafe fn compress_generic_no_dict_ctx(
     )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// LZ4HC_compress_generic_dictCtx  (lz4hc.c:1441–1465)
-// ─────────────────────────────────────────────────────────────────────────────
-
 /// Compress with an attached dictionary context.
 ///
-/// Three cases (mirroring C exactly):
+/// Selects one of three paths based on the current position within the
+/// combined prefix+dict history:
 ///
-/// 1. **position ≥ 64 KB** — the dictionary window is too far back; discard
-///    the dict-ctx and compress without it.
-/// 2. **position == 0 and srcSize > 4 KB and states are compatible** — no
-///    history yet and the source is large: copy the dict-ctx into `ctx`,
-///    call [`set_external_dict`] to switch to ext-dict mode, and compress.
+/// 1. **position ≥ 64 KB** — the dictionary window is beyond the maximum
+///    encodable offset; discard the dict-ctx and compress without it.
+/// 2. **position == 0, `src_size` > 4 KB, and strategies are compatible** —
+///    the context has no history yet and the source is large enough to benefit:
+///    copy the dict-ctx state into `ctx`, promote it to ext-dict mode via
+///    [`set_external_dict`], and compress using the standard no-dict path.
 /// 3. **Otherwise** — use the attached dict-ctx directly via
-///    `DictCtxDirective::UsingDictCtxHc`.
+///    [`DictCtxDirective::UsingDictCtxHc`].
 ///
-/// Equivalent to `LZ4HC_compress_generic_dictCtx`.
+/// Corresponds to `LZ4HC_compress_generic_dictCtx` in `lz4hc.c`.
 ///
 /// # Safety
 /// Same as [`compress_generic_internal`].  `ctx.dict_ctx` must be non-null.
@@ -284,8 +277,9 @@ pub unsafe fn compress_generic_dict_ctx(
         && *src_size_ptr > KB_4 as i32
         && ctx.is_compatible(&*ctx.dict_ctx)
     {
-        // No history yet and source large enough: promote dict-ctx → ext-dict.
-        // C: `LZ4_memcpy(ctx, ctx->dictCtx, sizeof(LZ4HC_CCtx_internal))`
+        // No history yet and source is large enough to justify the promotion:
+        // overwrite ctx with the full dict-ctx state (inheriting its hash tables),
+        // then slide it into ext-dict position so the new block can reference it.
         let dict_ctx_ptr = ctx.dict_ctx;
         core::ptr::copy_nonoverlapping(dict_ctx_ptr, ctx as *mut HcCCtxInternal, 1);
         set_external_dict(ctx, src);
@@ -306,16 +300,14 @@ pub unsafe fn compress_generic_dict_ctx(
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// LZ4HC_compress_generic  (lz4hc.c:1467–1483)
-// ─────────────────────────────────────────────────────────────────────────────
-
 /// Top-level HC compression entry point.
 ///
-/// Routes to [`compress_generic_no_dict_ctx`] or [`compress_generic_dict_ctx`]
-/// depending on whether `ctx.dict_ctx` is set.
+/// Routes to [`compress_generic_no_dict_ctx`] when `ctx.dict_ctx` is null,
+/// or to [`compress_generic_dict_ctx`] when a dictionary context is attached.
+/// All callers that do not manage dictionary modes directly should use this
+/// function rather than the lower-level variants.
 ///
-/// Equivalent to `LZ4HC_compress_generic`.
+/// Corresponds to `LZ4HC_compress_generic` in `lz4hc.c`.
 ///
 /// # Safety
 /// Same as [`compress_generic_internal`].

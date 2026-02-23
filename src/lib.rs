@@ -1,4 +1,23 @@
-// lz4-programs — Rust port of lz4-1.10.0/programs
+//! `lz4r` — a pure-Rust implementation of the LZ4 compression algorithms and
+//! command-line programs (equivalent to the `programs/` tree of LZ4 v1.10.0).
+//!
+//! # Crate layout
+//!
+//! | Module       | Contents |
+//! |--------------|----------|
+//! | `block`      | Low-level block compression and decompression (LZ4 spec §§ 1–3). |
+//! | `frame`      | LZ4 Frame format (magic number, header, content checksum). |
+//! | `hc`         | High-compression (`lz4hc`) encoder variants. |
+//! | `io`         | File-level I/O: compress / decompress single and multiple files. |
+//! | `file`       | Streaming `Read`/`Write` wrappers over the Frame API. |
+//! | `cli`        | Command-line argument parsing and dispatch. |
+//! | `bench`      | Throughput benchmarking infrastructure. |
+//! | `xxhash`     | XXH32 content-checksum wrapper. |
+//! | `lorem`      | Deterministic lorem ipsum generator (benchmark corpus). |
+//! | `timefn`     | Monotonic high-resolution timer. |
+//! | `threadpool` | Fixed-size work-stealing thread pool. |
+//! | `config`     | Compile-time configuration constants. |
+//! | `util`       | File enumeration and sizing utilities. |
 
 pub mod lorem;
 pub mod timefn;
@@ -21,8 +40,8 @@ pub const LZ4_VERSION_RELEASE: u32 = 0;
 pub const LZ4_VERSION_NUMBER: u32 =
     LZ4_VERSION_MAJOR * 100 * 100 + LZ4_VERSION_MINOR * 100 + LZ4_VERSION_RELEASE;
 pub const LZ4_VERSION_STRING: &str = "1.10.0";
-/// Git commit string injected at build time (mirrors bench.c lines 61–64).
-/// Defaults to `""` when `LZ4_GIT_COMMIT` is not set, matching the C default.
+/// Git commit hash string injected at build time via the `LZ4_GIT_COMMIT`
+/// environment variable.  Empty when the variable is not set.
 pub const LZ4_GIT_COMMIT_STRING: &str = "";
 
 /// Returns the runtime version number (equivalent to LZ4_versionNumber()).

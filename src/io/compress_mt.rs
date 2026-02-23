@@ -1,35 +1,28 @@
-// compress_mt.rs — LZ4 frame multi-threaded (MT) compression pipeline.
-// Migrated from lz4io.c lines 455–565, 568–760, 1158–1365 (declarations #7, #8, #12).
-//
-// Migration decisions:
-// - `WriteRegister` (C: sorted dynamic array, qsort-based) →
-//   `WriteRegister` Rust struct wrapping a `BTreeMap<u64, Vec<u8>>` + `Mutex`.
-//   A BTreeMap keeps pending chunks in chunk-ID order automatically, avoiding
-//   the need for qsort. The Mutex makes it safe to share across rayon threads.
-// - MT structs `CompressJobDesc` / `ReadTracker` are not needed as named types;
-//   closures capture all necessary state.
-// - `LZ4IO_compressFilename_extRess_MT` →
-//   `compress_filename_mt(in_stream_size, ress, src, dst, level, prefs)`.
-//   The function signature mirrors the ST counterpart in compress_frame.rs.
-// - Chunk reading is done sequentially (only one thread can read a FILE).
-//   Chunks are processed in bounded batches of nb_workers at a time:
-//   read up to nb_workers chunks → compress in parallel with rayon → write in order → repeat.
-//   This keeps memory bounded to O(nb_workers * CHUNK_SIZE), matching C's O(nb_workers)
-//   buffer count from the TPool pipeline.
-// - Linked-block mode (blockMode == Linked): each chunk receives the last
-//   64 KB of the previous chunk as its prefix (copied before batch dispatch).
-//   Chunks within a batch are independent after prefix extraction, so full
-//   parallelism is achieved for independent blocks; linked blocks get parallel
-//   compression with pre-extracted, independently-owned prefix slices.
-// - Content checksum: computed externally with XXH32 over raw input data
-//   (matching the C code which resets contentChecksumFlag to LZ4F_noContentChecksum
-//   after compressBegin to avoid double-accounting). Written as 4 LE bytes after
-//   the 4-byte end-of-data marker.
-// - Single-block files (<= CHUNK_SIZE): compressed with `lz4f_compress_frame_using_cdict`
-//   in a single pass (same as the C single-block path, lines 1199–1211).
-// - `END_PROCESS(code, msg)` (process exit in C) → `io::Error` + early return.
-// - File stat propagation uses `crate::util::set_file_stat`.
-// - `DISPLAYUPDATE` / `DISPLAYLEVEL` → `crate::io::prefs::display_level`.
+//! Multi-threaded (MT) frame-format compression pipeline.
+//!
+//! This module implements parallel LZ4 frame compression using a
+//! read-one-thread / compress-many-threads / write-one-thread strategy:
+//!
+//! 1. The input file is read sequentially in 4 MB chunks.
+//! 2. Each batch of up to `nb_workers` chunks is compressed concurrently
+//!    via [`rayon`], keeping peak memory proportional to
+//!    `nb_workers × CHUNK_SIZE` rather than the full file size.
+//! 3. Compressed chunks are written to the output file in their original
+//!    order, enforced by [`WriteRegister`].
+//!
+//! **Linked-block mode**: when `BlockMode::Linked` is active, the last
+//! 64 KB of each chunk is extracted before the batch is dispatched so that
+//! every compression worker owns its prefix slice independently, enabling
+//! full parallelism without shared mutable state.
+//!
+//! **Content checksum**: the XXH32 digest is computed over the raw input
+//! bytes and appended as a 4-byte little-endian value after the end-of-data
+//! marker.  The frame header advertises checksum presence; the LZ4F context's
+//! internal checksum tracking is disabled after the header is written to
+//! avoid double-accounting.
+//!
+//! Files smaller than `CHUNK_SIZE` take a fast single-block path and skip
+//! the batch machinery entirely.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -56,10 +49,16 @@ use crate::xxhash::Xxh32State;
 // Constants
 // ---------------------------------------------------------------------------
 
-/// Chunk size for MT compression (4 MB), matching C `const size_t chunkSize = 4 MB`.
+/// Chunk size for each MT compression unit (4 MB).
+///
+/// Large enough to give rayon workers substantial independent work while
+/// keeping per-worker memory overhead bounded.
 const CHUNK_SIZE: usize = 4 * MB;
 
-/// Prefix size for linked-block mode (64 KB). Equivalent to `64 KB` in lz4io.c.
+/// Prefix carried forward in linked-block mode (last 64 KB of each chunk).
+///
+/// Matches the LZ4 spec's maximum back-reference distance so a linked block
+/// can reference any byte written by its predecessor.
 const PREFIX_SIZE: usize = 64 * KB;
 
 // ---------------------------------------------------------------------------
@@ -89,20 +88,19 @@ impl SyncCDictPtr {
 }
 
 // ---------------------------------------------------------------------------
-// WriteRegister — lz4io.c lines 461–565 (declarations #7)
+// WriteRegister — ordered write buffer for parallel-compressed chunks
 //
-// In C: a flat array of `BufferDesc` sorted by chunk rank, extended with realloc.
-// In Rust: a `BTreeMap<chunk_id, compressed_bytes>` wrapped in a Mutex so that
-// multiple rayon threads can insert pending chunks concurrently.
-//
-// The C `WR_checkWriteOrder` drains sequentially as chunks arrive; in Rust the
-// drain happens after all compressions are done (still in-order via BTreeMap).
+// Compressed chunks arrive from rayon workers in arbitrary order.  This
+// structure buffers them — keyed by their sequential chunk ID — and drains
+// them to the writer in ascending ID order.  The BTreeMap provides O(log n)
+// insertion and O(1) in-order access without a secondary sort pass.
 // ---------------------------------------------------------------------------
 
-/// Stores out-of-order compressed chunks until the writer can drain them in sequence.
+/// Stores out-of-order compressed chunks and drains them to the writer in sequence.
 ///
-/// Equivalent to `WriteRegister` in C, but implemented with a `BTreeMap` instead
-/// of `qsort`-managed arrays.
+/// Rayon may complete chunks in any order; this structure buffers each chunk
+/// under its sequential ID and emits them strictly in ascending order, ensuring
+/// the output stream is well-formed regardless of scheduling.
 struct WriteRegister {
     /// Next chunk ID expected to be written.
     expected_rank: u64,
@@ -116,7 +114,7 @@ struct WriteRegister {
 }
 
 impl WriteRegister {
-    /// Equivalent to `WR_init(blockSize)`.
+    /// Creates a new register expecting chunk ID 0 first.
     fn new(block_size: usize) -> Self {
         WriteRegister {
             expected_rank: 0,
@@ -126,15 +124,19 @@ impl WriteRegister {
         }
     }
 
-    /// Insert a compressed chunk. Equivalent to `WR_addBufDesc`.
+    /// Stores a compressed chunk under its sequential chunk ID.
+    ///
+    /// Thread-safe; may be called from multiple rayon workers concurrently.
     fn insert(&self, chunk_id: u64, data: Vec<u8>) {
         self.pending.lock().unwrap().insert(chunk_id, data);
     }
 
-    /// Drain all pending chunks in order, calling `write_fn` for each.
+    /// Drains all pending chunks whose IDs form an unbroken sequence starting
+    /// at `expected_rank`, calling `write_fn` for each in ascending order.
     ///
-    /// Equivalent to `WR_getBufID` + `WR_removeBuffID` + `LZ4IO_writeBuffer`
-    /// called from `LZ4IO_checkWriteOrder`.
+    /// Stops as soon as a gap is encountered (the missing chunk has not yet
+    /// been inserted).  Advances `expected_rank` and `total_csize` for every
+    /// chunk successfully written.
     fn drain_in_order(
         &mut self,
         write_fn: &mut dyn FnMut(&[u8]) -> io::Result<()>,
@@ -175,8 +177,11 @@ impl WriteRegister {
 }
 
 // ---------------------------------------------------------------------------
-// read_to_capacity — fills buf fully from reader, equivalent to fread.
-// (local copy — same as in compress_frame.rs, repeated here to avoid coupling)
+// read_to_capacity — fills `buf` as fully as possible from `reader`.
+//
+// Retries on `Interrupted` and stops at EOF or when the buffer is full.
+// Returns the number of bytes actually read, which may be less than
+// `buf.len()` only at the end of the stream.
 // ---------------------------------------------------------------------------
 
 fn read_to_capacity(reader: &mut dyn Read, buf: &mut [u8]) -> io::Result<usize> {
@@ -193,7 +198,7 @@ fn read_to_capacity(reader: &mut dyn Read, buf: &mut [u8]) -> io::Result<usize> 
 }
 
 // ---------------------------------------------------------------------------
-// copy_file_stat — UTIL_getFileStat + UTIL_setFileStat (lz4io.c 1337–1343)
+// copy_file_stat — copies mtime and, on Unix, uid/gid/mode from src to dst.
 // ---------------------------------------------------------------------------
 
 fn copy_file_stat(src: &str, dst: &str) -> io::Result<()> {
@@ -225,16 +230,15 @@ struct Chunk {
 }
 
 // ---------------------------------------------------------------------------
-// compress_filename_mt — LZ4IO_compressFilename_extRess_MT (lz4io.c 1158–1358)
+// compress_filename_mt — parallel frame-format compression of a single file
 // ---------------------------------------------------------------------------
 
-/// Multi-threaded frame-format compression of one file.
+/// Compresses `src_filename` into `dst_filename` using `io_prefs.nb_workers`
+/// parallel compression threads.
 ///
-/// Reads from `src_filename`, compresses with `io_prefs.nb_workers` threads,
-/// writes to `dst_filename`.  Updates `*in_stream_size` with the total number
-/// of uncompressed bytes processed.
-///
-/// Equivalent to `static int LZ4IO_compressFilename_extRess_MT(...)`.
+/// The output is a valid LZ4 frame that any conforming LZ4 decompressor can
+/// read.  `*in_stream_size` is set to the total number of uncompressed bytes
+/// consumed from the source.
 pub fn compress_filename_mt(
     in_stream_size: &mut u64,
     ress: &mut CompressResources,
@@ -243,7 +247,6 @@ pub fn compress_filename_mt(
     compression_level: i32,
     io_prefs: &Prefs,
 ) -> io::Result<()> {
-    // ── Open files (lz4io.c 1176–1179) ──────────────────────────────────────
     let mut src_reader = open_src_file(src_filename)?;
     let dst_file = open_dst_file(dst_filename, io_prefs).map_err(|e| {
         // close src_reader implicitly on drop
@@ -252,7 +255,7 @@ pub fn compress_filename_mt(
     let dst_is_stdout = dst_file.is_stdout;
     let mut dst_writer: Box<dyn Write> = Box::new(dst_file);
 
-    // ── Build per-call preferences (lz4io.c 1182–1189) ──────────────────────
+    // Build per-call preferences: inherit global settings, then apply call-site overrides.
     let mut prefs = ress.prepared_prefs;
     prefs.compression_level = compression_level;
     if io_prefs.content_size_flag {
@@ -269,7 +272,7 @@ pub fn compress_filename_mt(
 
     let cdict_ptr = ress.cdict_ptr();
 
-    // ── Read first chunk (lz4io.c 1193–1196) ────────────────────────────────
+    // Read the first chunk to decide whether the single-block or multi-block path applies.
     let mut first_buf = vec![0u8; CHUNK_SIZE];
     let read_size = read_to_capacity(&mut *src_reader, &mut first_buf)?;
     first_buf.truncate(read_size);
@@ -277,7 +280,8 @@ pub fn compress_filename_mt(
     let mut filesize: u64 = read_size as u64;
     let mut compressedfilesize: u64 = 0;
 
-    // ── Single-block path (lz4io.c 1199–1211) ───────────────────────────────
+    // Single-block fast path: the entire input fits in one CHUNK_SIZE buffer,
+    // so compress it as a single self-contained frame without the batch machinery.
     if read_size < CHUNK_SIZE {
         let max_dst = lz4f_compress_frame_bound(read_size, Some(&prefs));
         let mut dst_buf = vec![0u8; max_dst];
@@ -309,16 +313,16 @@ pub fn compress_filename_mt(
             )
         })?;
     } else {
-        // ── Multi-block MT path (lz4io.c 1216–1330) ─────────────────────────
+        // Multi-block path: read, compress in parallel, and write in bounded batches.
 
         let linked_blocks = prefs.frame_info.block_mode == BlockMode::Linked;
         let use_checksum = prefs.frame_info.content_checksum_flag == ContentChecksum::Enabled;
 
-        // ── Write frame header (lz4io.c 1267–1274) ──────────────────────────
-        // C note: "do not employ dictionary when input size >= 4 MB, the
-        // benefit is very limited anyway, and is not worth the dependency cost"
-        // NOTE: contentChecksumFlag is still set here so the frame header declares
-        // checksum present — matching C where the flag is reset AFTER compressBegin.
+        // Write the LZ4 frame header.  The content-checksum flag must still be
+        // set at this point so the header correctly declares that a checksum
+        // is present; the flag is cleared on the working copy of `prefs` after
+        // the header is written so the LZ4F context does not attempt to compute
+        // a second, internal checksum.
         let header_size = lz4f_compress_begin(
             &mut ress.ctx,
             &mut ress.dst_buffer,
@@ -340,18 +344,17 @@ pub fn compress_filename_mt(
             })?;
         compressedfilesize += header_size as u64;
 
-        // Disable internal checksum AFTER header write — we compute it externally.
-        // Matches lz4io.c line 1277: prefs.frameInfo.contentChecksumFlag = LZ4F_noContentChecksum
-        // which comes AFTER LZ4F_compressBegin (line 1269).
+        // Disable the LZ4F context's internal checksum tracking after the header
+        // has been written.  We accumulate the XXH32 digest over raw input bytes
+        // ourselves and append it manually, which is necessary to maintain a
+        // correct rolling checksum across independently-compressed parallel chunks.
         if use_checksum {
             prefs.frame_info.content_checksum_flag = ContentChecksum::Disabled;
         }
 
-        // ── Process chunks in bounded batches ────────────────────────────────
-        // Reads and compresses up to nb_workers chunks at a time, then writes
-        // them before reading the next batch.  This keeps memory bounded to
-        // O(nb_workers * CHUNK_SIZE) — matching C's O(nb_workers) buffer count
-        // from the TPool pipeline — rather than buffering the entire file.
+        // Process chunks in bounded batches of at most `nb_workers` chunks.
+        // Reading the next batch is deferred until the current batch is fully
+        // written, which bounds peak memory to O(nb_workers × CHUNK_SIZE).
         let batch_size = (io_prefs.nb_workers as usize).max(1);
         let max_cblock_size = lz4f_compress_frame_bound(CHUNK_SIZE, Some(&prefs));
         // Wrap cdict_ptr in a Sync+Send newtype so rayon closures can capture it.
@@ -367,17 +370,17 @@ pub fn compress_filename_mt(
             None
         };
 
-        // last_suffix: last PREFIX_SIZE bytes of the most-recently-read chunk,
-        // supplied as the prefix to the next chunk in linked-block mode.
-        // (lz4io.c 1259–1264 / 1296–1298)
+        // last_suffix: the final PREFIX_SIZE bytes of the most-recently-read chunk.
+        // In linked-block mode this slice is given to the *next* chunk as its
+        // prefix dictionary, so each block can reference data from its predecessor.
         let mut last_suffix: Option<Vec<u8>> = if linked_blocks && read_size >= PREFIX_SIZE {
             Some(first_buf[read_size - PREFIX_SIZE..].to_vec())
         } else {
             None
         };
 
-        // Seed the first batch with the already-read first_buf.
-        // First chunk has no prefix (lz4io.c 1283: cjd.prefixSize = 0).
+        // Seed the first batch with the already-read first chunk.
+        // The first chunk never has a prefix because there is no preceding chunk.
         let mut pending: Option<Chunk> = Some(Chunk { data: first_buf, prefix: None });
         let mut eof = false;
 
@@ -415,13 +418,15 @@ pub fn compress_filename_mt(
 
             if batch.is_empty() { break; }
 
-            // ── Compress this batch in parallel (rayon) ───────────────────────
-            // `into_par_iter()` + `collect::<Vec<_>>()` preserves chunk order.
+            // Compress this batch in parallel.  Collecting into a Vec preserves
+            // the original chunk order so writing is straightforward.
             let batch_results: Vec<io::Result<Vec<u8>>> = batch
                 .into_par_iter()
                 .map(|chunk| -> io::Result<Vec<u8>> {
                     let mut dst_buf = vec![0u8; max_cblock_size];
-                    // SAFETY: sync_cdict.as_ptr() is immutable and valid for ress lifetime.
+                    // SAFETY: `sync_cdict` wraps an immutable pointer that remains
+                    // valid for the duration of the enclosing `ress` borrow.
+                    // Multiple threads reading the same immutable CDict is safe.
                     let params = CfcParameters {
                         prefs: &prefs,
                         cdict: sync_cdict.as_ptr(),
@@ -437,7 +442,7 @@ pub fn compress_filename_mt(
                 })
                 .collect();
 
-            // ── Write this batch in order ─────────────────────────────────────
+            // Write each compressed chunk in original order via WriteRegister.
             for result in batch_results {
                 let c_data = result?;
                 write_register.insert(write_register.expected_rank, c_data);
@@ -455,12 +460,13 @@ pub fn compress_filename_mt(
         }
         compressedfilesize += write_register.total_csize;
 
-        // ── End-of-frame mark (lz4io.c 1310–1323) ───────────────────────────
-        // Write 4 bytes of zeros (end-of-data mark), plus optional 4-byte XXH32.
-        // The C code notes: LZ4F_compressEnd already wrote a (bogus) checksum;
-        // we skip that and write the end block manually.
+        // Finalise the frame: write the 4-byte end-of-data marker
+        // (0x00000000) followed by the optional 4-byte XXH32 content checksum.
+        // We write both fields manually so we can inject our externally-computed
+        // checksum rather than relying on the LZ4F context (whose checksum was
+        // disabled after the header was written).
         let mut end_buf = [0u8; 8];
-        // end_buf[0..4] = 0x00000000 (end-of-data block, already zeroed).
+        // Bytes 0–3 are the end-of-data block (already zero-initialised).
         let end_size = if use_checksum {
             if let Some(h) = xxh32 {
                 let crc = h.digest();
@@ -483,22 +489,22 @@ pub fn compress_filename_mt(
         compressedfilesize += end_size as u64;
     }
 
-    // ── Release file handles ─────────────────────────────────────────────────
+    // Flush and close the destination file before touching its metadata.
     drop(dst_writer);
 
-    // ── Copy owner/permissions/mtime (lz4io.c 1337–1343) ────────────────────
+    // Propagate mtime and, on Unix, uid/gid/mode from source to destination.
     if src_filename != STDIN_MARK && !dst_is_stdout && dst_filename != NUL_MARK {
         let _ = copy_file_stat(src_filename, dst_filename);
     }
 
-    // ── Remove source file if --rm (lz4io.c 1345–1348) ──────────────────────
+    // Remove the source file when `--rm` is active.
     if io_prefs.remove_src_file && src_filename != STDIN_MARK {
         fs::remove_file(src_filename).map_err(|e| {
             io::Error::new(e.kind(), format!("Remove error : {}: {}", src_filename, e))
         })?;
     }
 
-    // ── Final status display (lz4io.c 1351–1354) ─────────────────────────────
+    // Print the final compression-ratio summary line.
     display_level(2, &format!("\r{:79}\r", ""));
     display_level(
         2,

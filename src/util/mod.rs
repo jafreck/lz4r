@@ -1,15 +1,14 @@
-//! Utility module — Rust port of `util.h` + `util.c` from lz4-1.10.0/programs.
+//! Cross-cutting utility functions used by the CLI and I/O layers.
 //!
-//! All platform-specific C preprocessor branches in `util.h` are replaced by
-//! Rust standard-library types and the `filetime`/`nix`/`walkdir`/`num_cpus`
-//! crates. Functions that were `UTIL_STATIC` (static inline in C) become
-//! regular `pub fn` here.
+//! Submodules:
+//! - [`cores`]       — CPU core counting via [`std::thread::available_parallelism`]
+//! - [`file_status`] — file-type queries (`is_reg_file`, `is_directory`, `is_reg_fd`)
+//!                     and metadata mutation (`set_file_stat`)
+//! - [`file_size`]   — file size queries (`get_file_size`, `get_open_file_size`,
+//!                     `get_total_file_size`)
+//! - [`file_list`]   — recursive directory expansion into a flat `Vec<PathBuf>`
 //!
-//! Submodules correspond to logical sections of the original header:
-//! - [`cores`]       — CPU core counting (`UTIL_countCores`, `util.c`)
-//! - [`file_status`] — stat, isRegFile, isDirectory, setFileStat
-//! - [`file_size`]   — getFileSize, getOpenFileSize, getTotalFileSize
-//! - [`file_list`]   — createFileList / prepareFileList (directory traversal)
+//! The most commonly needed symbols are re-exported at the `util` module level.
 
 pub mod cores;
 pub mod file_status;
@@ -17,8 +16,8 @@ pub mod file_size;
 pub mod file_list;
 
 // ── Re-exports at `util::` level ─────────────────────────────────────────────
-// Mirrors the flat C namespace where all UTIL_* symbols are in scope after
-// `#include "util.h"`.
+// Commonly used symbols are re-exported here so callers can write
+// `util::count_cores()` instead of `util::cores::count_cores()`.
 
 pub use cores::count_cores;
 
@@ -35,10 +34,8 @@ pub use file_list::create_file_list;
 
 /// Returns `true` if both string slices are equal.
 ///
-/// Migrated from `UTIL_sameString` (util.h lines 203–209).
-/// The C version accepts `const char*` and handles NULL gracefully (returns 0
-/// if either is NULL); here `&str` slices are always valid, so the NULL guard
-/// is not needed. The comparison is a simple `==`.
+/// Equivalent to `a == b`; provided as a named function to give call-sites a
+/// self-documenting label when comparing filenames or format identifiers.
 pub fn same_string(a: &str, b: &str) -> bool {
     a == b
 }
@@ -46,16 +43,12 @@ pub fn same_string(a: &str, b: &str) -> bool {
 // ── Sleep helpers ─────────────────────────────────────────────────────────────
 // Correspond to the `UTIL_sleep` / `UTIL_sleepMilli` macros in util.h.
 
-/// Sleep for `secs` seconds.
-///
-/// Corresponds to the `UTIL_sleep(s)` macro in util.h.
+/// Blocks the current thread for `secs` seconds.
 pub fn sleep_secs(secs: u64) {
     std::thread::sleep(std::time::Duration::from_secs(secs));
 }
 
-/// Sleep for `millis` milliseconds.
-///
-/// Corresponds to the `UTIL_sleepMilli(milli)` macro in util.h.
+/// Blocks the current thread for `millis` milliseconds.
 pub fn sleep_millis(millis: u64) {
     std::thread::sleep(std::time::Duration::from_millis(millis));
 }

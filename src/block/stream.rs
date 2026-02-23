@@ -1,8 +1,9 @@
 //! LZ4 streaming compression state management.
 //!
-//! Translated from lz4.c v1.10.0, lines 1526–1834.
+//! Pure-Rust implementation of the LZ4 streaming block-compression API,
+//! corresponding to lz4.c v1.10.0 (lines 1526–1834).
 //!
-//! # Coverage
+//! # API correspondence
 //! - [`Lz4Stream`] (mirrors `LZ4_stream_t` / `LZ4_stream_t_internal`)
 //! - [`Lz4Stream::reset`] / [`Lz4Stream::reset_fast`]
 //!   (`LZ4_resetStream`, `LZ4_resetStream_fast`)
@@ -535,8 +536,8 @@ impl Lz4Stream {
     /// Compress using external-dictionary mode regardless of the current state.
     ///
     /// This is a **hidden debug function** that exists in the C source to
-    /// force-test the `usingExtDict` compression path.  It is exposed here for
-    /// testing parity with the C implementation.
+    /// force-test the `usingExtDict` compression path.  It is exposed here to
+    /// allow targeted testing of the external-dictionary compression path.
     ///
     /// Equivalent to `LZ4_compress_forceExtDict`.
     ///

@@ -1,45 +1,34 @@
-//! Legacy LZ4 decompression.
+//! Decompression of the LZ4 legacy format (magic `0x184C2102`).
 //!
-//! Migrated from lz4io.c lines 1677–1887 (declarations #15, #16):
-//! `g_magicRead` global, MT/ST variants of `LZ4IO_decodeLegacyStream`, and
-//! the `LZ4IO_writeDecodedChunk` / `LZ4IO_decompressBlockLegacy` helpers.
+//! The legacy format is a stream of size-prefixed LZ4 block-compressed chunks.
+//! Each chunk is preceded by a 4-byte little-endian block size; a value that
+//! exceeds `LZ4_COMPRESSBOUND(LEGACY_BLOCKSIZE)` is not a valid block size —
+//! it is the magic number of the next chained frame, to be returned to the
+//! caller for dispatch.
 //!
-//! # Migration decisions
+//! # API
 //!
-//! - **`g_magicRead` global out-param** eliminated: `decode_legacy_stream`
-//!   returns `(decoded_bytes: u64, next_magic: Option<u32>)`.  When the block-
-//!   size field read from the stream exceeds `LZ4_COMPRESSBOUND(LEGACY_BLOCKSIZE)`,
-//!   it is interpreted as a next-stream magic number and returned as
-//!   `Some(magic)` instead of being stored in a module-level global.
+//! [`decode_legacy_stream`] is the main entry point.  It expects the stream
+//! positioned immediately after the consumed magic number and writes
+//! decompressed output to any `impl Write`.  On success it returns the total
+//! number of decoded bytes and, if a chained-frame magic was encountered, that
+//! magic value so the caller can dispatch the next frame.
 //!
-//! - **ST path** (`prefs.nb_workers <= 1`): a simple sequential loop that
-//!   reads a 4-byte block header, decompresses the block with
-//!   `lz4_flex::block::decompress`, and writes to `dst`.  Mirrors
-//!   `LZ4IO_decodeLegacyStream` (ST variant, lz4io.c lines 1825–1873).
+//! # Threading
 //!
-//! - **MT path** (`prefs.nb_workers > 1`): reads compressed blocks in batches
-//!   of `NB_BUFFSETS` and decompresses each batch in parallel using `rayon`.
-//!   Results are collected in order and written sequentially by the main
-//!   thread.  The C implementation used two `TPool` instances (one for
-//!   decompression, one for serialised writes) connected by a 3-stage
-//!   pipeline.  Replicating that pipeline with a generic `impl Write`
-//!   (which is not `Send`) is not possible without unsafe code; the rayon
-//!   batch approach provides equivalent throughput with safe Rust.
+//! When `prefs.nb_workers > 1` the multi-threaded path reads compressed blocks
+//! in batches of [`NB_BUFFSETS`] and decompresses each batch in parallel via
+//! rayon, then writes results in order on the calling thread.  The
+//! single-threaded path processes one block at a time.
 //!
-//! - **Sparse writes**: `fwrite_sparse` / `fwrite_sparse_end` require a
-//!   `&mut File` reference.  Because `decode_legacy_stream` accepts a generic
-//!   `impl Write`, sparse-hole optimisation is delegated to the caller
-//!   (`decompress_dispatch`) which has direct access to the `File`.
-//!
-//! - **`LZ4_decompress_safe`** → `lz4_flex::block::decompress`.
-//!
-//! - **`LZ4_compressBound(LEGACY_BLOCKSIZE)`**: computed at runtime via
-//!   `lz4_sys::LZ4_compressBound`; used to distinguish valid block sizes from
-//!   embedded magic numbers in the stream.
+//! Sparse-write optimisation is intentionally left to the caller
+//! (`decompress_dispatch`), which holds a direct `&mut File`.  A generic
+//! `impl Write` cannot safely assume sparse-hole support.
 
 use std::io::{self, Read, Write};
 
-use lz4_flex::block::decompress as lz4_block_decompress;
+use crate::block::compress::compress_bound;
+use crate::block::decompress_api::decompress_safe;
 use rayon::prelude::*;
 
 use crate::io::decompress_resources::DecompressResources;
@@ -49,42 +38,42 @@ use crate::io::prefs::{Prefs, LEGACY_BLOCKSIZE};
 // Constants
 // ---------------------------------------------------------------------------
 
-/// Number of buffer sets used in the C MT pipeline (1 reading + 1 processing
-/// + 1 writing + 1 queued).  Reused here as the rayon batch size.
+/// Batch size for the multi-threaded decompression loop.
+///
+/// Four buffer sets allow one set to be filling, one decompressing, one
+/// writing, and one queued simultaneously — matching the natural pipeline
+/// depth of the MT path.
 const NB_BUFFSETS: usize = 4;
 
-/// Size of the block-size header field in the legacy format (4 bytes).
-///
-/// Equivalent to `LZ4IO_LEGACY_BLOCK_HEADER_SIZE` (lz4io.c line 760).
+/// Byte length of the block-size header field in the legacy stream format.
 const LEGACY_BLOCK_HEADER_SIZE: usize = 4;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Returns the maximum size of a compressed block for `LEGACY_BLOCKSIZE`
-/// uncompressed bytes.
+/// Returns the maximum compressed size of a `LEGACY_BLOCKSIZE`-byte input block.
 ///
-/// Equivalent to `LZ4_compressBound(LEGACY_BLOCKSIZE)` (lz4io.c line 1777).
+/// Block-size values read from the stream that exceed this bound are not valid
+/// compressed sizes; they are treated as magic numbers for a chained frame.
 fn lz4_compress_bound() -> usize {
-    // SAFETY: LZ4_compressBound is a pure C function with no side effects.
-    unsafe { lz4_sys::LZ4_compressBound(LEGACY_BLOCKSIZE as i32) as usize }
+    compress_bound(LEGACY_BLOCKSIZE as i32) as usize
 }
 
 /// Reads exactly `buf.len()` bytes, returning `Ok(false)` on a clean EOF
 /// encountered before the first byte, `Ok(true)` on success, or an error if
 /// EOF occurs mid-read.
 ///
-/// Used to detect end-of-stream when reading the 4-byte block header without
-/// treating a clean EOF as an error (mirrors `if (sizeCheck == 0) break;` in
-/// lz4io.c lines 1772, 1841).
+/// Used when reading the 4-byte block header so that a clean end-of-stream
+/// is not treated as an I/O error.
 fn read_exact_or_eof<R: Read>(src: &mut R, buf: &mut [u8]) -> io::Result<bool> {
-    // Read the first byte to distinguish clean EOF from mid-read EOF.
+    // A single-byte read distinguishes a clean EOF (n == 0) from a
+    // short read mid-header, which would be a truncated stream.
     let n = src.read(&mut buf[..1])?;
     if n == 0 {
-        return Ok(false); // clean EOF
+        return Ok(false); // clean end-of-stream
     }
-    // Read remaining bytes; mid-read EOF is an error.
+    // Any EOF while reading the remaining bytes is a truncation error.
     src.read_exact(&mut buf[1..])?;
     Ok(true)
 }
@@ -112,11 +101,6 @@ fn read_exact_or_eof<R: Read>(src: &mut R, buf: &mut [u8]) -> io::Result<bool> {
 ///
 /// Returns `Err` on any I/O error or on corrupted compressed data.
 ///
-/// # C equivalent
-///
-/// `LZ4IO_decodeLegacyStream` — both the MT variant (lz4io.c lines 1741–1821)
-/// and the ST variant (lz4io.c lines 1825–1873).  Dispatches based on
-/// `prefs.nb_workers`.
 pub fn decode_legacy_stream<R: Read, W: Write>(
     src: &mut R,
     dst: &mut W,
@@ -136,8 +120,10 @@ pub fn decode_legacy_stream<R: Read, W: Write>(
 
 /// Single-threaded legacy decompression loop.
 ///
-/// Equivalent to the `#else` branch of `LZ4IO_decodeLegacyStream`
-/// (lz4io.c lines 1825–1873).
+/// Reads one block at a time: reads the 4-byte size header, validates it
+/// against the compress bound, reads the compressed payload, decompresses it,
+/// and writes the result to `dst`.  Repeats until clean EOF or a chained-frame
+/// magic number is encountered.
 fn decode_legacy_st<R: Read, W: Write>(
     src: &mut R,
     dst: &mut W,
@@ -149,42 +135,40 @@ fn decode_legacy_st<R: Read, W: Write>(
     let mut next_magic: Option<u32> = None;
 
     loop {
-        // Read block header — clean EOF terminates the stream normally.
+        // Clean EOF before the block header means the stream ended normally.
         if !read_exact_or_eof(src, &mut header)? {
-            break; // Nothing to read: file read is completed (lz4io.c:1841).
+            break;
         }
 
-        // Convert block size to native endianness (lz4io.c:1846).
+        // Decode the little-endian block-size header.
         let block_size = u32::from_le_bytes(header);
 
         if block_size as usize > compress_bound {
-            // Cannot read next block: maybe new stream? (lz4io.c:1847–1850).
-            // Return the value as the next magic number instead of storing in
-            // the `g_magicRead` global.
+            // Value exceeds the maximum compressed block size — it is the
+            // magic number of a chained frame.  Return it for dispatch.
             next_magic = Some(block_size);
             break;
         }
 
-        // Read the compressed block (lz4io.c:1854).
         let block_len = block_size as usize;
         src.read_exact(&mut in_buf[..block_len])?;
 
-        // Decompress the block (lz4io.c:1858 — `LZ4_decompress_safe`).
-        let decompressed =
-            lz4_block_decompress(&in_buf[..block_len], LEGACY_BLOCKSIZE).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("Decoding Failed! Corrupted input detected!: {e}"),
-                )
-            })?;
+        // Decompress the block; any decompressor error is treated as
+        // corrupted input and surfaced as an InvalidData I/O error.
+        let mut dec_buf = vec![0u8; LEGACY_BLOCKSIZE];
+        let dec_n = decompress_safe(&in_buf[..block_len], &mut dec_buf).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Decoding Failed! Corrupted input detected!: {e:?}"),
+            )
+        })?;;
 
-        // Write the decompressed block (lz4io.c:1862).
-        stream_size += decompressed.len() as u64;
-        dst.write_all(&decompressed)?;
+        stream_size += dec_n as u64;
+        dst.write_all(&dec_buf[..dec_n])?;
     }
 
-    // `ferror` equivalent: propagated as `Err` from `read_exact_or_eof` /
-    // `read_exact` above; no explicit check needed.
+    // I/O errors from read_exact_or_eof / read_exact propagate as Err;
+    // no separate error-state check is needed.
 
     Ok((stream_size, next_magic))
 }
@@ -195,14 +179,14 @@ fn decode_legacy_st<R: Read, W: Write>(
 
 /// Multi-threaded legacy decompression using rayon batch parallelism.
 ///
-/// Reads compressed blocks in batches of `NB_BUFFSETS`, decompresses each
-/// batch in parallel with rayon, then writes decompressed output in order.
+/// Reads compressed blocks in batches of [`NB_BUFFSETS`], decompresses each
+/// batch in parallel with rayon, then writes decompressed output in order on
+/// the calling thread.
 ///
-/// The C implementation (lz4io.c lines 1741–1821) used two `TPool` instances
-/// forming a 3-stage pipeline (read → decompress → write).  The generic
-/// `impl Write` bound prevents moving the write stage to a separate thread
-/// (as `Write` is not `Send`).  The rayon batch approach provides equivalent
-/// CPU-bound throughput while keeping writes on the calling thread.
+/// A fully pipelined design with a dedicated write thread is not possible
+/// because `Write` is not `Send`.  The rayon batch approach achieves the same
+/// CPU-bound throughput with safe Rust by decoupling the decompression work
+/// from the serial write step.
 fn decode_legacy_mt<R: Read, W: Write>(
     src: &mut R,
     dst: &mut W,
@@ -213,15 +197,14 @@ fn decode_legacy_mt<R: Read, W: Write>(
     let mut next_magic: Option<u32> = None;
 
     loop {
-        // ── Read a batch of compressed blocks ────────────────────────────────
-        // Equivalent to the C "Main Loop" with NB_BUFFSETS rotating buffer sets.
+        // ── Read a batch of up to NB_BUFFSETS compressed blocks ─────────────
         let mut batch: Vec<Vec<u8>> = Vec::with_capacity(NB_BUFFSETS);
-        let mut batch_done = false; // signals that next_magic or EOF was found
+        let mut batch_done = false; // set when EOF or a chained-frame magic is found
 
         for _ in 0..NB_BUFFSETS {
             let mut header = [0u8; LEGACY_BLOCK_HEADER_SIZE];
 
-            // Clean EOF: stream is finished (lz4io.c:1772).
+            // Clean EOF before a block header means the stream ended normally.
             if !read_exact_or_eof(src, &mut header)? {
                 batch_done = true;
                 break;
@@ -229,13 +212,13 @@ fn decode_legacy_mt<R: Read, W: Write>(
 
             let block_size = u32::from_le_bytes(header);
             if block_size as usize > compress_bound {
-                // Magic number for next frame (lz4io.c:1777–1780).
+                // Value exceeds the maximum compressed block size — treat as
+                // a chained-frame magic number and stop reading this stream.
                 next_magic = Some(block_size);
                 batch_done = true;
                 break;
             }
 
-            // Read the compressed block data (lz4io.c:1784).
             let mut block = vec![0u8; block_size as usize];
             src.read_exact(&mut block)?;
             batch.push(block);
@@ -246,22 +229,26 @@ fn decode_legacy_mt<R: Read, W: Write>(
         }
 
         // ── Decompress batch in parallel ──────────────────────────────────────
-        // Equivalent to `TPool_submitJob(tPool, LZ4IO_decompressBlockLegacy, lbi)`
-        // (lz4io.c:1799) but using rayon for safe parallelism with generic Write.
+        // Each block is independent, so rayon can decompress them concurrently.
+        // Results are collected into a Vec to preserve ordering before writing.
         let results: Vec<io::Result<Vec<u8>>> = batch
             .par_iter()
             .map(|block| {
-                lz4_block_decompress(block, LEGACY_BLOCKSIZE).map_err(|e| {
+                let mut dec_buf = vec![0u8; LEGACY_BLOCKSIZE];
+                let n = decompress_safe(block, &mut dec_buf).map_err(|e| {
                     io::Error::new(
                         io::ErrorKind::InvalidData,
-                        format!("Decoding Failed! Corrupted input detected!: {e}"),
+                        format!("Decoding Failed! Corrupted input detected!: {e:?}"),
                     )
-                })
+                })?;
+                dec_buf.truncate(n);
+                Ok(dec_buf)
             })
             .collect();
 
         // ── Write results in order ────────────────────────────────────────────
-        // Equivalent to `LZ4IO_writeDecodedChunk` (lz4io.c lines 1690–1701).
+        // Propagate any decompression error from the parallel batch before
+        // writing; this ensures output is never partially written on error.
         for result in results {
             let decompressed = result?;
             stream_size += decompressed.len() as u64;
@@ -290,7 +277,7 @@ mod tests {
     }
 
     /// Compress `data` in legacy format (magic + 4-byte size-prefixed blocks)
-    /// using `lz4_flex::block::compress` and return the raw stream bytes.
+    /// using the native block encoder and return the raw stream bytes.
     fn make_legacy_stream(data: &[u8]) -> Vec<u8> {
         const LZ4IO_LEGACY_MAGICNUMBER: u32 = 0x184C2102;
         let mut stream = Vec::new();
@@ -298,7 +285,7 @@ mod tests {
         stream.extend_from_slice(&LZ4IO_LEGACY_MAGICNUMBER.to_le_bytes());
         // Split data into LEGACY_BLOCKSIZE chunks and compress each.
         for chunk in data.chunks(LEGACY_BLOCKSIZE) {
-            let compressed = lz4_flex::block::compress(chunk);
+            let compressed = crate::block::compress_block_to_vec(chunk);
             let block_size = compressed.len() as u32;
             stream.extend_from_slice(&block_size.to_le_bytes());
             stream.extend_from_slice(&compressed);
@@ -342,7 +329,7 @@ mod tests {
         let block2 = vec![0x42u8; 32]; // 32 bytes of 'B'
         let mut payload = Vec::new();
         for chunk in [block1.as_slice(), block2.as_slice()] {
-            let compressed = lz4_flex::block::compress(chunk);
+            let compressed = crate::block::compress_block_to_vec(chunk);
             payload.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
             payload.extend_from_slice(&compressed);
         }
@@ -390,7 +377,7 @@ mod tests {
         let mut payload = Vec::new();
         // One valid compressed block first.
         let data = b"test data for magic detection";
-        let compressed = lz4_flex::block::compress(data);
+        let compressed = crate::block::compress_block_to_vec(data);
         payload.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
         payload.extend_from_slice(&compressed);
         // Then the "next magic" (large value).

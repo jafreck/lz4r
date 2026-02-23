@@ -1,18 +1,30 @@
-//! HC compression types, level table, hash functions, and context initialisation.
+//! Core types, constants, hash functions, and context management for the HC
+//! (high-compression) family of LZ4 strategies.
 //!
-//! Translated from lz4hc.c v1.10.0, lines 71–260:
-//!   - `lz4hc_strat_e` enum → `HcStrategy`
-//!   - `cParams_t` → `CParams`
-//!   - `k_clTable[13]` compression-level parameter table
-//!   - `LZ4HC_getCLevelParams` → `get_clevel_params`
-//!   - Hash functions: `hash_ptr`, `mid_hash4_ptr`, `mid_hash7`, `mid_hash8_ptr`,
-//!     `read64`, `read_le64`
-//!   - `LZ4HC_NbCommonBytes32` → `nb_common_bytes32`
-//!   - `LZ4HC_count` (forward match) → `hc_count` (delegates to `block::types::count`)
-//!   - `LZ4HC_countBack` → `count_back`
-//!   - `LZ4HC_CCtx_internal` → `HcCCtxInternal`
-//!   - `LZ4HC_clearTables` → `clear_tables`
-//!   - `LZ4HC_init_internal` → `init_internal`
+//! LZ4 HC extends the base LZ4 block format with a hash-chain search that
+//! trades compression speed for a higher compression ratio.  Three strategies
+//! share this infrastructure:
+//!
+//! * **LZ4MID** ([`HcStrategy::Lz4Mid`], levels 0–2) — dual-hash (4-byte +
+//!   8-byte) medium speed with lower memory pressure than full HC.
+//! * **LZ4HC** ([`HcStrategy::Lz4Hc`], levels 3–9) — single hash-chain;
+//!   increasing `nb_searches` improves ratio at the cost of speed.
+//! * **LZ4OPT** ([`HcStrategy::Lz4Opt`], levels 10–12) — optimal parser over
+//!   a [`LZ4_OPT_NUM`]-entry lookahead; near-maximum compression ratio.
+//!
+//! ## Module contents
+//! * Level constants ([`LZ4HC_CLEVEL_MIN`] … [`LZ4HC_CLEVEL_MAX`]) and the
+//!   per-level parameter table ([`K_CL_TABLE`] / [`get_clevel_params`]).
+//! * Hash-table sizing constants for both the HC and LZ4MID strategies.
+//! * Hash functions used by each strategy ([`hash_ptr`], [`mid_hash4_ptr`],
+//!   [`mid_hash8_ptr`]) and unaligned read helpers ([`read64`], [`read_le64`]).
+//! * Match-counting helpers ([`hc_count`] for forward matches, [`count_back`]
+//!   for backward extension).
+//! * The compression context ([`HcCCtxInternal`]) and its initialisation
+//!   routines ([`clear_tables`], [`init_internal`]).
+//!
+//! Individual doc comments name the corresponding symbol in `lz4hc.c` /
+//! `lz4hc.h` from the reference C implementation for cross-reference.
 
 use crate::block::types as bt;
 

@@ -1,15 +1,17 @@
-//! File status utility functions.
+//! File status queries and metadata mutation.
 //!
-//! Migrated from `util.h` lines 130–316 (Sections 7, 8, 13, 14):
-//! - Stat macros (`UTIL_TYPE_stat`, `UTIL_stat`, `UTIL_fstat`, `UTIL_STAT_MODE_ISREG`)
-//! - `fileno` macro (`UTIL_fileno`)
-//! - `stat_t` typedef
-//! - `UTIL_setFileStat`, `UTIL_getFDStat`, `UTIL_getFileStat`,
-//!   `UTIL_isRegFD`, `UTIL_isRegFile`, `UTIL_isDirectory`
+//! Functions in this module inspect filesystem entries and, on supported
+//! platforms, update file attributes:
 //!
-//! All platform-specific preprocessor branches are replaced by Rust's
-//! `std::fs::Metadata`, the `filetime` crate, and `nix` for POSIX-only
-//! chown / permission operations.
+//! - [`is_reg_file`]   — true if a path refers to a regular file
+//! - [`is_directory`]  — true if a path refers to a directory
+//! - [`is_reg_fd`]     — true if a raw file descriptor refers to a regular
+//!                       file (available on POSIX and Windows targets)
+//! - [`set_file_stat`] — apply modification time, ownership (POSIX), and
+//!                       permission bits to a regular file
+//!
+//! Ownership and permission operations use the [`filetime`] and [`nix`] crates
+//! on POSIX targets and `libc` on Windows.
 
 use std::fs;
 use std::io;
@@ -24,20 +26,18 @@ use std::os::unix::io::RawFd;
 #[cfg(windows)]
 use libc;
 
-/// Sets modification time, ownership (POSIX), and file-permission bits on a
-/// regular file.
+/// Apply modification time, ownership, and permission bits to a regular file.
 ///
-/// Returns `Err` if `path` is not a regular file.  On success every
-/// platform-specific attribute is applied; errors from individual operations
-/// accumulate and are returned as the first encountered `io::Error`.
+/// Returns `Err` if `path` is not a regular file. Attribute operations are
+/// applied in order; the first failure is returned immediately.
 ///
-/// Corresponds to `UTIL_setFileStat` (util.h lines 228–258).
-///
+/// # Parameters
 /// * `mtime` — desired last-modification time
-/// * `uid`   — desired owner UID (POSIX only; silently ignored on Windows)
-/// * `gid`   — desired owner GID (POSIX only; silently ignored on Windows)
-/// * `mode`  — desired permission bits; lower 12 bits are applied
-///             (`mode & 0o7777`), matching the C `chmod` call
+/// * `uid`   — desired owner UID (POSIX only; ignored on other targets)
+/// * `gid`   — desired owner GID (POSIX only; ignored on other targets)
+/// * `mode`  — permission bits; only the lower 12 bits are applied
+///             (`mode & 0o7777`), i.e. rwxrwxrwx plus the setuid/setgid/sticky
+///             bits. On Windows only the read-only bit is honoured.
 pub fn set_file_stat(
     path: &Path,
     mtime: SystemTime,
@@ -45,7 +45,6 @@ pub fn set_file_stat(
     gid: u32,
     mode: u32,
 ) -> io::Result<()> {
-    // Mirrors: if (!UTIL_isRegFile(filename)) return -1;
     if !is_reg_file(path) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -53,8 +52,8 @@ pub fn set_file_stat(
         ));
     }
 
-    // Set modification time and access time — replaces utime() / utimensat() branches.
-    // The C code sets atime = time(NULL) (current wall-clock) and mtime = statbuf->st_mtime.
+    // Set modification time; access time is updated to now (current wall-clock).
+    // filetime handles the platform-specific syscall (utimensat on POSIX, SetFileTime on Windows).
     let atime = FileTime::from_system_time(SystemTime::now());
     let ft_mtime = FileTime::from_system_time(mtime);
     filetime::set_file_times(path, atime, ft_mtime)?;
@@ -71,7 +70,7 @@ pub fn set_file_stat(
     #[cfg(not(unix))]
     let _ = (uid, gid);
 
-    // Copy file permissions — mode & 07777, matching `chmod` in the C source.
+    // Apply the lower 12 permission bits (rwxrwxrwx + setuid/setgid/sticky).
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -91,13 +90,11 @@ pub fn set_file_stat(
     Ok(())
 }
 
-/// Returns `true` if the file descriptor `fd` refers to a regular file.
+/// Returns `true` if the raw file descriptor `fd` refers to a regular file.
 ///
-/// On Windows the C runtime always opens descriptors 0, 1 and 2 in text mode,
-/// so they cannot be used for binary I/O; this function therefore returns
-/// `false` for those values.  The POSIX path has no such restriction.
-///
-/// Corresponds to `UTIL_isRegFD` / `UTIL_getFDStat` (util.h lines 261–295).
+/// Uses `fstat(2)` to query the file type. Returns `false` if the `fstat`
+/// call fails (e.g. the descriptor is invalid) or the entry is not a regular
+/// file (pipes, sockets, terminals, etc.).
 #[cfg(unix)]
 pub fn is_reg_fd(fd: RawFd) -> bool {
     use nix::sys::stat::{fstat, SFlag};
@@ -109,11 +106,9 @@ pub fn is_reg_fd(fd: RawFd) -> bool {
 
 /// Returns `true` if the file descriptor `fd` refers to a regular file.
 ///
-/// Windows CRT always opens fds 0, 1, 2 in text mode — not usable for binary
-/// I/O — so this function returns `false` for those values, matching the C
-/// source's `if(fd < 3) return 0` guard.  For other fds `_fstat64` is used.
-///
-/// Corresponds to `UTIL_isRegFD` / `UTIL_getFDStat` (util.h lines 261–295).
+/// Descriptors 0, 1, and 2 (stdin/stdout/stderr) always return `false`: the
+/// Windows CRT opens them in text mode, making them unsuitable for binary I/O.
+/// For all other descriptors, `fstat` is used to check the file type.
 #[cfg(windows)]
 pub fn is_reg_fd(fd: i32) -> bool {
     if fd < 3 {
@@ -130,10 +125,8 @@ pub fn is_reg_fd(fd: i32) -> bool {
 
 /// Returns `true` if `path` refers to a regular file.
 ///
-/// Returns `false` for directories, symlinks to directories, special files,
-/// and paths that do not exist.
-///
-/// Corresponds to `UTIL_isRegFile` / `UTIL_getFileStat` (util.h lines 274–301).
+/// Returns `false` for directories, symlinks, special files, and paths that
+/// do not exist. Symlinks are not followed — the link itself is examined.
 pub fn is_reg_file(path: &Path) -> bool {
     fs::metadata(path)
         .map(|m| m.file_type().is_file())
@@ -142,10 +135,8 @@ pub fn is_reg_file(path: &Path) -> bool {
 
 /// Returns `true` if `path` refers to a directory.
 ///
-/// Returns `false` for regular files, special files, and paths that do not
-/// exist.
-///
-/// Corresponds to `UTIL_isDirectory` (util.h lines 303–316).
+/// Returns `false` for regular files, symlinks, special files, and paths that
+/// do not exist.
 pub fn is_directory(path: &Path) -> bool {
     fs::metadata(path)
         .map(|m| m.file_type().is_dir())

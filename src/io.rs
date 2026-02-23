@@ -1,7 +1,8 @@
-// io/mod (src/io.rs) — lz4io public API surface
-//
-// This module assembles all lz4io sub-modules and re-exports the public API
-// that corresponds to the symbols declared in lz4io.h.
+//! Public API surface for LZ4 file I/O operations.
+//!
+//! This module assembles the `lz4io` sub-modules and re-exports the symbols
+//! consumed by the CLI and library users.  The organisation mirrors `lz4io.h`
+//! from the LZ4 reference implementation.
 
 pub mod prefs;
 pub mod file_io;
@@ -40,11 +41,11 @@ pub use compress_frame::compress_filename;
 /// Compress multiple files with a given suffix. Mirrors `LZ4IO_compressMultipleFilenames`.
 pub use compress_frame::compress_multiple_filenames;
 
-// ── Legacy compression (visible to cli via extern in C) ──────────────────────
-/// Compress a single file in legacy format. Mirrors `LZ4IO_compressFilename_Legacy`.
+// ── Legacy LZ4 frame format compression ──────────────────────────────────────────
+/// Compress a single file using the legacy LZ4 frame format.
 pub use compress_legacy::compress_filename_legacy;
 
-/// Compress multiple files in legacy format. Mirrors `LZ4IO_compressMultipleFilenames_Legacy`.
+/// Compress multiple files using the legacy LZ4 frame format.
 pub use compress_legacy::compress_multiple_filenames_legacy;
 
 // ── Decompression public API (mirrors lz4io.h) ───────────────────────────────

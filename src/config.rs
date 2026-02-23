@@ -1,39 +1,45 @@
-// config.rs — Compile-time configuration constants.
-// Migrated from lz4conf.h and platform.h (lz4-1.10.0/programs).
-//
-// Platform-detection macros from platform.h (__64BIT__, _FILE_OFFSET_BITS,
-// _LARGEFILE_SOURCE, PLATFORM_POSIX_VERSION, SET_BINARY_MODE,
-// SET_SPARSE_FILE_MODE) are not needed in Rust: Rust handles 64-bit sizes
-// natively, file I/O does not require binary-mode toggling, and sparse-file
-// detection is handled by build.rs via `#[cfg(has_sparse_files)]`.
-//
-// IS_CONSOLE(stream) is provided by std::io::IsTerminal (Rust 1.70+) at each
-// call site and does not need a constant here.
+//! Compile-time configuration constants for the `lz4r` programs layer.
+//!
+//! These constants govern defaults for compression level, block size,
+//! multithreading, and related tunables.  Most can be overridden at runtime
+//! via CLI flags or environment variables; see the individual constants for
+//! details.
+//!
+//! Platform-specific concerns handled elsewhere:
+//! - 64-bit file offsets: native to Rust; no `_FILE_OFFSET_BITS` dance needed.
+//! - Binary-mode I/O: `std::fs::File` has no text/binary distinction on Unix,
+//!   and on Windows Rust opens files in binary mode by default.
+//! - Sparse-file support: detected by `build.rs` via `#[cfg(has_sparse_files)]`.
+//! - Terminal detection: `std::io::IsTerminal` (Rust 1.70+) at each call site.
 
-// Default compression level.
-// Corresponds to LZ4_CLEVEL_DEFAULT in lz4conf.h.
-// Can be overridden by the LZ4_CLEVEL environment variable at runtime,
-// or by the -# command-line flag.
+/// Default compression level applied when no `-#` flag is given.
+///
+/// The value `1` selects the fast (non-HC) compressor at its baseline
+/// acceleration.  Mirrors `LZ4_CLEVEL_DEFAULT` in `lz4conf.h`.
 pub const CLEVEL_DEFAULT: i32 = 1;
 
-// Whether multi-threaded compression is compiled in.
-// Corresponds to LZ4IO_MULTITHREAD in lz4conf.h.
-// In C: defaults to 1 on Windows (Completion Ports available), 0 elsewhere.
-// Here: true on Windows by default, or when the `multithread` Cargo feature is enabled.
+/// Whether multithreaded compression is available in this build.
+///
+/// `true` on Windows (where I/O Completion Ports are available) and whenever
+/// the `multithread` Cargo feature is enabled; `false` otherwise.  Mirrors
+/// `LZ4IO_MULTITHREAD` in `lz4conf.h`.
 pub const MULTITHREAD: bool = cfg!(target_os = "windows") || cfg!(feature = "multithread");
 
-// Default number of worker threads.
-// Corresponds to LZ4_NBWORKERS_DEFAULT in lz4conf.h (C source value: 0 = auto-detect).
-// Migration acceptance criteria intentionally diverges from C source and specifies 4.
-// Can be overridden by the LZ4_NBWORKERS environment variable,
-// or by the -T# command-line flag.
+/// Default number of compression worker threads when `-T0` (auto) is requested.
+///
+/// Can be overridden at runtime with the `LZ4_NBWORKERS` environment variable
+/// or the `-T#` flag.  Mirrors `LZ4_NBWORKERS_DEFAULT` in `lz4conf.h`.
 pub const NB_WORKERS_DEFAULT: usize = 4;
 
-// Maximum number of compression worker threads selectable at runtime.
-// Corresponds to LZ4_NBWORKERS_MAX in lz4conf.h.
+/// Hard upper bound on the number of compression worker threads.
+///
+/// Requests exceeding this value are silently clamped.  Mirrors
+/// `LZ4_NBWORKERS_MAX` in `lz4conf.h`.
 pub const NB_WORKERS_MAX: usize = 200;
 
-// Default block size ID (7 = 4 MB blocks).
-// Corresponds to LZ4_BLOCKSIZEID_DEFAULT in lz4conf.h.
-// Can be overridden at runtime using the -B# command-line flag.
+/// Default block size ID (`7` = 4 MiB blocks).
+///
+/// Controls the maximum uncompressed block size used by the Frame API.
+/// Can be overridden at runtime with the `-B#` flag.  Mirrors
+/// `LZ4_BLOCKSIZEID_DEFAULT` in `lz4conf.h`.
 pub const BLOCKSIZEID_DEFAULT: u32 = 7;

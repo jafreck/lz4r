@@ -1,39 +1,18 @@
-/*
-    bench/bench_mem.rs — Core benchmark loop
-    Migrated from lz4-1.10.0/programs/bench.c (lines 347–619)
-
-    Original copyright (C) Yann Collet 2012-2020 — GPL v2 License.
-
-    Migration notes:
-    - `blockParam_t` (lines 347–355): internal struct tracking per-block
-      source, compressed, and result data.  In C, these are raw pointers into
-      flat malloc'd buffers.  In Rust, each BlockParam owns its compressed and
-      result Vecs, pre-allocated to capacity so the tight timing loop performs
-      no heap allocation.
-    - `BMK_benchMem` (lines 360–619): the core adaptive timing loop.
-      `TIME_getTime()`/`TIME_clockSpan_ns()` → `std::time::Instant`.
-      `UTIL_sleep()` / `UTIL_sleepMilli()` → `std::thread::sleep`.
-      `TIME_waitForNextTick()` approximated by a 1 ms sleep (no OS tick API).
-      XXH64 checksum provided by `xxhash_rust::xxh64::xxh64` (xxhash-rust crate).
-    - Adaptive loop-count logic (`nbCompressionLoops`/`nbDecodeLoops`) is
-      preserved verbatim; it targets ~1 second per timing pass.
-    - Warm-up `memset` calls (0xE5 for compressed buffer, 0xD6 for result
-      buffer) are preserved.  Since each block owns its Vecs, per-block fill
-      is used instead of a single flat fill, yielding equivalent cache behaviour.
-    - `LZ4_isError` inverted semantics NOT ported: block compress returns Err
-      on failure; check with `.is_err()`.
-    - `g_decodeOnly` → `config.decode_only`; in decode-only mode the
-      compression phase is skipped (`c_completed` starts true) and block
-      `c_buf` is pre-filled from `src` rather than being produced by the
-      compressor.  Decompression uses `decompress_frame_block` (LZ4 Frame).
-    - `decompress_safe_using_dict` from `crate::block` is called in normal
-      (non-decode-only) mode for block decompression with an optional dictionary.
-    - `dict` parameter is passed to `decompress_safe_using_dict`.
-    - `file_sizes`: the plan signature takes only `src: &[u8]`; the source is
-      always treated as a single file (nbFiles=1, fileSizes=[src.len()]).
-    - `pub struct BlockParams` is the public data-carrier specified in the plan.
-    - `BenchResult` carries throughput numbers computed by the timing loop.
-*/
+//! Core benchmark timing loop for the lz4r benchmarking subsystem.
+//!
+//! This module provides [`bench_mem`], which drives the adaptive compression
+//! and decompression timing loop used by all benchmark entry points.  The loop
+//! self-calibrates: after each timing pass it adjusts the number of compression
+//! and decompression iterations so that each subsequent pass takes roughly one
+//! second of wall time, yielding stable throughput measurements regardless of
+//! input size.
+//!
+//! Buffer management is block-oriented.  The source is split into fixed-size
+//! chunks; each chunk owns pre-allocated compressed and result [`Vec`]s so that
+//! no heap allocation occurs inside the hot timing paths.
+//!
+//! After every decompression pass an XXH64 round-trip checksum verifies that
+//! the decompressed output is byte-for-byte identical to the original source.
 
 use std::io;
 use std::time::{Duration, Instant};
@@ -58,10 +37,8 @@ const LZ4_MAX_INPUT_SIZE: usize = 0x7E00_0000;
 
 /// Per-block data used by the timing loop.
 ///
-/// Mirrors `blockParam_t` (bench.c lines 347–355).  In C these are raw
-/// pointer + size pairs into flat malloc'd buffers; in Rust each block owns
-/// its storage so the borrow checker is satisfied without unsafe pointer
-/// arithmetic.
+/// Each block owns its pre-allocated storage, eliminating unsafe pointer
+/// arithmetic and ensuring no heap allocation occurs inside the hot timing loops.
 struct BlockParam {
     /// Byte range [src_offset .. src_offset + src_size] within `src`.
     src_offset: usize,
@@ -84,8 +61,6 @@ struct BlockParam {
 // ── Public types ──────────────────────────────────────────────────────────────
 
 /// Source and compressed data carrier for callers that manage their own buffers.
-///
-/// Corresponds to `pub struct BlockParams` specified in the migration plan.
 pub struct BlockParams {
     pub src: Vec<u8>,
     pub compressed: Vec<u8>,
@@ -110,25 +85,27 @@ pub struct BenchResult {
 
 // ── bench_mem ─────────────────────────────────────────────────────────────────
 
-/// Core benchmark timing loop.
+/// Core adaptive benchmark timing loop.
 ///
-/// Migrated from `BMK_benchMem` (bench.c lines 360–619).
+/// Compresses and decompresses `src` repeatedly, self-calibrating the number of
+/// iterations after each pass to target roughly one second of wall time per
+/// phase.  Returns throughput measurements once both phases have accumulated
+/// enough wall time (governed by `config.nb_seconds`).
 ///
 /// # Parameters
-/// - `src`            — input data to compress (and decompress back).
+/// - `src`            — input data to compress and then decompress back.
 /// - `display_name`   — label printed in the progress line (≤17 chars displayed).
 /// - `config`         — runtime benchmark parameters.
-/// - `c_level`        — compression level (for display only; strategy was
+/// - `c_level`        — compression level (for display only; `strategy` was
 ///                      already constructed from this level by the caller).
-/// - `strategy`       — mutable compression strategy (owns stream state).
+/// - `strategy`       — mutable compression strategy (owns any stream state).
 /// - `decompressor`   — frame decompressor used in `decode_only` mode.
 /// - `dict`           — optional dictionary bytes; empty slice means no dict.
-/// - `file_sizes`     — per-file byte counts within `src` (matches C `fileSizes`/
-///                      `nbFiles`). An empty slice means treat `src` as a single
-///                      file (backward-compatible single-file mode).
+/// - `file_sizes`     — per-file byte counts within `src`.  An empty slice
+///                      means treat the entire `src` as a single file.
 ///
 /// # Returns
-/// `Ok(BenchResult)` on success, or `Err` if allocation or compression fails.
+/// `Ok(BenchResult)` on success, or `Err` if compression or checksum verification fails.
 pub fn bench_mem(
     src: &[u8],
     display_name: &str,
@@ -143,16 +120,19 @@ pub fn bench_mem(
 
     // ── block-size selection ──────────────────────────────────────────────────
     //
-    // C: blockSize = (g_blockSize>=32 && !g_decodeOnly ? g_blockSize : srcSize)
-    //                + (!srcSize)  /* avoid div by 0 */
+    // Use the configured block size when it is ≥ 32 bytes and we are not in
+    // decode-only mode; otherwise fall back to the total source size so that
+    // the entire input is treated as a single block.  Add 1 when src is empty
+    // to prevent division by zero in the loop-count calculation below.
     let block_size = if config.block_size >= 32 && !config.decode_only {
         config.block_size
     } else {
         src_size
     } + if src_size == 0 { 1 } else { 0 };
 
-    // C: maxNbBlocks = (srcSize + blockSize-1)/blockSize + nbFiles  (bench.c line 366)
-    // When file_sizes is empty, treat src as a single file (backward-compatible).
+    // Upper bound on the number of blocks across all files.  Each file may
+    // contribute a partial final block, so we add `nb_files` to account for
+    // those remainders.  When file_sizes is empty, treat src as a single file.
     let nb_files = if file_sizes.is_empty() { 1 } else { file_sizes.len() };
     let max_nb_blocks = (src_size + block_size - 1) / block_size + nb_files;
 
@@ -165,19 +145,16 @@ pub fn bench_mem(
         LZ4_MAX_INPUT_SIZE
     };
 
-    // ── validate allocation sizes ─────────────────────────────────────────────
-    //
-    // C: END_PROCESS(31, "allocation error : not enough memory") if any alloc
-    // fails.  In Rust, Vec::new() + resize() propagate OOM via panic or
-    // (with allocator_api) Err; we let the caller handle OOM naturally.
+    // `max_dec_size` feeds into per-block `res_capa` below.  Vec allocation
+    // failures propagate naturally as panics (or Err with allocator_api); no
+    // explicit check is needed here.
     let _ = max_dec_size; // referenced indirectly via per-block res_capa
 
     // ── build block table ─────────────────────────────────────────────────────
     //
-    // C: Init blockTable data (bench.c lines 393–415).
-    // Iterates per-file so the last block of each file may be smaller than
-    // blockSize, matching C's `fileSizes[fileNb]`-driven inner loop.
-    // When file_sizes is empty, the entire src is treated as a single file.
+    // Iterate per-file so that the last block of each file may be smaller than
+    // `block_size`.  When `file_sizes` is empty, the entire `src` is treated
+    // as a single file.
     let mut block_table: Vec<BlockParam> = Vec::with_capacity(max_nb_blocks);
     {
         let single_file_sizes = [src_size];
@@ -194,10 +171,10 @@ pub fn bench_mem(
             for _ in 0..nb_blocks_for_this_file {
                 let this_block_size = remaining.min(block_size);
 
-                // C: cRoom = LZ4_compressBound(thisBlockSize)
+                // Worst-case compressed size; pre-allocated so the timing loop never reallocates.
                 let c_room = compress_bound(this_block_size as i32) as usize;
 
-                // C: resMaxSize = thisBlockSize * decMultiplier (capped at LZ4_MAX_INPUT_SIZE)
+                // Maximum decompressed output size, capped at LZ4_MAX_INPUT_SIZE.
                 let res_max_size = this_block_size * dec_multiplier;
                 let res_capa = if this_block_size < max_in_size {
                     res_max_size
@@ -209,7 +186,9 @@ pub fn bench_mem(
                 let mut c_buf = vec![0u8; c_room];
                 let res_buf = vec![0u8; res_capa];
 
-                // decode-only init: copy src block into c_buf (C lines 421–426).
+                // In decode-only mode the compressed buffer is pre-filled with
+                // the raw source bytes so decompression can run without a prior
+                // compression pass.
                 let c_size_init = if config.decode_only {
                     let copy_len = this_block_size.min(c_buf.len());
                     c_buf[..copy_len].copy_from_slice(&src[src_offset..src_offset + copy_len]);
@@ -246,19 +225,21 @@ pub fn bench_mem(
         }
     }
 
-    // ── truncate display name to 17 chars (C line 382) ───────────────────────
+    // ── truncate display name to 17 chars ───────────────────────────────────
     let display_name: &str = if display_name.len() > 17 {
         &display_name[display_name.len() - 17..]
     } else {
         display_name
     };
 
-    // ── initial warm-up: memset compressedBuffer to ' ' (C line 418) ─────────
+    // ── initial warm-up: fill compressed buffers ───────────────────────────────
+    // Filling with a known byte pattern before the first pass ensures cache
+    // and memory state is consistent across runs.
     for block in &mut block_table {
         block.c_buf.fill(b' ');
     }
 
-    // ── bench timing loop (C lines 429–611) ───────────────────────────────────
+    // ── adaptive benchmark timing loop ────────────────────────────────────────
     let mut fastest_c_ns: u64 = u64::MAX;
     let mut fastest_d_ns: u64 = u64::MAX;
     let crc_orig: u64 = xxh64_oneshot(src, 0);
@@ -270,7 +251,7 @@ pub fn bench_mem(
     let mut total_c_time_ns: u64 = 0;
     let mut total_d_time_ns: u64 = 0;
 
-    // cCompleted=1 when decode_only (compression phase skipped); C line 436.
+    // In decode-only mode the compression phase is skipped entirely.
     let mut c_completed: bool = config.decode_only;
     let mut d_completed: bool = false;
 
@@ -282,12 +263,11 @@ pub fn bench_mem(
     let mut total_r_size: usize = src_size; // C line 441
     let mut ratio: f64 = 0.0;
 
-    // mirror C: DISPLAYLEVEL(2, "\r%79s\r", "")
     if config.display_level >= 2 {
         eprint!("\r{:79}\r", "");
     }
 
-    // mirror C: if (g_nbSeconds==0) { nbCompressionLoops = 1; nbDecodeLoops = 1; }
+    // When nb_seconds is 0, run exactly one loop iteration (single-pass mode).
     if config.nb_seconds == 0 {
         nb_compression_loops = 1;
         nb_decode_loops = 1;
@@ -296,7 +276,9 @@ pub fn bench_mem(
     let mut bench_error = false;
 
     while !c_completed || !d_completed {
-        // ── overheat protection (C lines 447–452) ────────────────────────────
+        // ── overheat protection ────────────────────────────────────────────────
+        // If the active measurement period exceeds the threshold, sleep briefly
+        // to allow the CPU to cool before taking the next timing sample.
         if cool_time.elapsed().as_nanos() as u64 > ACTIVEPERIOD_NANOSEC {
             if config.display_level >= 2 {
                 eprint!("\rcooling down ...    \r");
@@ -305,7 +287,7 @@ pub fn bench_mem(
             cool_time = Instant::now();
         }
 
-        // ── compression phase (C lines 454–505) ──────────────────────────────
+        // ── compression phase ───────────────────────────────────────────────────
         if config.display_level >= 2 {
             eprint!(
                 "{}-{:<17.17} :{:>10} ->\r",
@@ -314,23 +296,26 @@ pub fn bench_mem(
         }
 
         if !c_completed {
-            // warm up compressed buffer (C line 457)
+            // Fill compressed buffers with a known byte pattern before timing
+            // to prevent the OS from skipping physical page mapping (demand-zero).
             for block in &mut block_table {
                 block.c_buf.fill(0xE5);
                 block.c_size = 0;
             }
         }
 
-        // UTIL_sleepMilli(1) + TIME_waitForNextTick (C lines 461–462)
+        // Brief sleep before starting the timed region.  Two back-to-back
+        // 1 ms sleeps approximate a "wait for next OS scheduler tick" without
+        // requiring a platform-specific tick API.
         std::thread::sleep(Duration::from_millis(1));
-        std::thread::sleep(Duration::from_millis(1)); // approximate TIME_waitForNextTick
+        std::thread::sleep(Duration::from_millis(1));
 
         if !c_completed {
             let time_start = Instant::now();
 
             'compress_outer: for _ in 0..nb_compression_loops {
-                // compP.resetFunction is called inside strategy's compress_block
-                // (the trait impl resets stream state before each block).
+                // `compress_block` resets any internal stream state on each call
+                // (required by the `CompressionStrategy` contract).
                 for block in &mut block_table {
                     let compressed = strategy.compress_block(
                         &src[block.src_offset..block.src_offset + block.src_size],
@@ -369,7 +354,7 @@ pub fn bench_mem(
             total_c_time_ns += duration_ns;
             c_completed = total_c_time_ns > max_time_ns;
 
-            // recalculate compressed total (C lines 495–498)
+            // Sum compressed sizes across blocks to compute the overall ratio.
             c_size = block_table.iter().map(|b| b.c_size).sum::<usize>();
             if c_size == 0 {
                 c_size = 1; // avoid div by 0
@@ -378,7 +363,6 @@ pub fn bench_mem(
 
             mark_nb = (mark_nb + 1) % NB_MARKS;
             if config.display_level >= 2 {
-                // OUTLEVEL(2, ...) mirrors C line 500
                 eprint!(
                     "{}-{:<17.17} :{:>10} ->{:>10} ({:5.3}),{:6.1} MB/s\r",
                     MARKS[mark_nb],
@@ -391,18 +375,21 @@ pub fn bench_mem(
             }
         }
 
-        // ── decompression phase (C lines 508–595) ────────────────────────────
+        // ── decompression phase ───────────────────────────────────────────────
 
-        // warm up result buffer (C line 509)
+        // Fill result buffers with a known byte pattern before timing to prevent
+        // demand-zero pages from inflating measurement latency.
         if !d_completed {
             for block in &mut block_table {
                 block.res_buf.fill(0xD6);
             }
         }
 
-        // UTIL_sleepMilli(5) + TIME_waitForNextTick (C lines 511–512)
+        // Sleep before the timed decompression region.  A 5 ms pause gives the
+        // CPU a moment to settle; the follow-up 1 ms sleep approximates a
+        // scheduler-tick boundary without a platform tick API.
         std::thread::sleep(Duration::from_millis(5));
-        std::thread::sleep(Duration::from_millis(1)); // approximate TIME_waitForNextTick
+        std::thread::sleep(Duration::from_millis(1));
 
         if !d_completed {
             let time_start = Instant::now();
@@ -417,10 +404,9 @@ pub fn bench_mem(
                     };
 
                     if config.decode_only {
-                        // Frame decompression (C: LZ4F_decompress_binding).
-                        // Mirrors g_decodeOnly branch (bench.c line 515-516).
-                        // Use a temp Vec to satisfy FrameDecoder's append API;
-                        // then copy into the pre-sized res_buf.
+                        // LZ4 Frame decompression path.  `decompress_frame_block`
+                        // appends into a caller-supplied Vec, so we use a
+                        // temporary buffer and then copy into the pre-sized res_buf.
                         let mut tmp = Vec::new();
                         match decompress_frame_block(
                             decompressor,
@@ -443,9 +429,10 @@ pub fn bench_mem(
                             }
                         }
                     } else {
-                        // Block decompression (native crate::block::decompress_safe_using_dict).
-                        // SAFETY: block.c_buf and block.res_buf are valid, non-overlapping
-                        // heap allocations. dict is a valid slice.
+                        // LZ4 raw-block decompression with optional dictionary.
+                        // SAFETY: `block.c_buf` and `block.res_buf` are distinct,
+                        // valid heap allocations.  `dict` is a valid slice (possibly
+                        // empty when no dictionary is used).
                         let result = unsafe {
                             decompress_safe_using_dict(
                                 block.c_buf.as_ptr(),
@@ -488,7 +475,8 @@ pub fn bench_mem(
             d_completed = total_d_time_ns > (DECOMP_MULT as u64 * max_time_ns);
         }
 
-        // update total_r_size in decode-only mode (C lines 557–561)
+        // In decode-only mode the "source" size is the decompressed output
+        // from this pass rather than the original input length.
         if config.decode_only {
             total_r_size = block_table.iter().map(|b| b.res_size).sum();
         }
@@ -524,9 +512,10 @@ pub fn bench_mem(
             );
         }
 
-        // ── CRC checksum verification (C lines 571–596) ──────────────────────
+        // ── CRC checksum verification ────────────────────────────────────────
+        // Compare an XXH64 digest of the round-tripped data against the digest
+        // of the original source.  Any mismatch indicates a decompression bug.
         if !config.decode_only {
-            // Collect decompressed bytes across all blocks.
             let mut result_bytes: Vec<u8> =
                 Vec::with_capacity(block_table.iter().map(|b| b.res_size).sum());
             for block in &block_table {
@@ -540,6 +529,7 @@ pub fn bench_mem(
                     display_name, crc_orig, crc_check
                 );
                 bench_error = true;
+                // Scan for the first differing byte to aid debugging.
                 for (u, (&src_b, &res_b)) in
                     src.iter().zip(result_bytes.iter()).enumerate()
                 {
@@ -556,7 +546,7 @@ pub fn bench_mem(
         }
     } // while !c_completed || !d_completed
 
-    // ── final output line (C lines 600–610) ──────────────────────────────────
+    // ── final output ──────────────────────────────────────────────────────────
     let compress_speed_mb_s = if fastest_c_ns > 0 && fastest_c_ns != u64::MAX {
         (src_size as f64 / fastest_c_ns as f64) * 1000.0
     } else {
@@ -568,12 +558,11 @@ pub fn bench_mem(
         0.0
     };
 
-    // OUTLEVEL(2, "%2i#\n", cLevel)
     if config.display_level >= 2 {
         eprintln!("{:2}#", c_level);
     }
 
-    // quiet mode (C lines 603–610): display_level == 1
+    // Quiet mode: print a single summary line without a progress spinner.
     if config.display_level == 1 {
         print!(
             "-{:<3}{:>11} ({:5.3}) {:6.2} MB/s {:6.1} MB/s  {}",
@@ -618,8 +607,8 @@ mod tests {
 
     #[test]
     fn bench_mem_1mb_level1() {
-        // Verification criterion from migration plan:
-        // "bench_mem completes without error on a 1 MB buffer at level 1"
+        // Smoke test: bench_mem must complete without error on a 1 MB buffer
+        // at level 1 and return plausible throughput values.
         let src = make_1mb_buf();
         let config = {
             let mut c = BenchConfig::default();

@@ -1,6 +1,6 @@
 //! LZ4 HC public API.
 //!
-//! Translated from lz4hc.c v1.10.0, lines 1486–2192.
+//! Corresponds to lz4hc.c v1.10.0 (lines 1486–2192).
 //!
 //! ## Function Map
 //!
@@ -35,7 +35,7 @@
 //!   dictionary buffer must likewise remain accessible.
 //! - If `None`, any existing dictionary association is detached.
 //!
-//! Deprecated functions are **not** migrated.
+//! Deprecated LZ4 HC functions are not exposed by this module.
 
 use core::mem;
 
@@ -84,8 +84,8 @@ impl Lz4StreamHc {
     }
 }
 
-// `LZ4_freeStreamHC` → simply `drop(box_stream)` in Rust.
-// Rust's `Drop` trait handles deallocation automatically.
+// Dropping a `Box<Lz4StreamHc>` frees the allocation; no explicit free
+// function is needed thanks to Rust's `Drop` trait.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LZ4_sizeofStateHC  (lz4hc.c:1486)
@@ -200,7 +200,7 @@ pub unsafe fn compress_hc_ext_state(
     dst_capacity: i32,
     compression_level: i32,
 ) -> i32 {
-    // Full init (mirrors LZ4_initStreamHC in C)
+    // Full re-initialisation ensures a safe starting state regardless of prior use.
     init_stream_hc(state);
     compress_hc_ext_state_fast_reset(state, src, dst, src_size, dst_capacity, compression_level)
 }
@@ -261,7 +261,8 @@ pub unsafe fn compress_hc_dest_size(
     target_dst_size: i32,
     c_level: i32,
 ) -> i32 {
-    // Full init, then override compression level (mirrors C exactly)
+    // Full initialisation resets the compression level to its default;
+    // we then apply the caller-supplied level before compressing.
     init_stream_hc(state);
     init_internal(&mut state.ctx, src);
     set_compression_level(state, c_level);

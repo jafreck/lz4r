@@ -158,7 +158,7 @@ fn error_out_exits_with_code_1() {
     // Mirrors `errorOut` which always calls exit(1).
     let exe = std::env::current_exe().expect("could not find test executable");
     let output = std::process::Command::new(&exe)
-        .args(["subprocess_helper_error_out", "--exact", "--nocapture"])
+        .args(["help::subprocess_helper_error_out", "--exact", "--nocapture"])
         .env("LZ4_TEST_ERROR_OUT", "1")
         .output()
         .expect("failed to spawn subprocess");
@@ -176,7 +176,7 @@ fn print_bad_usage_exits_with_code_1() {
     // Mirrors `badusage` which always calls exit(1).
     let exe = std::env::current_exe().expect("could not find test executable");
     let output = std::process::Command::new(&exe)
-        .args(["subprocess_helper_bad_usage", "--exact", "--nocapture"])
+        .args(["help::subprocess_helper_bad_usage", "--exact", "--nocapture"])
         .env("LZ4_TEST_BAD_USAGE", "1")
         .output()
         .expect("failed to spawn subprocess");
@@ -194,7 +194,7 @@ fn wait_enter_returns_gracefully_on_eof_stdin() {
     // gracefully on EOF, then exit(0). Mirrors waitEnter's EOF handling.
     let exe = std::env::current_exe().expect("could not find test executable");
     let output = std::process::Command::new(&exe)
-        .args(["subprocess_helper_wait_enter", "--exact", "--nocapture"])
+        .args(["help::subprocess_helper_wait_enter", "--exact", "--nocapture"])
         .env("LZ4_TEST_WAIT_ENTER", "1")
         .stdin(std::process::Stdio::null())
         .output()

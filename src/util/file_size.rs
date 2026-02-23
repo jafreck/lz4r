@@ -1,24 +1,20 @@
-//! File size utility functions.
+//! File size queries backed by `std::fs` metadata.
 //!
-//! Migrated from `util.h` lines 319–354 (Section 15):
-//! - `UTIL_getOpenFileSize`  → [`get_open_file_size`]
-//! - `UTIL_getFileSize`      → [`get_file_size`]
-//! - `UTIL_getTotalFileSize` → [`get_total_file_size`]
+//! Provides three functions:
+//! - [`get_open_file_size`]  — byte length of an already-open [`std::fs::File`]
+//! - [`get_file_size`]       — byte length of a file at a given path
+//! - [`get_total_file_size`] — summed byte length over a slice of paths
 //!
-//! All platform-specific stat/fileno/fstat branches are replaced by
-//! `std::fs::File::metadata()` and `std::fs::metadata()`, which return
-//! `std::fs::Metadata` on every supported platform.
+//! Non-regular files (directories, pipes, sockets) and unreachable paths
+//! contribute `0`, avoiding error propagation through bulk size operations.
 
 use std::fs::{self, File};
 use std::path::Path;
 
 /// Returns the size in bytes of the open file `file`.
 ///
-/// Returns `0` if the underlying file descriptor does not refer to a regular
-/// file (e.g. stdin/stdout, a pipe, or a directory), mirroring the C source's
-/// `if (r || !UTIL_STAT_MODE_ISREG(statbuf.st_mode)) return 0` guard.
-///
-/// Corresponds to `UTIL_getOpenFileSize` (util.h lines 319–332).
+/// Returns `0` if `file` does not refer to a regular file (e.g. stdin, a pipe,
+/// or a directory). Use [`get_file_size`] when only a path is available.
 pub fn get_open_file_size(file: &File) -> u64 {
     file.metadata()
         .ok()
@@ -29,11 +25,9 @@ pub fn get_open_file_size(file: &File) -> u64 {
 
 /// Returns the size in bytes of the regular file at `path`.
 ///
-/// Returns `0` if the path does not exist, is not a regular file, or
-/// cannot be stat-ted — matching the C source's
-/// `if (r || !UTIL_STAT_MODE_ISREG(statbuf.st_mode)) return 0` guard.
-///
-/// Corresponds to `UTIL_getFileSize` (util.h lines 335–344).
+/// Returns `0` if the path does not exist, is not a regular file, or cannot
+/// be stat-ted. This makes the function safe to use in accumulation loops
+/// without requiring callers to handle per-file errors.
 pub fn get_file_size(path: &Path) -> u64 {
     fs::metadata(path)
         .ok()
@@ -44,11 +38,8 @@ pub fn get_file_size(path: &Path) -> u64 {
 
 /// Returns the total size in bytes of all regular files in `paths`.
 ///
-/// Each element is processed by [`get_file_size`]; non-regular files and
-/// paths that cannot be stat-ted contribute `0`, matching the C source's
-/// accumulation loop.
-///
-/// Corresponds to `UTIL_getTotalFileSize` (util.h lines 347–354).
+/// Each element is queried with [`get_file_size`]; non-regular files and
+/// unreachable paths contribute `0`. Returns `0` for an empty slice.
 pub fn get_total_file_size(paths: &[&Path]) -> u64 {
     paths.iter().map(|p| get_file_size(p)).sum()
 }

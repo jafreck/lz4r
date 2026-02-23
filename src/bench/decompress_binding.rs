@@ -1,34 +1,13 @@
-/*
-    bench/decompress_binding.rs — LZ4 Frame decompression binding
-    Migrated from lz4-1.10.0/programs/bench.c (lines 315–341)
-
-    Original copyright (C) Yann Collet 2012-2020 — GPL v2 License.
-
-    Migration notes:
-    - `DecFunction_f` (C typedef, lines 315–317): a function-pointer type used
-      by the benchmark loop to call any decompression implementation through a
-      uniform signature. Represented in Rust as a type alias `DecFunctionF`.
-      `dst_capacity` is preserved (mirrors the C parameter); `dictStart`/
-      `dictSize` are dropped because the C source explicitly ignores them too.
-    - `g_dctx` (C global `LZ4F_dctx*`, line 319): never freed in C; lives for
-      the process lifetime. In Rust, replaced by `FrameDecompressor` which
-      creates a fresh `Lz4FDCtx` per call (`decompress_frame_block`) rather than
-      reusing across calls. This avoids unsafe statics while preserving the same
-      observable behaviour (each call fully decompresses one independent LZ4
-      frame).
-    - `LZ4F_decompress_binding` (lines 322–341): decompresses one LZ4-frame
-      block.  In C it returned -1 on error; in Rust we return `io::Error`.
-      `dst_capacity` is now enforced (returns an error if exceeded, matching C).
-      The input-consumption check (`readSize == srcSize`) is replicated by
-      tracking the cumulative `src_consumed` returned by `lz4f_decompress`.
-    - `dictStart`/`dictSize` parameters: the C source explicitly ignores them
-      (`(void)dictStart; (void)dictSize;`).  The Rust signature omits them
-      entirely for clarity.
-    - `skip_checksums`: the C code forwarded this via `LZ4F_decompressOptions_t`.
-      Now forwarded through `DecompressOptions { skip_checksums, .. }`.
-    - `stableData = 1`: set in C's `LZ4F_decompressOptions_t` as a performance
-      hint; mapped to `DecompressOptions { stable_dst: true, .. }`.
-*/
+//! Decompression binding for the benchmark harness.
+//!
+//! This module provides three public items that the benchmark loop builds on:
+//!
+//! - [`DecFunctionF`] — a uniform function-pointer type that lets the harness
+//!   call any decompression back-end through a single consistent signature.
+//! - [`FrameDecompressor`] — a lightweight session token that owns (or will
+//!   own) per-session decompression state.
+//! - [`decompress_frame_block`] — decompresses one complete LZ4 frame, enforces
+//!   an output-size cap, and verifies that all input bytes were consumed.
 
 use std::io;
 
@@ -37,20 +16,22 @@ use crate::frame::{
 };
 use crate::frame::types::LZ4F_VERSION;
 
-// ── DecFunction_f (bench.c lines 315–317) ────────────────────────────────────
+// ── DecFunctionF ─────────────────────────────────────────────────────────────
 
-/// Uniform function-pointer type for decompression implementations.
+/// Uniform function-pointer type for decompression back-ends used by the
+/// benchmark harness.
 ///
-/// Mirrors `typedef int (*DecFunction_f)(const char* src, char* dst,
-///   int srcSize, int dstCapacity, const char* dictStart, int dictSize)`.
+/// Every decompression implementation called during benchmarking must match
+/// this signature so the measurement loop can swap back-ends without
+/// structural changes.
 ///
-/// `dst_capacity` caps the number of bytes that may be appended to `dst`
-/// (mirrors the C `dstCapacity` parameter).  `dictStart`/`dictSize` are
-/// omitted because the C source explicitly ignores them.
+/// - `dst_capacity` — maximum bytes the callee may append to `dst`; the callee
+///   must return an error rather than exceed this limit.
+/// - `skip_checksums` — when `true`, content-checksum verification is skipped,
+///   reducing per-call overhead at the cost of integrity coverage.
 ///
-/// Returns the number of bytes written into `dst` on success, or an `io::Error`
-/// on failure.  The `skip_checksums` parameter replaces the global
-/// `g_skipChecksums` reference in the C binding.
+/// Returns the number of bytes written into `dst` on success, or an
+/// [`io::Error`] on failure.
 pub type DecFunctionF =
     fn(
         decompressor: &mut FrameDecompressor,
@@ -60,41 +41,41 @@ pub type DecFunctionF =
         skip_checksums: bool,
     ) -> io::Result<usize>;
 
-// ── FrameDecompressor (replaces g_dctx, bench.c line 319) ────────────────────
+// ── FrameDecompressor ────────────────────────────────────────────────────────
 
-/// Owns the decompression context for one benchmark session.
+/// Owns decompression state for one benchmark session.
 ///
-/// The C equivalent was a process-lifetime `static LZ4F_dctx* g_dctx`.
-/// In Rust we create a fresh context per call inside `decompress_frame_block`,
-/// so `FrameDecompressor` is currently a zero-sized sentinel.  It is kept as a
-/// named type so that the public API is stable and future versions can add
-/// state (e.g. a dictionary) without breaking callers.
+/// Currently zero-sized: [`decompress_frame_block`] creates a fresh
+/// [`Lz4FDCtx`] on each call rather than reusing one across calls, keeping
+/// each decompression independent. The named type exists so that future
+/// versions can carry persistent state (e.g. a pre-loaded dictionary) without
+/// breaking callers.
 #[derive(Debug, Default)]
 pub struct FrameDecompressor;
 
 impl FrameDecompressor {
-    /// Create a new `FrameDecompressor`.
+    /// Constructs a `FrameDecompressor` with no pre-loaded state.
     pub fn new() -> Self {
         FrameDecompressor
     }
 }
 
-// ── LZ4F_decompress_binding (bench.c lines 322–341) ──────────────────────────
+// ── decompress_frame_block ───────────────────────────────────────────────────
 
-/// Decompress one LZ4-frame block from `src`, appending output to `dst`.
+/// Decompress one complete LZ4 frame from `src`, appending output to `dst`.
 ///
-/// Mirrors `LZ4F_decompress_binding`.  A fresh [`Lz4FDCtx`] is created for
-/// every call, replacing the reuse of the global `g_dctx` in C.
+/// A fresh [`Lz4FDCtx`] is allocated per call, so each invocation is
+/// independent regardless of prior calls on the same [`FrameDecompressor`].
 ///
 /// # Parameters
-/// - `_decompressor`  — reserved for future state; unused today.
-/// - `src`            — complete, valid LZ4 frame data.
+/// - `_decompressor`  — reserved for future per-session state; currently unused.
+/// - `src`            — a complete, valid LZ4-frame byte sequence.
 /// - `dst`            — output buffer; decompressed bytes are appended.
-/// - `dst_capacity`   — maximum bytes that may be appended to `dst`; mirrors
-///   the C `dstCapacity` parameter.  Returns an error if the frame decompresses
-///   to more bytes than this limit (same as C returning −1).
-/// - `skip_checksums` — mirrors `g_skipChecksums`; forwarded via
-///   [`DecompressOptions`].
+/// - `dst_capacity`   — maximum bytes that may be appended to `dst`.  Returns
+///   an error if the decompressed output would exceed this limit; `dst` is
+///   rolled back to its pre-call length on failure.
+/// - `skip_checksums` — when `true`, content-checksum verification is skipped;
+///   forwarded via [`DecompressOptions`].
 ///
 /// # Returns
 /// The number of bytes appended to `dst`, or an [`io::Error`] on failure.
@@ -129,8 +110,8 @@ pub fn decompress_frame_block(
         if dst_written > 0 {
             total_written += dst_written;
 
-            // dstCapacity check: mirror C passing dstSize=dstCapacity to LZ4F_decompress.
-            // C returns -1 (error) if the frame decompresses to more than dstCapacity bytes.
+            // Enforce the output-size cap: roll back dst and fail if the
+            // decompressed output exceeds dst_capacity.
             if total_written > dst_capacity {
                 dst.truncate(before);
                 return Err(io::Error::new(
@@ -160,8 +141,8 @@ pub fn decompress_frame_block(
         }
     }
 
-    // Input-consumption check: mirror C's `(int)readSize == srcSize` assertion.
-    // C returns -1 if the decompressor did not consume all srcSize input bytes.
+    // Verify that all input bytes were consumed; leftover bytes indicate a
+    // malformed or truncated frame.
     if src_pos != src.len() {
         dst.truncate(before);
         return Err(io::Error::new(
@@ -204,7 +185,7 @@ mod tests {
 
     #[test]
     fn round_trip_1mb() {
-        // Parity check: decompress a 1 MiB buffer and verify correctness.
+        // Decompress a 1 MiB cyclic buffer and verify byte-for-byte correctness.
         let original: Vec<u8> = (0u8..=255).cycle().take(1024 * 1024).collect();
         let frame = compress_frame(&original);
 
@@ -249,7 +230,7 @@ mod tests {
 
     #[test]
     fn dst_capacity_exceeded_returns_error() {
-        // Mirrors C returning -1 when decompressed output > dstCapacity.
+        // Decompressed output larger than dst_capacity must produce an error.
         let data = b"hello, capacity check!";
         let frame = compress_frame(data);
         let mut dec = FrameDecompressor::new();

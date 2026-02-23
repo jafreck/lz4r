@@ -12,7 +12,6 @@
 
 use lz4::io::decompress_dispatch::{decompress_filename, decompress_multiple_filenames, DecompressStats};
 use lz4::io::prefs::{Prefs, LEGACY_BLOCKSIZE};
-use lz4_flex::frame::FrameEncoder;
 use std::fs;
 use std::io::Write;
 
@@ -22,11 +21,7 @@ use std::io::Write;
 
 /// Compress `data` into a valid LZ4 frame-format stream.
 fn make_frame_stream(data: &[u8]) -> Vec<u8> {
-    let mut compressed = Vec::new();
-    let mut encoder = FrameEncoder::new(&mut compressed);
-    encoder.write_all(data).expect("encode");
-    encoder.finish().expect("finish");
-    compressed
+    lz4::frame::compress_frame_to_vec(data)
 }
 
 /// Build a legacy-format LZ4 stream (magic + size-prefixed compressed blocks).
@@ -35,7 +30,7 @@ fn make_legacy_stream(data: &[u8]) -> Vec<u8> {
     let mut stream = Vec::new();
     stream.extend_from_slice(&LEGACY_MAGICNUMBER.to_le_bytes());
     for chunk in data.chunks(LEGACY_BLOCKSIZE) {
-        let compressed = lz4_flex::block::compress(chunk);
+        let compressed = lz4::block::compress_block_to_vec(chunk);
         stream.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
         stream.extend_from_slice(&compressed);
     }

@@ -1,6 +1,7 @@
-//! LZ4 Frame streaming compression.
+//! LZ4 frame-format streaming compression.
 //!
-//! Translated from lz4frame.c v1.10.0, lines 419–1244.
+//! Implements the full LZ4 frame compressor API, mirroring `lz4frame.c` v1.10.0
+//! (lines 419–1244) from the reference C implementation.
 //!
 //! # Coverage
 //! - cctx lifecycle: [`lz4f_create_compression_context`],
@@ -14,11 +15,11 @@
 //!   [`lz4f_uncompressed_update`], [`lz4f_flush`], [`lz4f_compress_end`]
 //! - One-shot: [`lz4f_compress_frame_using_cdict`], [`lz4f_compress_frame`]
 //!
-//! # goto elimination
-//! The three `goto _end` cleanup patterns in `LZ4F_compressFrame` and
-//! `LZ4F_compressFrame_usingCDict` are eliminated via Rust's RAII / `?`
-//! operator.  The temporary cctx in `lz4f_compress_frame` is a local
-//! `Box<Lz4FCCtx>` dropped at the end of the function regardless of success.
+//! # Resource management
+//! Compression contexts ([`Lz4FCCtx`]) implement [`Drop`], which frees the
+//! inner LZ4 or HC stream.  The one-shot [`lz4f_compress_frame`] allocates a
+//! temporary context via `Box`, ensuring cleanup on both success and error
+//! without explicit cleanup code.  Error propagation uses `?` throughout.
 
 use crate::block::compress::compress_fast_ext_state_fast_reset;
 use crate::block::stream::Lz4Stream;
@@ -132,6 +133,8 @@ fn select_compress_mode(
 // `lz4_ctx_alloc` tracks what type was Box-allocated (0=none, 1=Fast, 2=HC).
 // `lz4_ctx_type` tracks the currently initialised type.
 
+/// Read the raw inner-context pointer stored in `cctx.lz4_ctx`.
+/// Returns `0` if no pointer has been written yet.
 fn read_inner_ptr(cctx: &Lz4FCCtx) -> usize {
     match cctx.lz4_ctx.as_ref() {
         Some(v) if v.len() >= PTR_BYTES => {
@@ -141,6 +144,7 @@ fn read_inner_ptr(cctx: &Lz4FCCtx) -> usize {
     }
 }
 
+/// Write a raw pointer value into `cctx.lz4_ctx`, allocating the backing `Vec` if necessary.
 fn write_inner_ptr(cctx: &mut Lz4FCCtx, ptr: usize) {
     let bytes = ptr.to_ne_bytes();
     match cctx.lz4_ctx.as_mut() {
@@ -461,11 +465,11 @@ pub fn lz4f_create_compression_context(
 
 /// Free a compression context.
 ///
-/// Accepts `Box<Lz4FCCtx>`; all cleanup is handled by `Drop`.
+/// Accepts `Box<Lz4FCCtx>`; all cleanup is handled by [`Drop`].
 /// Mirrors `LZ4F_freeCompressionContext` (lz4frame.c:629–637).
 #[inline]
 pub fn lz4f_free_compression_context(_cctx: Box<Lz4FCCtx>) {
-    // dropping the Box calls Lz4FCCtx::drop which frees inner context
+    // `Drop` for `Lz4FCCtx` frees the inner LZ4/HC stream; nothing else needed.
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1084,8 +1088,7 @@ pub fn lz4f_compress_frame_using_cdict(
 ///
 /// Creates a temporary compression context internally; no external cctx needed.
 ///
-/// Mirrors `LZ4F_compressFrame` (lz4frame.c:484–524).
-/// The C `goto _end` cleanup is replaced by Rust's RAII drop at function exit.
+/// Corresponds to `LZ4F_compressFrame` (lz4frame.c:484–524).
 pub fn lz4f_compress_frame(
     dst: &mut [u8],
     src: &[u8],
@@ -1098,9 +1101,12 @@ pub fn lz4f_compress_frame(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Private helper: set HC compression level without resetting stream
+// Private helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Set the HC compression level on an already-initialised stream without
+/// resetting its match history.  Used when re-purposing an existing allocation
+/// for a different compression level.
 fn set_hc_level(stream: &mut Lz4StreamHc, level: i32) {
     hc_set_compression_level(stream, level);
 }
@@ -1116,7 +1122,7 @@ mod tests {
 
     // ── Frame header magic ────────────────────────────────────────────────────
 
-    /// Parity: magic number appears at byte offset 0 of any compressed frame.
+    /// Magic number `0x184D_2204` must appear at the first 4 bytes of any LZ4 frame.
     #[test]
     fn compress_frame_magic_number() {
         let src = b"hello world";
@@ -1128,7 +1134,7 @@ mod tests {
         assert_eq!(magic, LZ4F_MAGIC_NUMBER, "magic number must be 0x184D2204");
     }
 
-    /// Parity: frame magic number constant matches C LZ4F_MAGICNUMBER.
+    /// `LZ4F_MAGIC_NUMBER` must equal `0x184D_2204` as specified by the LZ4 frame format.
     #[test]
     fn magic_constant() {
         assert_eq!(LZ4F_MAGIC_NUMBER, 0x184D_2204u32);

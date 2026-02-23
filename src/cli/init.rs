@@ -1,28 +1,12 @@
-// cli/init.rs — Rust port of lz4cli.c lines 388–441 (declaration #22 partial)
-//
-// Migrated from: lz4-src/lz4-1.10.0/programs/lz4cli.c
-// Task: task-033 — main Initialization and Alias Detection (Chunk 5)
-//
-// Covers:
-//   - `CliInit` struct holding the initial state for the CLI
-//   - `detect_alias()` — mirrors binary-name detection logic at lz4cli.c lines 427–439
-//     (lz4cat → decompress + stdout + multiple_inputs; unlz4 → decompress; lz4c → legacy)
-//
-// Migration decisions:
-//   - C `LZ4IO_defaultPreferences()` (heap-allocated opaque struct) →
-//     `Prefs::default()` (owned value, freed automatically by Rust).
-//   - C `inFileNames` array allocation (`calloc`) → `Vec<String>` owned by caller.
-//   - C `forceStdout` / `output_filename=stdoutmark` → `force_stdout: bool` +
-//     `output_filename: Option<String>` set to `Some(STDOUT_MARK.to_owned())`.
-//   - C `g_lz4c_legacy_commands = 1` global side-effect → `lz4c_legacy: bool` field
-//     on `CliInit`; the global `LZ4C_LEGACY_COMMANDS` is also updated for callers that
-//     read the atomic directly.
-//   - C `displayLevel = 1` global side-effect → `display_level_override: Option<u32>`
-//     returned to the caller, who should apply it via `set_display_level`.
-//   - `LZ4IO_setBlockSizeID(prefs, LZ4_BLOCKSIZEID_DEFAULT)` sets `prefs.block_size`;
-//     we replicate this by calling `prefs.set_block_size_id(LZ4IO_BLOCKSIZEID_DEFAULT)`.
-//   - `LZ4IO_setOverwrite(prefs, 0)` after init → `prefs.overwrite = false` (default is
-//     `true`; the C main immediately overrides it to 0 for the common path).
+//! CLI initialization and binary-alias detection.
+//!
+//! When LZ4 is installed under multiple names (`lz4cat`, `unlz4`, `lz4c`)
+//! via hard or symbolic links, the program detects which operation mode to
+//! enter from `argv[0]` before any flag parsing takes place.
+//!
+//! [`detect_alias`] encapsulates that detection and returns a [`CliInit`]
+//! carrying the pre-parsed defaults.  The argument parser in [`crate::cli`]
+//! then layers explicit flags on top of these values.
 
 use crate::cli::arg_utils::{exe_name_match, last_name_from_path};
 use crate::cli::constants::{set_display_level, set_lz4c_legacy_commands, LZ4CAT, LZ4_LEGACY, UNLZ4};
@@ -30,12 +14,13 @@ use crate::cli::op_mode::{init_c_level, init_nb_workers, OpMode};
 use crate::io::prefs::{Prefs, LZ4IO_BLOCKSIZEID_DEFAULT};
 use crate::io::file_io::STDOUT_MARK;
 
-/// Initial CLI state derived from the binary name and environment variables.
+/// Initial CLI state derived from the binary name and environment.
 ///
-/// Equivalent to the locals and setup performed in C `main()` at lines 388–441.
+/// Built by [`detect_alias`] before argument parsing begins; the argument
+/// parser layers explicit flags on top of these defaults.
 #[derive(Debug, Clone)]
 pub struct CliInit {
-    /// Compression preferences, initialised to defaults (mirrors `LZ4IO_defaultPreferences`).
+    /// Compression preferences initialised to library defaults.
     pub prefs: Prefs,
     /// Initial operation mode — overridden by alias detection before argument parsing.
     pub op_mode: OpMode,
@@ -56,33 +41,29 @@ pub struct CliInit {
     pub display_level_override: Option<u32>,
 }
 
-/// Detect the operation mode and initial settings from the argv\[0\] binary name.
+/// Detect the operation mode and initial settings from `argv[0]`.
 ///
-/// Mirrors the alias-detection block in C `main()` (lz4cli.c lines 427–439):
+/// LZ4 ships as several alias binaries that each select a different default
+/// mode before any flags are parsed:
 ///
-/// ```c
-/// if (exeNameMatch(exeName, LZ4CAT)) {
-///     mode = om_decompress; overwrite=1; passThrough=1; removeSrc=0;
-///     forceStdout=1; output_filename=stdoutmark; displayLevel=1;
-///     multiple_inputs=1;
-/// }
-/// if (exeNameMatch(exeName, UNLZ4))     { mode = om_decompress; }
-/// if (exeNameMatch(exeName, LZ4_LEGACY)){ g_lz4c_legacy_commands=1; }
-/// ```
+/// | Binary name | Effect                                                          |
+/// |-------------|----------------------------------------------------------------|
+/// | `lz4cat`    | Decompress + pass-through + force stdout + multiple inputs     |
+/// | `unlz4`     | Decompress only                                                |
+/// | `lz4c`      | Enable legacy option spellings                                 |
 ///
-/// `argv0` is the raw argv\[0\] string; `last_name_from_path` is applied internally
-/// (mirrors `lastNameFromPath(argv[0])` at line 412).
+/// `argv0` may be a full path; the basename is extracted internally.
 ///
-/// The function also sets the `LZ4C_LEGACY_COMMANDS` atomic and optionally the
-/// display-level atomic as side-effects, matching the C global mutations.
+/// As a side effect, the `LZ4C_LEGACY_COMMANDS` atomic and the display-level
+/// atomic are updated to match any alias-specific global state, so that code
+/// reading those atomics directly sees consistent values.
 pub fn detect_alias(argv0: &str) -> CliInit {
     let exe_name = last_name_from_path(argv0);
 
     let mut prefs = Prefs::default();
-    // C: LZ4IO_setOverwrite(prefs, 0) — the default `Prefs` has overwrite=true;
-    // main() immediately sets it to 0 for the normal (non-lz4cat) path.
+    // `Prefs::default()` sets overwrite to true; the normal invocation path starts
+    // with it disabled.  The lz4cat branch below re-enables it explicitly.
     prefs.overwrite = false;
-    // C: blockSize = LZ4IO_setBlockSizeID(prefs, LZ4_BLOCKSIZEID_DEFAULT)
     prefs.set_block_size_id(LZ4IO_BLOCKSIZEID_DEFAULT);
 
     let mut op_mode = OpMode::Auto;
@@ -92,7 +73,7 @@ pub fn detect_alias(argv0: &str) -> CliInit {
     let mut output_filename: Option<String> = None;
     let mut display_level_override: Option<u32> = None;
 
-    // lz4cat alias (lz4cli.c lines 428–437)
+    // lz4cat: decompress to stdout, accept multiple inputs, quiet verbosity (level 1).
     if exe_name_match(exe_name, LZ4CAT) {
         op_mode = OpMode::Decompress;
         prefs.set_overwrite(true);
@@ -102,19 +83,21 @@ pub fn detect_alias(argv0: &str) -> CliInit {
         output_filename = Some(STDOUT_MARK.to_owned());
         display_level_override = Some(1);
         multiple_inputs = true;
-        // Mirror global side-effect: displayLevel = 1
+        // Sync the global display-level atomic so callers that read it directly
+        // also observe level 1 without waiting for the caller to apply the override.
         set_display_level(1);
     }
 
-    // unlz4 alias (lz4cli.c line 438)
+    // unlz4: decompress only; all other settings remain at their defaults.
     if exe_name_match(exe_name, UNLZ4) {
         op_mode = OpMode::Decompress;
     }
 
-    // lz4c (legacy) alias (lz4cli.c line 439)
+    // lz4c: keep default compress mode but enable legacy-style option parsing.
     if exe_name_match(exe_name, LZ4_LEGACY) {
         lz4c_legacy = true;
-        // Mirror global side-effect: g_lz4c_legacy_commands = 1
+        // Sync the global atomic so callers that read LZ4C_LEGACY_COMMANDS directly
+        // also observe legacy mode.
         set_lz4c_legacy_commands(true);
     }
 
@@ -137,7 +120,7 @@ mod tests {
     use crate::cli::op_mode::OpMode;
     use crate::cli::constants::{set_display_level, set_lz4c_legacy_commands, lz4c_legacy_commands};
 
-    // Helper: reset global state so tests don't interfere with each other.
+    // Reset shared atomics before each test to prevent inter-test interference.
     fn reset_globals() {
         set_display_level(2);
         set_lz4c_legacy_commands(false);

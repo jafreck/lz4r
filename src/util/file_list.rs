@@ -1,39 +1,32 @@
 //! File list construction with recursive directory expansion.
 //!
-//! Replaces the three platform-specific `UTIL_prepareFileList` implementations
-//! (Win32, POSIX, stub) and `UTIL_createFileList`/`UTIL_freeFileList` from
-//! `util.h` sections 16–19 (lines 357–560).
+//! Given a mixed list of file and directory paths, [`create_file_list`] returns
+//! a flat `Vec<PathBuf>` containing only regular files. Directories are walked
+//! recursively using the [`walkdir`] crate.
 //!
-//! Instead of a flat heap buffer with a pointer table, this module returns a
-//! `Vec<PathBuf>` — ownership is handled automatically.
-//!
-//! **Symlink handling**: Unlike the C POSIX implementation (which uses `stat()`
-//! and therefore follows symlinks), this implementation uses `walkdir` with its
-//! default `follow_links(false)` setting. Symlink entries are not treated as
-//! regular files and symlinks to directories are not recursed into. This is an
-//! intentional divergence that avoids infinite loops from symlink cycles.
+//! **Symlink handling**: Symlinks are never followed during directory traversal.
+//! `walkdir` runs with its default `follow_links(false)` setting, so symlink
+//! entries report a symlink `file_type()` rather than the target's type and are
+//! excluded from the result. This prevents infinite loops from cyclic symlinks.
+//! A symlink passed directly as a non-directory input is forwarded as-is.
 
 use std::io;
 use std::path::{Path, PathBuf};
 
 use walkdir::WalkDir;
 
-/// Expand a mixed list of files and directories into a flat list of regular files.
+/// Expand a mixed list of file and directory paths into a flat list of regular files.
 ///
-/// Behavioural notes relative to `UTIL_createFileList`:
-/// - Regular files in `inputs` are passed through unchanged.
-/// - Directories are walked recursively; only regular files (`ft.is_file()`)
-///   are included. Symlinks to directories are **not** followed and symlinks
-///   to regular files are **not** included — walkdir's default
-///   `follow_links(false)` is used, so symlink entries have a symlink
-///   `file_type()` rather than the target's type.
-/// - If a directory cannot be opened or a `readdir` call fails, an
-///   `io::Error` is returned (the C code printed to stderr and returned 0;
-///   here we surface the error to the caller instead).
+/// - Paths that are already regular files are forwarded unchanged.
+/// - Directories are walked recursively; only entries whose
+///   `file_type().is_file()` returns `true` are included. Symlinks are excluded
+///   regardless of target type — `walkdir` uses `follow_links(false)`.
+/// - If any directory entry cannot be read, the walk is aborted and an
+///   `io::Error` is returned. Callers that prefer best-effort enumeration
+///   should handle or filter errors before calling this function.
 ///
-/// Unlike `UTIL_createFileList`, which returns `NULL` when the input list
-/// expands to zero files, this function returns an empty `Vec` — callers
-/// should check `is_empty()` if needed.
+/// Returns an empty `Vec` when `inputs` is empty or contains no regular files.
+/// Callers should check `result.is_empty()` if a non-empty list is required.
 pub fn create_file_list(inputs: &[&Path]) -> io::Result<Vec<PathBuf>> {
     let mut result = Vec::new();
     for input in inputs {
@@ -52,8 +45,8 @@ pub fn create_file_list(inputs: &[&Path]) -> io::Result<Vec<PathBuf>> {
                 }
             }
         } else {
-            // Non-directory inputs are passed through as-is, just like the C
-            // code copies the path string directly into the buffer.
+            // Non-directory inputs are forwarded unchanged; no existence or
+            // type check is performed on them.
             result.push(input.to_path_buf());
         }
     }

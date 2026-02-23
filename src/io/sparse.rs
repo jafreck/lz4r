@@ -1,20 +1,25 @@
-//! Sparse file write utilities.
+//! Sparse file write support for decompressed output.
 //!
-//! Mirrors `LZ4IO_readLE32`, `LZ4IO_fwriteSparse`, and `LZ4IO_fwriteSparseEnd`
-//! from lz4io.c (lines 1583–1676).
+//! When decompressed data contains long runs of zero bytes, writing every zero
+//! to disk wastes I/O bandwidth and disk space.  On Unix, filesystems that
+//! support sparse files allow the kernel to represent such runs as holes: the
+//! file's logical size reflects the full data length, but no physical blocks
+//! are allocated for the zero regions.
 //!
-//! On Unix, `fwrite_sparse` scans decompressed output for contiguous runs of
-//! zero bytes and advances the file position with `seek(SeekFrom::Current(n))`
-//! rather than writing the zeros, creating a sparse file hole on filesystems
-//! that support it.  On non-Unix platforms the optimisation is skipped and the
-//! function performs a plain write.
+//! This module implements that optimisation via [`fwrite_sparse`] and
+//! [`fwrite_sparse_end`], which mirror the behaviour of `LZ4IO_fwriteSparse`
+//! and `LZ4IO_fwriteSparseEnd` in the LZ4 reference implementation.  On
+//! non-Unix platforms the optimisation is skipped and a plain `write_all` is
+//! performed instead.
 
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom, Write};
 use std::mem;
 
-/// One gigabyte — used as a safe upper bound for a single `seek` call to avoid
-/// integer-overflow in the stored-skips counter (mirrors the C guard at line 1616).
+/// One gigabyte — used as a safe upper bound for a single `seek` call.
+///
+/// Accumulated skips are capped at this value before issuing a `seek` to
+/// prevent integer overflow in the stored-skips counter.
 const ONE_GB: u64 = 1 << 30;
 
 /// Size of a native word (usize) in bytes.
@@ -22,15 +27,17 @@ const WORD: usize = mem::size_of::<usize>();
 
 // ── Public constants ──────────────────────────────────────────────────────────
 
-/// Default sparse-write segment size in bytes (32 KiB), matching the C macro
-/// `(32 KB) / sizeof(size_t)` scaled back to bytes.
+/// Default sparse-write segment granularity in bytes (32 KiB).
+///
+/// Buffers are processed in chunks of this size.  Each chunk is scanned for
+/// leading zero words before deciding whether to seek or write.
 pub const SPARSE_SEGMENT_SIZE: usize = 32 * 1024;
 
 // ── read_le32 ─────────────────────────────────────────────────────────────────
 
 /// Decodes a little-endian `u32` from the first four bytes of `src`.
 ///
-/// Equivalent to `LZ4IO_readLE32` (lz4io.c line 1583).
+/// Panics if `src` is shorter than four bytes.
 #[inline]
 pub fn read_le32(src: &[u8]) -> u32 {
     u32::from_le_bytes([src[0], src[1], src[2], src[3]])
@@ -38,29 +45,27 @@ pub fn read_le32(src: &[u8]) -> u32 {
 
 // ── fwrite_sparse (Unix) ──────────────────────────────────────────────────────
 
-/// Writes `buf` to `file`, using `seek` to create sparse holes for zero runs.
+/// Writes `buf` to `file`, punching sparse holes for runs of zero bytes.
 ///
-/// `sparse_mode` must be `true` to enable sparse writes; when `false` the
-/// buffer is written with a plain `write_all` and `Ok(0)` is returned — this
-/// mirrors the `if (!sparseMode)` path in `LZ4IO_fwriteSparse` (lz4io.c:1609).
-/// Callers should compute `sparse_mode` as
-/// `(sparse_file_support - (file_is_stdout as i32)) > 0`, matching the C
-/// expression `sparseMode = (sparseFileSupport - (file==stdout)) > 0`.
+/// When `sparse_mode` is `false` the buffer is written with a plain
+/// `write_all`, `stored_skips` is reset to `0`, and `Ok(0)` is returned.
+/// Callers should derive `sparse_mode` as
+/// `(sparse_file_support - (file_is_stdout as i32)) > 0`.
 ///
-/// The buffer is processed in segments of `sparse_threshold` bytes.  Leading
-/// zero *words* (native `usize`-sized) in each segment are accumulated in
-/// `stored_skips` rather than written.  When a non-zero word is found the
-/// accumulated skip is applied with `file.seek(SeekFrom::Current(…))` before
-/// writing the rest of the segment.  Trailing bytes that are not a multiple of
-/// `usize` are handled byte-by-byte.
+/// When `sparse_mode` is `true` the buffer is examined in segments of
+/// `sparse_threshold` bytes.  Within each segment, leading zero *words*
+/// (native `usize`-wide) are not written; instead their byte count is
+/// accumulated in `stored_skips`.  When a non-zero word is encountered the
+/// accumulated skip is applied with `file.seek(SeekFrom::Current(…))`
+/// (creating a hole on supporting filesystems), and the remainder of the
+/// segment is written normally.  Trailing bytes that are not a full `usize`
+/// wide are handled byte-by-byte with the same logic.
 ///
-/// Returns the updated `stored_skips` value, which the caller must pass back
-/// on the next call and ultimately hand to [`fwrite_sparse_end`].
+/// Returns the updated `stored_skips` value. The caller must pass this back
+/// on successive calls and ultimately supply it to [`fwrite_sparse_end`] to
+/// materialise the final file size.
 ///
-/// On non-Unix platforms falls back to [`fwrite_sparse`]'s `#[cfg(not(unix))]`
-/// variant which performs a plain write.
-///
-/// Equivalent to `LZ4IO_fwriteSparse` (lz4io.c line 1594).
+/// Corresponds to `LZ4IO_fwriteSparse` in the LZ4 reference implementation.
 #[cfg(unix)]
 pub fn fwrite_sparse(
     file: &mut File,
@@ -69,7 +74,7 @@ pub fn fwrite_sparse(
     stored_skips: u64,
     sparse_mode: bool,
 ) -> io::Result<u64> {
-    // Non-sparse path: plain write, mirrors C `if (!sparseMode)` at line 1609.
+    // Non-sparse path: write the buffer as-is without any hole optimisation.
     if !sparse_mode {
         file.write_all(buf)?;
         return Ok(0);
@@ -77,8 +82,8 @@ pub fn fwrite_sparse(
 
     let mut stored_skips = stored_skips;
 
-    // Guard: avoid integer overflow by flushing if accumulated skips > 1 GB
-    // (mirrors the C check at line 1616).
+    // Guard: flush if accumulated skips exceed 1 GB to prevent integer
+    // overflow when casting `stored_skips` to `i64` for `SeekFrom::Current`.
     if stored_skips > ONE_GB {
         file.seek(SeekFrom::Current(ONE_GB as i64))?;
         stored_skips -= ONE_GB;
@@ -156,13 +161,13 @@ pub fn fwrite_sparse(
 /// Finalises a sparse write sequence.
 ///
 /// If there are pending accumulated skips (trailing zeros that were seeked over
-/// but not written), advances the file position by `stored_skips - 1` bytes
-/// and writes a single zero byte.  This materialises the end of the file at
-/// the correct logical offset, matching the behaviour of
-/// `LZ4IO_fwriteSparseEnd` (lz4io.c line 1665).
+/// but never written), advances the file position by `stored_skips - 1` bytes
+/// and writes a single zero byte.  Writing the final byte forces the OS to
+/// extend the file to the correct logical size; a bare `seek` would not update
+/// the file's end-of-file marker on most systems.
 ///
-/// Must be called exactly once after the last [`fwrite_sparse`] call to ensure
-/// the output file has the correct size.
+/// Must be called exactly once after the last [`fwrite_sparse`] call.
+/// Corresponds to `LZ4IO_fwriteSparseEnd` in the LZ4 reference implementation.
 pub fn fwrite_sparse_end(file: &mut File, stored_skips: u64) -> io::Result<()> {
     if stored_skips > 0 {
         file.seek(SeekFrom::Current((stored_skips - 1) as i64))?;

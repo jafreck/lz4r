@@ -1,28 +1,38 @@
 //! LZ4MID (medium compression) strategy.
 //!
-//! Translated from lz4hc.c v1.10.0, lines 357–775.
+//! Implements the LZ4MID dual-hash algorithm; corresponds to lz4hc.c v1.10.0
+//! lines 357–775.
 //!
-//! Covers:
-//!   - `LZ4HC_match_t`            → [`Match`]
-//!   - `LZ4HC_searchExtDict`      → [`hc_search_ext_dict`]  (HC chain-based ext-dict search)
-//!   - `LZ4MID_searchIntoDict_f`  → [`DictSearchMode`] enum (replaces raw function pointer)
-//!   - `LZ4MID_searchHCDict`      → dispatched via `DictSearchMode::Hc`
-//!   - `LZ4MID_searchExtDict`     → dispatched via `DictSearchMode::Ext`
-//!   - `LZ4MID_addPosition`       → [`add_position`]
-//!   - `LZ4MID_fillHTable`        → [`fill_htable`]
-//!   - `select_searchDict_function` → [`select_dict_search_mode`]
-//!   - `LZ4MID_compress`          → [`lz4mid_compress`]
+//! # Rust/C name correspondence
 //!
-//! The 8 `goto` statements in `LZ4MID_compress` are converted as follows:
-//! - `goto _lz4mid_encode_sequence` (5×) → `break 'find Some((ml, md))`  
-//!   (labeled-block break to exit the match-search block with a found match)
-//! - `goto _lz4mid_dest_overflow`  (1×) → set `overflow_info`, `break 'compress`
-//! - `goto _lz4mid_last_literals`  (2×) → fall through to the last-literals block
-//!   (too-small input: skip compress; overflow+fillOutput: handled inline)
+//! | C name                        | Rust item                                         |
+//! |-------------------------------|---------------------------------------------------|
+//! | `LZ4HC_match_t`               | [`Match`]                                         |
+//! | `LZ4HC_searchExtDict`         | [`hc_search_ext_dict`] (HC chain ext-dict search) |
+//! | `LZ4MID_searchIntoDict_f`     | [`DictSearchMode`] enum (see below)               |
+//! | `LZ4MID_searchHCDict`         | dispatched via `DictSearchMode::Hc`               |
+//! | `LZ4MID_searchExtDict`        | dispatched via `DictSearchMode::Ext`              |
+//! | `LZ4MID_addPosition`          | [`add_position`]                                  |
+//! | `LZ4MID_fillHTable`           | [`fill_htable`]                                   |
+//! | `select_searchDict_function`  | [`select_dict_search_mode`]                       |
+//! | `LZ4MID_compress`             | [`lz4mid_compress`]                               |
 //!
-//! The `LZ4MID_searchIntoDict_f` C function-pointer typedef is replaced by
+//! # Control-flow structure of `lz4mid_compress`
+//!
+//! `LZ4MID_compress` in lz4hc.c uses 8 `goto` statements.  Their Rust
+//! equivalents are:
+//!
+//! | C label                     | Rust construct                                |
+//! |-----------------------------|-----------------------------------------------|
+//! | `_lz4mid_encode_sequence` (5×) | `break 'find Some((ml, md))` — labeled-block break returning a found match |
+//! | `_lz4mid_dest_overflow` (1×)   | `overflow_info = Some(…); break 'compress`    |
+//! | `_lz4mid_last_literals` (2×)   | fall-through to the last-literals block       |
+//!
+//! # DictSearchMode
+//!
+//! The C `LZ4MID_searchIntoDict_f` function-pointer typedef is represented as
 //! [`DictSearchMode`], a plain enum whose two variants correspond to the two
-//! concrete functions that were ever stored in that pointer.
+//! concrete functions that may be selected at runtime.
 
 use crate::block::types::{self as bt, LimitedOutputDirective, LZ4_DISTANCE_MAX, LASTLITERALS, MFLIMIT, MINMATCH, ML_BITS, ML_MASK, RUN_MASK};
 use super::types::{
@@ -484,9 +494,11 @@ pub unsafe fn lz4mid_compress(
     if do_compress {
         'compress: loop {
             while ip <= mflimit {
-                // Capture ip_index at the top of this iteration.
-                // C: `const U32 ipIndex = (U32)(ip - prefixPtr) + prefixIdx;`
-                // Using wrapping arithmetic to match C's U32 cast semantics.
+                // Compute the u32 index of the current input position in the
+                // global index space.  `prefix_idx` is the base; the byte
+                // difference from `prefix_ptr` gives the offset within the
+                // current block.  Wrapping arithmetic is intentional: the LZ4
+                // block format uses a 32-bit modular position space throughout.
                 let ip_index_start: u32 = ((ip as usize)
                     .wrapping_sub(prefix_ptr as usize) as u32)
                     .wrapping_add(prefix_idx);
@@ -547,8 +559,9 @@ pub unsafe fn lz4mid_compress(
                                 let mlt = bt::count(ip, match_ptr, matchlimit);
                                 if mlt >= MINMATCH as u32 {
                                     // Short match found; look one position ahead for longer.
-                                    // Note: ip may be incremented here; ip_index_start is NOT
-                                    // updated to match (faithful to C behaviour).
+                                    // ip advances by one for the lookahead match, but
+                                    // ip_index_start is intentionally left at the original
+                                    // position so that subsequent hash stores index correctly.
                                     let h8_next = mid_hash8_ptr(ip.add(1));
                                     let pos8_next = *hash8_table.add(h8_next as usize);
                                     let m2_distance = ip_index_start + 1 - pos8_next;
@@ -618,10 +631,13 @@ pub unsafe fn lz4mid_compress(
                     match_distance = md;
 
                     // ── _lz4mid_encode_sequence: catch back ────────────────
-                    // Extend match backwards as long as both sides agree.
-                    // Uses bitwise & (not short-circuit &&) matching C semantics.
-                    // Pointer arithmetic uses wrapping subtraction to match
-                    // C's `(U32)(ip - prefixPtr)` cast behaviour.
+                    // Extend the match backwards while the literal side and the
+                    // reference side have identical bytes before the current position.
+                    // Bitwise & (not &&) evaluates both conditions without short-circuit,
+                    // avoiding any undefined behaviour when ip equals anchor or
+                    // the index exactly equals match_distance.
+                    // Wrapping subtraction handles the u32 index space correctly
+                    // near the prefix_ptr boundary.
                     while ((ip > anchor) as u8)
                         & (((ip as usize).wrapping_sub(prefix_ptr as usize) as u32
                             > match_distance) as u8)
@@ -633,8 +649,9 @@ pub unsafe fn lz4mid_compress(
                     }
 
                     // ── Fill hash tables at start of match ─────────────────
-                    // Uses ip_index_start (the loop-top value) as in C, even
-                    // if ip was incremented in the ip+1 lookahead above.
+                    // ip_index_start holds the loop-entry position even when ip
+                    // was advanced by the ip+1 lookahead, so hash entries at
+                    // indices +1 and +2 align with the correct absolute positions.
                     add_position(hash8_table, mid_hash8_ptr(ip.add(1)), ip_index_start + 1);
                     add_position(hash8_table, mid_hash8_ptr(ip.add(2)), ip_index_start + 2);
                     add_position(hash4_table, mid_hash4_ptr(ip.add(1)), ip_index_start + 1);

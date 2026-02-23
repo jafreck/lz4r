@@ -1,9 +1,10 @@
-// timefn - portable high-resolution monotonic timer abstraction
-// Migrated from timefn.c / timefn.h (lz4 1.10.0)
-//
-// Rust's std::time::Instant is monotonic and MT-safe on all supported platforms,
-// replacing the platform-specific C implementations (QueryPerformanceCounter,
-// mach_absolute_time, clock_gettime, timespec_get, clock()).
+//! Portable high-resolution monotonic timer.
+//!
+//! Wraps [`std::time::Instant`], which is monotonic and thread-safe on all
+//! supported platforms, providing an API equivalent to `timefn.h` from the
+//! LZ4 reference implementation.  The platform-specific backends from the C
+//! version (`QueryPerformanceCounter`, `mach_absolute_time`,
+//! `clock_gettime`, etc.) are all subsumed by `Instant::now()`.
 
 use std::time::Instant;
 

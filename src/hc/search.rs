@@ -1,21 +1,27 @@
-//! HC match search: insert, pattern utilities, and wide-match search.
+//! Match-finding core for the LZ4-HC compressor.
 //!
-//! Translated from lz4hc.c v1.10.0, lines 776–1120:
-//!   - `LZ4HC_Insert`                    → [`insert`]
-//!   - `LZ4HC_rotatePattern`             → [`rotate_pattern`]
-//!   - `LZ4HC_countPattern`              → [`count_pattern`]
-//!   - `LZ4HC_reverseCountPattern`       → [`reverse_count_pattern`]
-//!   - `LZ4HC_protectDictEnd`            → [`protect_dict_end`]
-//!   - `repeat_state_e`                  → [`RepeatState`]
-//!   - `HCfavor_e`                       → [`HcFavor`]
-//!   - `LZ4HC_InsertAndGetWiderMatch`    → [`insert_and_get_wider_match`]
-//!   - `LZ4HC_InsertAndFindBestMatch`    → [`insert_and_find_best_match`]
+//! Performs three interleaved operations at each input position:
 //!
-//! The 7 `goto` statements in the original `LZ4HC_searchHC4`
-//! (`LZ4HC_InsertAndGetWiderMatch` in v1.10.0) are handled as follows:
-//! - Chain-loop break gotos → `break` / `continue` inside `'chain_loop`
-//! - Dict-boundary skip `goto _FindBestMatch` → restructured as `if/else` or
-//!   explicit `continue` at end of pattern-analysis block.
+//! 1. **Insertion** ([`insert`]) — update the hash and chain tables for every
+//!    unprocessed position in `[next_to_update, ip)`.
+//! 2. **Pattern utilities** ([`count_pattern`], [`reverse_count_pattern`],
+//!    [`rotate_pattern`]) — fast run-length counting for the repeating-pattern
+//!    optimisation in the HC chain search.
+//! 3. **Match search** ([`insert_and_get_wider_match`],
+//!    [`insert_and_find_best_match`]) — walk the hash chain for the longest
+//!    match, with optional backward extension, chain-swap, pattern-analysis,
+//!    and dictionary-context modes.
+//!
+//! Corresponds to `lz4hc.c` (v1.10.0, lines 776–1120):
+//!   - [`insert`]                     ← `LZ4HC_Insert`
+//!   - [`rotate_pattern`]             ← `LZ4HC_rotatePattern`
+//!   - [`count_pattern`]              ← `LZ4HC_countPattern`
+//!   - [`reverse_count_pattern`]      ← `LZ4HC_reverseCountPattern`
+//!   - [`protect_dict_end`]           ← `LZ4HC_protectDictEnd`
+//!   - [`RepeatState`]                ← `repeat_state_e`
+//!   - [`HcFavor`]                    ← `HCfavor_e`
+//!   - [`insert_and_get_wider_match`] ← `LZ4HC_InsertAndGetWiderMatch`
+//!   - [`insert_and_find_best_match`] ← `LZ4HC_InsertAndFindBestMatch`
 
 use crate::block::types::{self as bt, LZ4_DISTANCE_MAX, MINMATCH};
 use super::types::{
@@ -24,7 +30,7 @@ use super::types::{
 use super::lz4mid::Match;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helper: DELTANEXTU16 macro equivalent
+// Chain delta accessor (DELTANEXTU16)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Read the chain delta at `idx` from the chain table.
@@ -128,9 +134,8 @@ pub unsafe fn count_pattern(mut ip: *const u8, i_end: *const u8, pattern32: u32)
         while ip < i_end && *ip == (pattern_byte as u8) {
             ip = ip.add(1);
             pattern_byte >>= 8;
-            // After 4 bytes the byte cycle repeats for the repeating pattern.
-            // Reset to full pattern32 if we've exhausted 4 bytes of shift.
-            // (The pattern is 1, 2, or 4 bytes long so this handles wrap.)
+            // Wrap the 4-byte cycle: pattern_byte drains 8 bits per step and
+            // hits zero after 4 steps; reload for 1- and 2-byte patterns.
             if pattern_byte == 0 {
                 pattern_byte = pattern32 as u64;
             }
@@ -181,8 +186,10 @@ pub unsafe fn reverse_count_pattern(
         ip = ip.sub(4);
     }
 
-    // byte-by-byte tail (works for any endianness: walk the pattern bytes
-    // from MSB side in memory, i.e. the last byte of the u32 in-memory)
+    // Byte-by-byte tail: `to_ne_bytes()` returns bytes in native-endian
+    // memory order, so index 3 is always the byte that appeared at the
+    // highest address of the 4-byte group — the first one encountered when
+    // stepping backward through the stream.
     let pattern_bytes = pattern.to_ne_bytes();
     let mut byte_idx: isize = 3; // start from highest address byte of pattern
     while ip > i_low {

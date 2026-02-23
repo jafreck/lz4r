@@ -35,7 +35,6 @@ use lz4::io::{compress_multiple_filenames, decompress_multiple_filenames};
 use lz4::io::{default_nb_workers, set_notification_level};
 use lz4::io::Prefs;
 
-use lz4_flex::frame::FrameEncoder;
 use std::fs;
 use std::io::Write;
 
@@ -44,11 +43,7 @@ use std::io::Write;
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn make_frame_stream(data: &[u8]) -> Vec<u8> {
-    let mut compressed = Vec::new();
-    let mut encoder = FrameEncoder::new(&mut compressed);
-    encoder.write_all(data).expect("encode");
-    encoder.finish().expect("finish");
-    compressed
+    lz4::frame::compress_frame_to_vec(data)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

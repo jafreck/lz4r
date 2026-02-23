@@ -4,7 +4,7 @@
 // - The crate compiles without errors
 // - The crate-level module structure (lorem, timefn, config, util, threadpool,
 //   io, bench) is declared in lib.rs
-// - Key runtime dependencies (lz4_flex, anyhow) are available and functional
+// - Key runtime dependencies (anyhow) are available and functional
 
 // Test that the crate root compiles and links successfully.
 // This is the minimal parity check for the placeholder lib.rs.
@@ -14,25 +14,20 @@ fn crate_compiles() {
     // is structurally valid. No assertions needed beyond successful compilation.
 }
 
-// Verify the lz4_flex dependency resolves and can compress/decompress a
-// trivial payload. lz4_flex provides the core block-format compression that
-// the bench module (future task-023..task-028) will use.
+// Verify native block compression round-trips correctly.
 #[test]
-fn lz4_flex_dependency_available() {
+fn block_compression_available() {
     let input = b"lz4-programs crate scaffold verification";
-    let compressed = lz4_flex::compress_prepend_size(input);
-    let decompressed = lz4_flex::decompress_size_prepended(&compressed)
-        .expect("decompression should succeed");
-    assert_eq!(decompressed, input, "round-trip through lz4_flex should be lossless");
+    let compressed = lz4::block::compress_block_to_vec(input);
+    let decompressed = lz4::block::decompress_block_to_vec(&compressed, input.len());
+    assert_eq!(decompressed, input, "round-trip through native block API should be lossless");
 }
 
-// Verify lz4_flex handles empty input without panicking; this matches the
-// C LZ4_compress_fast() behavior for zero-length inputs.
+// Verify the native block API handles empty input without panicking.
 #[test]
-fn lz4_flex_empty_input() {
-    let compressed = lz4_flex::compress_prepend_size(b"");
-    let decompressed = lz4_flex::decompress_size_prepended(&compressed)
-        .expect("empty decompression should succeed");
+fn block_compression_empty_input() {
+    let compressed = lz4::block::compress_block_to_vec(b"");
+    let decompressed = lz4::block::decompress_block_to_vec(&compressed, 0);
     assert!(decompressed.is_empty());
 }
 
@@ -56,23 +51,13 @@ fn anyhow_error_propagation() {
     assert!(err.to_string().contains("expected test error"));
 }
 
-// Verify the lz4_flex frame encoder/decoder round-trips correctly.
-// The frame format is the wire format used by lz4io (future tasks).
+// Verify the native frame encoder/decoder round-trips correctly.
+// The frame format is the wire format used by lz4io.
 #[test]
-fn lz4_flex_frame_round_trip() {
-    use lz4_flex::frame::{FrameDecoder, FrameEncoder};
-    use std::io::{Read, Write};
-
+fn frame_round_trip() {
     let input = b"hello from lz4-programs frame round-trip test";
-    let mut encoded = Vec::new();
-    {
-        let mut enc = FrameEncoder::new(&mut encoded);
-        enc.write_all(input).expect("frame encode write");
-        enc.finish().expect("frame encode finish");
-    }
-    let mut decoded = Vec::new();
-    FrameDecoder::new(encoded.as_slice())
-        .read_to_end(&mut decoded)
+    let compressed = lz4::frame::compress_frame_to_vec(input);
+    let decoded = lz4::frame::decompress_frame_to_vec(&compressed)
         .expect("frame decode");
     assert_eq!(decoded, input);
 }

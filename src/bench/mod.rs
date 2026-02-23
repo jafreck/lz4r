@@ -1,20 +1,16 @@
-/*
-    bench/mod.rs — Benchmark module public API
-    Migrated from lz4-1.10.0/programs/bench.c (lines 756–865) and bench.h
-
-    Original copyright (C) Yann Collet 2012-2020 — GPL v2 License.
-
-    Migration notes:
-    - `BMK_syntheticTest` (static, lines 756–781) → `synthetic_test` (private)
-    - `BMK_benchFilesSeparately` (static, lines 784–799) → `bench_files_separately` (private)
-    - `BMK_benchFiles` (public, lines 802–865) → `pub fn bench_files` (public API)
-    - LZ4HC_CLEVEL_MAX (12) is re-exported from `crate::hc::types`.
-    - Dictionary loading mirrors C: use only the last LZ4_MAX_DICT_SIZE bytes of
-      the file (bench.c lines 837–842), consistent with C's UTIL_fseek logic.
-    - DISPLAYLEVEL(2, …) → `if config.display_level >= 2 { eprintln!(...) }`.
-    - END_PROCESS(code, msg) → `return Err(io::Error::new(Other, msg))`.
-    - `LOREM_genBuffer` → `crate::lorem::gen_buffer(size, seed)`.
-*/
+//! Benchmark entry points for lz4r.
+//!
+//! This module exposes [`bench_files`] as the primary public API. Callers pass
+//! a list of real files, or an empty slice to run the built-in synthetic
+//! lorem-ipsum benchmark. Internally, work is dispatched to:
+//!
+//! - [`runner::bench_c_level`] — benchmarks a single compression level for a
+//!   given in-memory buffer.
+//! - [`runner::bench_file_table`] — reads a set of files into memory and
+//!   benchmarks them together as a single logical dataset.
+//!
+//! [`config::BenchConfig`] controls display verbosity, iteration count,
+//! decode-only mode, and other runtime knobs.
 
 pub mod config;
 pub mod compress_strategy;
@@ -36,11 +32,10 @@ use runner::{bench_c_level, bench_file_table};
 
 /// Run a benchmark using synthetically generated lorem-ipsum data.
 ///
-/// Migrated from `BMK_syntheticTest` (bench.c lines 756–781).
-///
-/// Allocates a 10 MiB buffer, fills it with lorem ipsum text (seed 0, first=true,
-/// fill=true — identical to `LOREM_genBuffer(src, benchedSize, 0)`), then calls
-/// [`bench_c_level`] for each level in `c_level..=c_level_last`.
+/// Allocates a 10 MiB buffer filled with lorem-ipsum text (seed 0), then calls
+/// [`bench_c_level`] for each compression level in `c_level..=c_level_last`.
+/// This exercises the compressor on realistic but reproducible incompressible-ish
+/// natural-language input without requiring an on-disk file.
 fn synthetic_test(
     c_level: i32,
     c_level_last: i32,
@@ -48,7 +43,6 @@ fn synthetic_test(
     config: &BenchConfig,
 ) -> io::Result<()> {
     const BENCHED_SIZE: usize = 10_000_000;
-    // LOREM_genBuffer(srcBuffer, benchedSize, 0) — fill with lorem ipsum, seed 0.
     let src_buffer = crate::lorem::gen_buffer(BENCHED_SIZE, 0);
     bench_c_level(
         &src_buffer,
@@ -65,7 +59,9 @@ fn synthetic_test(
 
 /// Benchmark each file in `file_names` separately, one per call to [`bench_file_table`].
 ///
-/// Migrated from `BMK_benchFilesSeparately` (bench.c lines 784–799).
+/// When [`BenchConfig::bench_separately`] is set, this is called instead of
+/// [`bench_file_table`] so that each file's throughput numbers are reported
+/// independently rather than aggregated across all files.
 fn bench_files_separately(
     file_names: &[&str],
     c_level: i32,
@@ -73,7 +69,7 @@ fn bench_files_separately(
     dict: &[u8],
     config: &BenchConfig,
 ) -> io::Result<()> {
-    // C: clamp both levels to LZ4HC_CLEVEL_MAX, then ensure last >= first.
+    // Clamp both levels to the HC ceiling, then ensure the range is non-empty.
     let c_level = c_level.min(LZ4HC_CLEVEL_MAX);
     let c_level_last = c_level_last.min(LZ4HC_CLEVEL_MAX).max(c_level);
 
@@ -95,23 +91,20 @@ fn bench_files_separately(
 
 /// Benchmark compression and decompression across one or more files.
 ///
-/// Migrated from `BMK_benchFiles` (bench.c lines 802–865), which is the sole
-/// function declared in `bench.h`.
-///
 /// # Arguments
-/// - `file_names`: slice of file paths to benchmark. Pass an empty slice to run
-///   the synthetic lorem-ipsum test (equivalent to `nbFiles == 0` in C).
-/// - `c_level` / `c_level_last`: inclusive compression-level range. If `c_level_last
-///   < c_level`, only `c_level` is benchmarked (C clamps after capping to
-///   `LZ4HC_CLEVEL_MAX`).
-/// - `dict_file`: optional path to a dictionary file. When provided, the last
-///   [`LZ4_MAX_DICT_SIZE`] bytes of the file are used as the dictionary
-///   (mirrors C bench.c lines 825–851).
-/// - `config`: runtime benchmark parameters.
+/// - `file_names`: paths of files to benchmark. An empty slice triggers the
+///   built-in synthetic lorem-ipsum benchmark instead.
+/// - `c_level` / `c_level_last`: inclusive compression-level range, both clamped
+///   to [`LZ4HC_CLEVEL_MAX`]. If `c_level_last < c_level` after clamping, only
+///   `c_level` is run.
+/// - `dict_file`: optional path to a pre-trained dictionary. Only the last
+///   [`LZ4_MAX_DICT_SIZE`] bytes of the file are loaded — LZ4 dictionaries
+///   are always anchored at the tail.
+/// - `config`: runtime parameters (verbosity, iteration count, decode-only, …).
 ///
 /// # Errors
-/// Returns `Err` if any required file cannot be read, the dictionary cannot be
-/// loaded, or at least one benchmark pass fails.
+/// Returns `Err` if a required file cannot be read, the dictionary cannot be
+/// loaded, or at least one benchmark pass reports a failure.
 pub fn bench_files(
     file_names: &[&str],
     c_level: i32,
@@ -119,11 +112,12 @@ pub fn bench_files(
     dict_file: Option<&str>,
     config: &BenchConfig,
 ) -> io::Result<()> {
-    // C: if (cLevel > LZ4HC_CLEVEL_MAX) cLevel = LZ4HC_CLEVEL_MAX
+    // Levels above LZ4HC_CLEVEL_MAX are undefined; clamp silently.
     let c_level = c_level.min(LZ4HC_CLEVEL_MAX);
     let mut c_level_last = c_level_last;
 
-    // Decode-only mode adjustments (bench.c lines 811–818).
+    // In decode-only mode there is no compression level to sweep; fix the range
+    // to a single level so the loop in bench_c_level runs exactly once.
     if config.decode_only {
         if config.display_level >= 2 {
             if config.skip_checksums {
@@ -132,19 +126,21 @@ pub fn bench_files(
                 eprintln!("Benchmark Decompression of LZ4 Frame + Checksum when present ");
             }
         }
-        c_level_last = c_level; // decode-only: single level
+        c_level_last = c_level;
     }
 
-    // C: cap cLevelLast, then ensure last >= first.
+    // Re-apply ceiling and non-empty-range invariant after the decode-only fixup.
     c_level_last = c_level_last.min(LZ4HC_CLEVEL_MAX).max(c_level);
 
     if c_level_last > c_level && config.display_level >= 2 {
         eprintln!("Benchmarking levels from {} to {}", c_level, c_level_last);
     }
 
-    // ── Load optional dictionary (bench.c lines 825–851) ────────────────────
+    // ── Load optional dictionary ──────────────────────────────────────────────
     let dict_buf: Vec<u8> = if let Some(dict_path) = dict_file {
-        // Validate decode-only incompatibility (bench.c line 830).
+        // Dictionary-assisted decompression is not yet wired into the frame
+        // decoder path; reject the combination early rather than silently ignoring
+        // the dictionary.
         if config.decode_only {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -167,7 +163,8 @@ pub fn bench_files(
             io::Error::new(e.kind(), format!("Dictionary error : could not open dictionary file: {}", e))
         })?;
 
-        // C: if (dictFileSize > LZ4_MAX_DICT_SIZE) seek to last LZ4_MAX_DICT_SIZE bytes.
+        // LZ4 dictionaries are identified by their last LZ4_MAX_DICT_SIZE bytes;
+        // if the file is larger, seek past the prefix so we only read the tail.
         let dict_size = if dict_file_size > LZ4_MAX_DICT_SIZE {
             let offset = (dict_file_size - LZ4_MAX_DICT_SIZE) as u64;
             f.seek(SeekFrom::Start(offset)).map_err(|e| {
@@ -187,9 +184,9 @@ pub fn bench_files(
         Vec::new()
     };
 
-    // ── Dispatch (bench.c lines 854–861) ────────────────────────────────────
+    // ── Dispatch ──────────────────────────────────────────────────────────────
     if file_names.is_empty() {
-        // nbFiles == 0 → synthetic test
+        // No files provided — fall back to the built-in synthetic benchmark.
         synthetic_test(c_level, c_level_last, &dict_buf, config)
     } else if config.bench_separately {
         bench_files_separately(file_names, c_level, c_level_last, &dict_buf, config)

@@ -1,46 +1,41 @@
-// cli/op_mode.rs — Rust port of lz4cli.c lines 343–387
-//
-// Migrated from: lz4-src/lz4-1.10.0/programs/lz4cli.c
-// Task: task-032 — Operation Mode Enum and Environment Init (Chunk 4)
-//
-// Covers:
-//   - `operationMode_e` enum  (line 343)
-//   - `determineOpMode()`     (lines 349–356)
-//   - `init_nbWorkers()`      (lines 360–371)
-//   - `init_cLevel()`         (lines 375–386)
+//! Operation mode selection and startup defaults for the CLI.
+//!
+//! This module provides:
+//! - [`OpMode`] — an enum describing what the CLI should do (compress, decompress, bench, …).
+//! - [`determine_op_mode`] — infers the intended mode from a filename's extension.
+//! - [`init_nb_workers`] / [`init_c_level`] — read per-process defaults from environment variables.
+//! - [`LZ4_CLEVEL_DEFAULT`] / [`LZ4_NBWORKERS_DEFAULT`] — fallback constants used when no
+//!   environment override is present.
 
 use crate::cli::arg_utils::read_u32_from_str;
 use crate::cli::constants::{display_level, LZ4_EXTENSION};
 
-// Default values from lz4conf.h
-/// Default compression level — mirrors `LZ4_CLEVEL_DEFAULT` (lz4conf.h:33).
+/// Default compression level (1 — fast, lossless). Used when `LZ4_CLEVEL` is unset or invalid.
 pub const LZ4_CLEVEL_DEFAULT: i32 = 1;
-/// Default number of worker threads — mirrors `LZ4_NBWORKERS_DEFAULT` (lz4conf.h:55).
+/// Default worker-thread count. `0` means "auto" — the runtime picks a suitable value.
 pub const LZ4_NBWORKERS_DEFAULT: usize = 0;
 
-/// Operation mode — mirrors `operationMode_e` enum (lz4cli.c line 343).
+/// What the CLI should do with its inputs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpMode {
-    /// Automatically determined from filename extension (`om_auto`).
+    /// Mode inferred from the filename extension: decompress if `.lz4`, compress otherwise.
     Auto,
-    /// Compress input (`om_compress`).
+    /// Compress input to LZ4 format.
     Compress,
-    /// Decompress input (`om_decompress`).
+    /// Decompress LZ4-encoded input.
     Decompress,
-    /// Test archive integrity (`om_test`).
+    /// Verify archive integrity without writing output.
     Test,
-    /// Benchmark mode (`om_bench`).
+    /// Run internal compression benchmarks.
     Bench,
-    /// List archive contents (`om_list`).
+    /// Print metadata about LZ4 archives.
     List,
 }
 
-/// Auto-determine operation mode from `filename`'s extension.
+/// Infer the operation mode from `filename`'s extension.
 ///
 /// Returns [`OpMode::Decompress`] if `filename` ends with `.lz4`,
 /// [`OpMode::Compress`] otherwise.
-///
-/// Equivalent to C `determineOpMode()` (lz4cli.c lines 349–356).
 pub fn determine_op_mode(filename: &str) -> OpMode {
     if filename.ends_with(LZ4_EXTENSION) {
         OpMode::Decompress
@@ -51,15 +46,21 @@ pub fn determine_op_mode(filename: &str) -> OpMode {
 
 /// Read the number of worker threads from the `LZ4_NBWORKERS` environment variable.
 ///
-/// If the variable is set and contains a leading decimal digit, the value is
-/// parsed as an unsigned integer (matching C `readU32FromChar`).  Otherwise
-/// the default [`LZ4_NBWORKERS_DEFAULT`] (0 ≡ auto) is returned.
-///
-/// Equivalent to C `init_nbWorkers()` (lz4cli.c lines 360–371).
+/// If the variable is set and starts with a decimal digit, it is parsed as an
+/// unsigned integer. Otherwise [`LZ4_NBWORKERS_DEFAULT`] (`0` — auto) is returned.
 pub fn init_nb_workers() -> usize {
+    init_nb_workers_from(std::env::var("LZ4_NBWORKERS").ok().as_deref())
+}
+
+/// Testable core of [`init_nb_workers`]: parse an optional `LZ4_NBWORKERS` value.
+///
+/// Pass `Some(s)` with the raw string, or `None` to simulate the variable being
+/// unset. Separating env-var I/O from parsing keeps the conversion logic
+/// unit-testable without touching the process environment.
+pub fn init_nb_workers_from(env_val: Option<&str>) -> usize {
     const ENV_NBTHREADS: &str = "LZ4_NBWORKERS";
-    if let Ok(env) = std::env::var(ENV_NBTHREADS) {
-        if let Some((val, _rest)) = read_u32_from_str(&env) {
+    if let Some(env) = env_val {
+        if let Some((val, _rest)) = read_u32_from_str(env) {
             return val as usize;
         }
         // Non-numeric value — warn and fall through to default.
@@ -73,17 +74,24 @@ pub fn init_nb_workers() -> usize {
     LZ4_NBWORKERS_DEFAULT
 }
 
-/// Read the compression level from the `LZ4_CLEVEL` environment variable.
+/// Read the default compression level from the `LZ4_CLEVEL` environment variable.
 ///
-/// If the variable is set and contains a leading decimal digit, the value is
-/// parsed as an unsigned integer cast to `i32` (matching C `readU32FromChar`).
-/// Otherwise the default [`LZ4_CLEVEL_DEFAULT`] (1) is returned.
-///
-/// Equivalent to C `init_cLevel()` (lz4cli.c lines 375–386).
+/// If the variable is set and starts with a decimal digit, it is parsed as an
+/// unsigned integer and widened to `i32`. Otherwise [`LZ4_CLEVEL_DEFAULT`] (1)
+/// is returned.
 pub fn init_c_level() -> i32 {
+    init_c_level_from(std::env::var("LZ4_CLEVEL").ok().as_deref())
+}
+
+/// Testable core of [`init_c_level`]: parse an optional `LZ4_CLEVEL` value.
+///
+/// Pass `Some(s)` with the raw string, or `None` to simulate the variable being
+/// unset. Separating env-var I/O from parsing keeps the conversion logic
+/// unit-testable without touching the process environment.
+pub fn init_c_level_from(env_val: Option<&str>) -> i32 {
     const ENV_CLEVEL: &str = "LZ4_CLEVEL";
-    if let Ok(env) = std::env::var(ENV_CLEVEL) {
-        if let Some((val, _rest)) = read_u32_from_str(&env) {
+    if let Some(env) = env_val {
+        if let Some((val, _rest)) = read_u32_from_str(env) {
             return val as i32;
         }
         // Non-numeric value — warn and fall through to default.

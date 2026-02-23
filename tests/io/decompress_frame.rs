@@ -9,21 +9,16 @@
 use lz4::io::decompress_frame::decompress_lz4f;
 use lz4::io::decompress_resources::DecompressResources;
 use lz4::io::prefs::Prefs;
-use lz4_flex::frame::FrameEncoder;
 use std::io::Write;
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 // Helpers
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────────
 
-/// Compress `data` with lz4_flex FrameEncoder, return the full frame bytes
+/// Compress `data` with the native frame API, returning the full frame bytes
 /// (including the 4-byte magic number prefix).
 fn compress_frame(data: &[u8]) -> Vec<u8> {
-    let mut compressed = Vec::new();
-    let mut encoder = FrameEncoder::new(&mut compressed);
-    encoder.write_all(data).expect("encode");
-    encoder.finish().expect("finish");
-    compressed
+    lz4::frame::compress_frame_to_vec(data)
 }
 
 /// Strip the 4-byte magic prefix, returning `(magic_slice, body)`.

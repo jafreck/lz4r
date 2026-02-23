@@ -1,21 +1,17 @@
-// cli/args.rs — Rust port of lz4cli.c lines 442–703 (declaration #22 partial: argument parsing loop)
-//
-// Migrated from: lz4-src/lz4-1.10.0/programs/lz4cli.c
-// Task: task-034 — main — Argument Parsing Loop (Chunk 6)
-//
-// Migration decisions:
-//   - C manual argv loop with pointer arithmetic → Rust index-based loop; short-option
-//     aggregation (-9fv) replicated with a `char_pos` index that advances like the C pointer.
-//   - `NEXT_UINT32` macro → `next_uint32()` helper that reads `=VALUE` or next-arg syntax.
-//   - `DISPLAYOUT(WELCOME_MESSAGE)` / `goto _cleanup` → sets `exit_early = true`, breaks.
-//   - `badusage()` / `CLEAN_RETURN(1)` → returns `Err(anyhow::anyhow!("bad usage: ..."))`.
-//   - `BMK_set*` global side-effects → accumulated in `ParsedArgs::bench_config`.
-//   - `displayLevel` global mutations → forwarded to `set_display_level()`.
-//   - `LZ4IO_set*` calls on opaque `prefs` → methods on owned `Prefs`.
-//   - `g_lz4c_legacy_commands` check → `init.lz4c_legacy` (field from task-033).
-//   - Legacy `--` end-of-options sentinel → `all_arguments_are_files` local bool.
-//   - Dynamic output filename allocation (`dynNameSpace`, `calloc`/`free`) is handled in
-//     task-035; `ParsedArgs` carries plain `Option<String>` (freed by Rust's drop).
+//! Command-line argument parsing for the `lz4` / `lz4c` / `unlz4` / `lz4cat` family.
+//!
+//! The entry points are [`parse_args`] (reads `std::env::args()`) and
+//! [`parse_args_from`] (takes an explicit slice, suitable for unit-testing).
+//! Both return a [`ParsedArgs`] value that captures every option and filename
+//! discovered during the parse.
+//!
+//! Short options may be aggregated (e.g. `-9fv`).  Long options use either
+//! `--option=VALUE` or `--option VALUE` syntax.  A bare `--` marks the end of
+//! options; all subsequent arguments are treated as file paths regardless of
+//! whether they start with `-`.
+//!
+//! Bad or unrecognised options return an `Err` with a human-readable message
+//! that begins with `"bad usage: "`.
 
 use anyhow::anyhow;
 
@@ -32,16 +28,15 @@ use crate::io::prefs::{BlockMode, Prefs};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-/// Legacy block size when `-l` (legacy format) is selected (8 MiB).
-/// Mirrors `blockSize = 8 MB` in lz4cli.c line 576.
+/// Block size used when `-l` (legacy format) is selected: 8 MiB.
 const LEGACY_BLOCK_SIZE: usize = 8 * (1 << 20);
 
 // ── Public output type ─────────────────────────────────────────────────────────
 
-/// All state accumulated by the argument parsing loop.
+/// Complete set of options and filenames produced by the argument parsing loop.
 ///
-/// Equivalent to the collection of local variables in C `main()` lines 388–703
-/// that are set during argument parsing and later consumed by the dispatch phase.
+/// Fields are populated by [`parse_args_from`] and consumed by the dispatch
+/// phase that selects compress / decompress / benchmark / list behaviour.
 #[derive(Debug)]
 pub struct ParsedArgs {
     /// Compression/decompression/IO preferences.
@@ -90,7 +85,7 @@ pub struct ParsedArgs {
 
 /// Parse `std::env::args()` (skipping argv[0]) using `init` as the starting state.
 ///
-/// Equivalent to the argument parsing loop in C `main()` (lz4cli.c lines 442–703).
+/// Delegates to [`parse_args_from`] after collecting `argv` into a `Vec<String>`.
 pub fn parse_args(init: CliInit) -> anyhow::Result<ParsedArgs> {
     let exe_name = std::env::args().next().unwrap_or_default();
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -106,7 +101,7 @@ pub fn parse_args_from(
     exe_name: &str,
     argv: &[String],
 ) -> anyhow::Result<ParsedArgs> {
-    // Unpack initial state from task-033 alias detection.
+    // Unpack initial state produced by alias detection in CliInit.
     let CliInit {
         mut prefs,
         op_mode: init_op_mode,
@@ -122,7 +117,7 @@ pub fn parse_args_from(
     // --- Mutable parsing state ---
     let mut op_mode = init_op_mode;
     let mut c_level: i32 = init_c_level;
-    let mut c_level_last: i32 = -10_000; // sentinel matching C initialisation
+    let mut c_level_last: i32 = -10_000; // sentinel: no explicit benchmark upper bound set yet
     let mut legacy_format = false;
     let mut force_stdout = init_force_stdout;
     let mut force_overwrite = false;
@@ -142,7 +137,7 @@ pub fn parse_args_from(
 
     let exe_name_str = exe_name.to_owned();
 
-    // ── Main argument loop (lz4cli.c lines 442–703) ─────────────────────────
+    // ── Main argument loop ──────────────────────────────────────────────────
 
     let mut arg_idx = 0usize;
     while arg_idx < argv.len() {
@@ -162,7 +157,7 @@ pub fn parse_args_from(
             } else if input_filename.is_none() {
                 input_filename = Some(argument.clone());
             } else if output_filename.is_none() {
-                // Translate "null" → nulmark (mirrors `if (!strcmp (output_filename, nullOutput))`)
+                // The special filename "null" is normalised to a sentinel so downstream code recognises it as /dev/null.
                 let s = if argument == NULL_OUTPUT {
                     NUL_MARK.to_owned()
                 } else {
@@ -170,7 +165,7 @@ pub fn parse_args_from(
                 };
                 output_filename = Some(s);
             } else {
-                // 3rd+ non-option argument (lz4cli.c lines 698–702)
+                // 3rd or later non-option argument with neither -m nor -f:
                 if force_overwrite {
                     displaylevel!(
                         1,
@@ -209,7 +204,7 @@ pub fn parse_args_from(
                 continue;
             }
 
-            // Try each long option.  Mirror the sequence in lz4cli.c lines 459–513.
+            // Dispatch on the long option name.
 
             if argument == "--compress" {
                 op_mode = OpMode::Compress;
@@ -247,10 +242,9 @@ pub fn parse_args_from(
                 op_mode = OpMode::List;
                 multiple_inputs = true;
             } else if argument == "--sparse" {
-                // C: LZ4IO_setSparseFile(prefs, 2) — force sparse on
+                // 2 = forced sparse; 0 = off; 1 = auto (default).
                 prefs.sparse_file_support = 2;
             } else if argument == "--no-sparse" {
-                // C: LZ4IO_setSparseFile(prefs, 0) — sparse off
                 prefs.sparse_file_support = 0;
             } else if argument == "--favor-decSpeed" {
                 prefs.favor_dec_speed(true);
@@ -263,7 +257,6 @@ pub fn parse_args_from(
                     set_display_level(lvl - 1);
                 }
             } else if argument == "--version" {
-                // DISPLAYOUT(WELCOME_MESSAGE) then goto _cleanup (exit 0)
                 print_welcome_message(exe_name);
                 exit_early = true;
                 break;
@@ -276,7 +269,7 @@ pub fn parse_args_from(
             } else if argument == "--rm" {
                 prefs.set_remove_src_file(true);
             } else if let Some(rest) = long_command_w_arg(argument, "--threads") {
-                // NEXT_UINT32(nbWorkers): accepts `--threads=N` or `--threads N`
+                // Accepts `--threads=N` or `--threads N` syntax.
                 let (val, rest_pos) =
                     parse_next_uint32(rest, argv, &mut arg_idx, exe_name)?;
                 if !rest_pos.is_empty() {
@@ -284,7 +277,7 @@ pub fn parse_args_from(
                 }
                 nb_workers = val as usize;
             } else if let Some(rest) = long_command_w_arg(argument, "--fast") {
-                // --fast[=N]  (lz4cli.c lines 492–509)
+                // --fast[=N]: negative acceleration level (higher = faster, lower quality).
                 if rest.starts_with('=') {
                     let value_str = &rest[1..];
                     if let Some((fast_level, remainder)) = read_u32_from_str(value_str) {
@@ -304,7 +297,7 @@ pub fn parse_args_from(
                     return Err(anyhow!("bad usage: --fast: unexpected characters after option"));
                 }
             } else if argument == "--best" {
-                // For gzip(1) compatibility (lz4cli.c line 513)
+                // gzip(1) compatibility alias for maximum HC compression level.
                 c_level = LZ4HC_CLEVEL_MAX;
             } else {
                 return Err(anyhow!("bad usage: unknown option: {}", argument));
@@ -316,13 +309,13 @@ pub fn parse_args_from(
 
         // ── Short options (possibly aggregated, e.g. `-9fv`) ─────────────────
         //
-        // The C outer while loop: `while (argument[1]!=0) { argument++; ... }`
-        // We mirror this with `char_pos` starting at 1 (first short flag char).
+        // `char_pos` starts at 1 (the first flag character after `-`).
+        // Each iteration handles one flag character and increments `char_pos`.
 
         let mut char_pos: usize = 1; // skip the leading '-'
         while char_pos < bytes.len() {
             // ── Legacy commands (`-c0`, `-c1`, `-c2`, `-hc`, `-y`) ───────────
-            // Checked before the switch, matching C lines 519–526.
+            // These multi-character sequences must be tested before the single-character dispatch below.
             if lz4c_legacy {
                 let rest = &argument[char_pos..];
                 if rest.starts_with("c0") {
@@ -353,21 +346,17 @@ pub fn parse_args_from(
             }
 
             // ── Numeric compression level (`-0` … `-9` … `-12`) ──────────────
-            // C: `if ((*argument>='0') && (*argument<='9')) { cLevel = readU32FromChar(&argument); argument--; }`
-            // The `argument--` + loop `argument++` = net +K (where K = digits consumed).
+            // A run of ASCII digits sets the compression level directly.
+            // `read_u32_from_str` consumes all leading digit characters.
             if bytes[char_pos].is_ascii_digit() {
                 let (val, remainder) = read_u32_from_str(&argument[char_pos..])
                     .expect("is_ascii_digit guarantees at least one digit");
                 c_level = val as i32;
-                // Advance char_pos past all consumed digit chars.
-                // C does: readU32 advances ptr by K, then argument-- (net K-1), then loop argument++ (net K).
-                // Our loop does char_pos += 1 at end, so we set char_pos to (end - 1) here.
+                // `char_pos` must advance past every consumed digit.
+                // The outer loop increments `char_pos` by 1 at the end of each
+                // iteration, so we position it one before the desired next character.
                 let consumed = argument[char_pos..].len() - remainder.len();
                 char_pos += consumed; // char_pos now points one past last digit
-                // Loop's char_pos += 1 at end → skip past digits
-                // But we want to stay at (char_pos + consumed - 1) + 1 = char_pos + consumed
-                // We already set char_pos = original + consumed, and the loop adds 1.
-                // So subtract 1 to compensate.
                 char_pos = char_pos.saturating_sub(1);
                 char_pos += 1;
                 continue;
@@ -376,26 +365,25 @@ pub fn parse_args_from(
             // ── Main switch ───────────────────────────────────────────────────
             match bytes[char_pos] {
                 b'V' => {
-                    // Version (lz4cli.c line 538)
+                    // Print version and exit.
                     print_welcome_message(exe_name);
                     exit_early = true;
                     break; // exit short-option loop
                 }
                 b'h' => {
-                    // Help (lz4cli.c line 539)
+                    // Print standard help and exit.
                     print_usage_advanced(exe_name);
                     exit_early = true;
                     break;
                 }
                 b'H' => {
-                    // Long help (lz4cli.c line 540)
+                    // Print extended help and exit.
                     print_long_help(exe_name);
                     exit_early = true;
                     break;
                 }
                 b'e' => {
-                    // `-eN` — benchmark level range upper bound (lz4cli.c lines 542–546)
-                    // C: argument++; cLevelLast = readU32FromChar(&argument); argument--;
+                    // `-eN` — upper bound of the compression-level range used during benchmark.
                     let next = char_pos + 1;
                     if next < bytes.len() && bytes[next].is_ascii_digit() {
                         let (val, remainder) = read_u32_from_str(&argument[next..]).unwrap();
@@ -408,12 +396,12 @@ pub fn parse_args_from(
                     }
                 }
                 b'z' => {
-                    // Compress (lz4cli.c line 549)
+                    // Force compress mode.
                     op_mode = OpMode::Compress;
                 }
                 b'T' => {
-                    // Threads (lz4cli.c lines 552–557)
-                    // C: argument++; nbWorkers = readU32FromChar(&argument); argument--;
+                    // Set the number of compression worker threads.
+                    // Accepts `-TN` (inline) or `-T N` (next argument).
                     let next = char_pos + 1;
                     if next < bytes.len() && bytes[next].is_ascii_digit() {
                         let (val, remainder) = read_u32_from_str(&argument[next..]).unwrap();
@@ -437,7 +425,7 @@ pub fn parse_args_from(
                     }
                 }
                 b'D' => {
-                    // Dictionary (lz4cli.c lines 559–573)
+                    // Specify a dictionary file; the path may follow immediately or as the next argument.
                     let next = char_pos + 1;
                     if next >= bytes.len() {
                         // Path is the next argument.
@@ -450,56 +438,57 @@ pub fn parse_args_from(
                         // Path immediately follows the 'D'.
                         dictionary_filename = Some(argument[next..].to_owned());
                     }
-                    // Skip to end of current argument (mirrors `argument += strlen(argument) - 1`).
+                    // Skip to end of this argument; the dictionary path has been fully consumed.
                     char_pos = bytes.len() - 1;
                 }
                 b'l' => {
-                    // Legacy format (lz4cli.c line 576)
+                    // Use the legacy (v0) LZ4 frame format with a fixed 8 MiB block size.
                     legacy_format = true;
                     block_size = LEGACY_BLOCK_SIZE;
                     prefs.block_size = block_size;
                 }
                 b'd' => {
-                    // Decompress (lz4cli.c lines 579–582)
+                    // Switch to decompress mode; also enables decode-only benchmarking.
                     if op_mode != OpMode::Bench {
                         op_mode = OpMode::Decompress;
                     }
                     bench_config.set_decode_only(true);
                 }
                 b'c' => {
-                    // Force stdout (lz4cli.c lines 585–589)
+                    // Force output to stdout; enables pass-through mode for non-LZ4 input.
                     force_stdout = true;
                     output_filename = Some(STDOUT_MARK.to_owned());
                     prefs.set_pass_through(true);
                 }
                 b't' => {
-                    // Test integrity (lz4cli.c line 592)
+                    // Verify integrity of compressed input; no output is written.
                     op_mode = OpMode::Test;
                 }
                 b'f' => {
-                    // Force overwrite (lz4cli.c line 595)
+                    // Overwrite existing destination files without prompting.
                     force_overwrite = true;
                     prefs.set_overwrite(true);
                 }
                 b'v' => {
-                    // Verbose (lz4cli.c line 598)
+                    // Increase verbosity level.
                     let lvl = display_level().saturating_add(1);
                     set_display_level(lvl);
                 }
                 b'q' => {
-                    // Quiet (lz4cli.c line 601)
+                    // Decrease verbosity level.
                     let lvl = display_level();
                     if lvl > 0 {
                         set_display_level(lvl - 1);
                     }
                 }
                 b'k' => {
-                    // Keep source (lz4cli.c line 604)
+                    // Preserve the source file after compression or decompression.
                     prefs.set_remove_src_file(false);
                 }
                 b'B' => {
-                    // Block properties (lz4cli.c lines 607–644)
-                    // Inner loop: peek at chars following 'B'.
+                    // Block format sub-options: size ID (4–7), raw byte count (≥32),
+                    // linked/independent mode (D/I), and block checksum (X).
+                    // Characters after 'B' are consumed by the inner loop below.
                     let mut j = char_pos + 1;
                     loop {
                         if j >= bytes.len() {
@@ -519,7 +508,7 @@ pub fn parse_args_from(
                                 j += 1;
                             }
                             c if c.is_ascii_digit() => {
-                                // C: argument++; B = readU32FromChar(&argument); argument--;
+                                // Numeric suffix: 4–7 selects a preset block-size ID; ≥32 is a raw byte count.
                                 let (b_val, remainder) =
                                     read_u32_from_str(&argument[j..]).unwrap();
                                 let consumed = argument[j..].len() - remainder.len();
@@ -562,37 +551,36 @@ pub fn parse_args_from(
                                 }
                                 // j is already past consumed digits; inner loop checks bytes[j] next.
                             }
-                            _ => break, // exit block properties (exitBlockProperties=1)
+                            _ => break, // unrecognised sub-option: stop parsing block properties
                         }
                     }
                     // Position char_pos so the outer loop's +1 lands at j.
                     char_pos = j.saturating_sub(1);
                 }
                 b'b' => {
-                    // Benchmark (lz4cli.c lines 647–648)
+                    // Enter benchmark mode; enables multiple input files.
                     op_mode = OpMode::Bench;
                     multiple_inputs = true;
                 }
                 b'S' => {
-                    // Bench separately (hidden, lz4cli.c line 651)
+                    // Benchmark each input file separately (hidden option).
                     bench_config.set_bench_separately(true);
                 }
                 b'r' => {
-                    // Recursive (lz4cli.c lines 654–658, feature-gated)
+                    // Traverse directories recursively (requires the "recursive" Cargo feature).
                     #[cfg(feature = "recursive")]
                     {
                         recursive = true;
                     }
-                    // Fall through to 'm' (treat non-option args as input files).
+                    // -r also implies -m: treat positional arguments as input files.
                     multiple_inputs = true;
                 }
                 b'm' => {
-                    // Multiple inputs (lz4cli.c line 660)
+                    // Accept multiple positional arguments as input filenames.
                     multiple_inputs = true;
                 }
                 b'i' => {
-                    // Benchmark iterations/seconds (lz4cli.c lines 664–671)
-                    // C: argument++; iters = readU32FromChar(&argument); argument--;
+                    // Set benchmark duration in seconds (or iteration count) for each level.
                     let next = char_pos + 1;
                     if next < bytes.len() && bytes[next].is_ascii_digit() {
                         let (iters, remainder) = read_u32_from_str(&argument[next..]).unwrap();
@@ -605,11 +593,11 @@ pub fn parse_args_from(
                     }
                 }
                 b'p' => {
-                    // Pause at end (hidden, lz4cli.c line 675)
+                    // Pause before returning (hidden diagnostic option).
                     main_pause = true;
                 }
                 _ => {
-                    // Unrecognised short option (lz4cli.c line 678)
+                    // Unrecognised short option.
                     return Err(anyhow!(
                         "bad usage: unrecognised option: -{c}",
                         c = bytes[char_pos] as char
@@ -656,9 +644,7 @@ pub fn parse_args_from(
 
 // ── Private helpers ────────────────────────────────────────────────────────────
 
-/// Print the welcome/version line to stdout.
-///
-/// Equivalent to `DISPLAYOUT(WELCOME_MESSAGE)` in lz4cli.c lines 483, 538.
+/// Prints the version banner to stdout.
 fn print_welcome_message(exe_name: &str) {
     let bits = (std::mem::size_of::<usize>() * 8) as u32;
     println!(
@@ -672,16 +658,15 @@ fn print_welcome_message(exe_name: &str) {
     let _ = exe_name; // unused; kept for symmetry with other help functions
 }
 
-/// Implement `NEXT_UINT32`: read a u32 from either `=VALUE` within the current argument
-/// or from the next element of `argv` (advancing `arg_idx`).
+/// Read a `u32` from either `=VALUE` within the current argument or from the next
+/// element of `argv` (advancing `arg_idx`), supporting both `--option=N` and
+/// `--option N` syntax.
 ///
-/// `rest` is the slice of the current argument that follows the long-option prefix
+/// `rest` is the slice of the current argument following the long-option name
 /// (e.g. for `--threads=4`, `rest` is `"=4"`; for `--threads 4`, `rest` is `""`).
 ///
-/// Returns `(value, unconsumed_suffix)`.  The caller should verify that the suffix
-/// is empty (no trailing garbage).
-///
-/// Equivalent to the `NEXT_UINT32` / `NEXT_FIELD` macros in lz4cli.c lines 321–328.
+/// Returns `(value, unconsumed_suffix)`.  Callers should verify the suffix is
+/// empty to catch trailing garbage such as `--threads=4x`.
 fn parse_next_uint32<'a>(
     rest: &'a str,
     argv: &[String],

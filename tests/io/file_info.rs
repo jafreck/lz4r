@@ -9,7 +9,7 @@
 //   - display_compressed_files_info() succeeds on valid LZ4 frames
 
 use lz4::io::file_info::{block_type_id, display_compressed_files_info, CompressedFileInfo, FrameType};
-use lz4_sys::{BlockMode, BlockSize};
+use lz4::frame::types::{BlockMode, BlockSizeId};
 use std::io::Write;
 use tempfile::NamedTempFile;
 
@@ -80,65 +80,65 @@ fn compressed_file_info_default_fields() {
 
 #[test]
 fn block_type_id_max64kb_linked() {
-    // BlockSize::Max64KB → digit '4', BlockMode::Linked → 'D' → "B4D"
-    let s = block_type_id(&BlockSize::Max64KB, &BlockMode::Linked);
+    // BlockSizeId::Max64Kb → digit '4', BlockMode::Linked → 'D' → "B4D"
+    let s = block_type_id(&BlockSizeId::Max64Kb, &BlockMode::Linked);
     assert_eq!(s, "B4D");
 }
 
 #[test]
 fn block_type_id_max64kb_independent() {
-    // BlockSize::Max64KB → digit '4', BlockMode::Independent → 'I' → "B4I"
-    let s = block_type_id(&BlockSize::Max64KB, &BlockMode::Independent);
+    // BlockSizeId::Max64Kb → digit '4', BlockMode::Independent → 'I' → "B4I"
+    let s = block_type_id(&BlockSizeId::Max64Kb, &BlockMode::Independent);
     assert_eq!(s, "B4I");
 }
 
 #[test]
 fn block_type_id_default_same_as_max64kb() {
-    // BlockSize::Default is treated identically to Max64KB → digit '4'
-    let s_default = block_type_id(&BlockSize::Default, &BlockMode::Linked);
-    let s_64kb = block_type_id(&BlockSize::Max64KB, &BlockMode::Linked);
+    // BlockSizeId::Default is treated identically to Max64KB → digit '4'
+    let s_default = block_type_id(&BlockSizeId::Default, &BlockMode::Linked);
+    let s_64kb = block_type_id(&BlockSizeId::Max64Kb, &BlockMode::Linked);
     assert_eq!(s_default, s_64kb);
 }
 
 #[test]
 fn block_type_id_max256kb_linked() {
-    // BlockSize::Max256KB → digit '5', Linked → 'D' → "B5D"
-    let s = block_type_id(&BlockSize::Max256KB, &BlockMode::Linked);
+    // BlockSizeId::Max256Kb → digit '5', Linked → 'D' → "B5D"
+    let s = block_type_id(&BlockSizeId::Max256Kb, &BlockMode::Linked);
     assert_eq!(s, "B5D");
 }
 
 #[test]
 fn block_type_id_max256kb_independent() {
-    // BlockSize::Max256KB → digit '5', Independent → 'I' → "B5I"
-    let s = block_type_id(&BlockSize::Max256KB, &BlockMode::Independent);
+    // BlockSizeId::Max256Kb → digit '5', Independent → 'I' → "B5I"
+    let s = block_type_id(&BlockSizeId::Max256Kb, &BlockMode::Independent);
     assert_eq!(s, "B5I");
 }
 
 #[test]
 fn block_type_id_max1mb_linked() {
-    // BlockSize::Max1MB → digit '6', Linked → 'D' → "B6D"
-    let s = block_type_id(&BlockSize::Max1MB, &BlockMode::Linked);
+    // BlockSizeId::Max1Mb → digit '6', Linked → 'D' → "B6D"
+    let s = block_type_id(&BlockSizeId::Max1Mb, &BlockMode::Linked);
     assert_eq!(s, "B6D");
 }
 
 #[test]
 fn block_type_id_max1mb_independent() {
-    // BlockSize::Max1MB → digit '6', Independent → 'I' → "B6I"
-    let s = block_type_id(&BlockSize::Max1MB, &BlockMode::Independent);
+    // BlockSizeId::Max1Mb → digit '6', Independent → 'I' → "B6I"
+    let s = block_type_id(&BlockSizeId::Max1Mb, &BlockMode::Independent);
     assert_eq!(s, "B6I");
 }
 
 #[test]
 fn block_type_id_max4mb_linked() {
-    // BlockSize::Max4MB → digit '7', Linked → 'D' → "B7D"
-    let s = block_type_id(&BlockSize::Max4MB, &BlockMode::Linked);
+    // BlockSizeId::Max4Mb → digit '7', Linked → 'D' → "B7D"
+    let s = block_type_id(&BlockSizeId::Max4Mb, &BlockMode::Linked);
     assert_eq!(s, "B7D");
 }
 
 #[test]
 fn block_type_id_max4mb_independent() {
-    // BlockSize::Max4MB → digit '7', Independent → 'I' → "B7I"
-    let s = block_type_id(&BlockSize::Max4MB, &BlockMode::Independent);
+    // BlockSizeId::Max4Mb → digit '7', Independent → 'I' → "B7I"
+    let s = block_type_id(&BlockSizeId::Max4Mb, &BlockMode::Independent);
     assert_eq!(s, "B7I");
 }
 
@@ -146,12 +146,12 @@ fn block_type_id_max4mb_independent() {
 fn block_type_id_always_three_chars() {
     // The result is always exactly 3 bytes: 'B' + digit + mode-char.
     for (size, mode) in [
-        (&BlockSize::Max64KB, &BlockMode::Linked),
-        (&BlockSize::Max64KB, &BlockMode::Independent),
-        (&BlockSize::Max256KB, &BlockMode::Linked),
-        (&BlockSize::Max256KB, &BlockMode::Independent),
-        (&BlockSize::Max1MB, &BlockMode::Linked),
-        (&BlockSize::Max4MB, &BlockMode::Independent),
+        (&BlockSizeId::Max64Kb, &BlockMode::Linked),
+        (&BlockSizeId::Max64Kb, &BlockMode::Independent),
+        (&BlockSizeId::Max256Kb, &BlockMode::Linked),
+        (&BlockSizeId::Max256Kb, &BlockMode::Independent),
+        (&BlockSizeId::Max1Mb, &BlockMode::Linked),
+        (&BlockSizeId::Max4Mb, &BlockMode::Independent),
     ] {
         let s = block_type_id(size, mode);
         assert_eq!(s.len(), 3, "block_type_id result must be exactly 3 chars, got '{s}'");
@@ -161,15 +161,15 @@ fn block_type_id_always_three_chars() {
 #[test]
 fn block_type_id_starts_with_b() {
     // First character must always be 'B'.
-    let s = block_type_id(&BlockSize::Max4MB, &BlockMode::Linked);
+    let s = block_type_id(&BlockSizeId::Max4Mb, &BlockMode::Linked);
     assert!(s.starts_with('B'), "block_type_id must start with 'B'");
 }
 
 #[test]
 fn block_type_id_ends_with_i_or_d() {
     // Last character must be 'I' (Independent) or 'D' (Linked/Dependent).
-    let si = block_type_id(&BlockSize::Max1MB, &BlockMode::Independent);
-    let sd = block_type_id(&BlockSize::Max1MB, &BlockMode::Linked);
+    let si = block_type_id(&BlockSizeId::Max1Mb, &BlockMode::Independent);
+    let sd = block_type_id(&BlockSizeId::Max1Mb, &BlockMode::Linked);
     assert!(si.ends_with('I'), "Independent must end with 'I'");
     assert!(sd.ends_with('D'), "Linked (dependent) must end with 'D'");
 }
@@ -204,16 +204,9 @@ fn display_info_directory_returns_err() {
 // display_compressed_files_info — valid LZ4 frames
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Build a minimal valid LZ4 frame using lz4_flex and write it to a temp file.
+/// Build a minimal valid LZ4 frame and write it to a temp file.
 fn write_lz4_frame(payload: &[u8]) -> NamedTempFile {
     let mut tmp = NamedTempFile::new().expect("tempfile");
-    let compressed = lz4_flex::compress_prepend_size(payload);
-    // lz4_flex::compress_prepend_size prepends the decompressed size as u32 LE,
-    // which is NOT a standard LZ4 frame. We need a proper LZ4F frame.
-    // Use lz4_sys to build a proper frame.
-    let _ = compressed; // discard
-
-    // Build a proper LZ4F frame using lz4_sys raw FFI.
     let frame = build_lz4f_frame(payload);
     tmp.write_all(&frame).expect("write frame");
     tmp

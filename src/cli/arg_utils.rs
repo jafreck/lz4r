@@ -1,11 +1,14 @@
-// arg_utils.rs — Rust port of lz4cli.c lines 262–341
-//
-// Migrated from: lz4-src/lz4-1.10.0/programs/lz4cli.c
-// Task: task-031
+//! Argument-parsing utilities for the `lz4r` CLI.
+//!
+//! This module provides small, focused helpers that sit between the raw
+//! argument strings produced by the OS and the higher-level argument types
+//! in [`crate::cli::args`].  Each function is `#[inline]`-friendly and has
+//! no allocations, operating entirely on string slices.
 
-/// Returns the last path component of `path`, handling both `/` and `\` separators.
+/// Returns the last path component of `path`.
 ///
-/// Equivalent to C `lastNameFromPath`.
+/// Both `/` (Unix) and `\` (Windows) path separators are recognised, so the
+/// function handles paths with mixed separators correctly.
 pub fn last_name_from_path(path: &str) -> &str {
     let after_slash = match path.rfind('/') {
         Some(pos) => &path[pos + 1..],
@@ -17,10 +20,11 @@ pub fn last_name_from_path(path: &str) -> &str {
     }
 }
 
-/// Returns `true` if `exe_path` matches `name`, excluding any file extension.
+/// Returns `true` if the basename of `exe_path` matches `name`.
 ///
-/// Equivalent to C `exeNameMatch`: the exe name must start with `name` and
-/// the character immediately after must be `'\0'` (end of string) or `'.'`.
+/// A match requires `exe_path` to start with `name` and the immediately
+/// following character to be either absent (exact match) or `'.'` (allowing
+/// for platform suffixes such as `.exe`).
 pub fn exe_name_match(exe_path: &str, name: &str) -> bool {
     if let Some(rest) = exe_path.strip_prefix(name) {
         rest.is_empty() || rest.starts_with('.')
@@ -30,18 +34,16 @@ pub fn exe_name_match(exe_path: &str, name: &str) -> bool {
 }
 
 /// Parses an unsigned 32-bit integer from the start of `s`, optionally
-/// followed by a size suffix.  Returns `None` if no leading digits are
-/// present, or `Some((value, remainder))` where `remainder` is the slice of
-/// `s` that was not consumed — mirroring C `readU32FromChar` which advances
-/// a `const char **` pointer past the parsed number and suffix.
+/// followed by a binary size suffix.  Returns `None` if `s` contains no
+/// leading digits, or `Some((value, remainder))` where `remainder` is the
+/// unconsumed tail of `s`.
 ///
-/// Recognised suffixes (case-sensitive, matching C `readU32FromChar`):
+/// Recognised suffixes (case-sensitive):
 ///   `K` / `KB` / `KiB`  → multiply by 1 024
 ///   `M` / `MB` / `MiB`  → multiply by 1 048 576
 ///   `G` / `GB` / `GiB`  → multiply by 1 073 741 824
 ///
-/// Note: the C source only handles K and M; G support is added per the
-/// migration spec to future-proof the interface.
+/// Arithmetic wraps silently on overflow, consistent with [`u32::wrapping_mul`].
 pub fn read_u32_from_str(s: &str) -> Option<(u32, &str)> {
     let bytes = s.as_bytes();
     let mut i = 0usize;
@@ -96,11 +98,11 @@ pub fn read_u32_from_str(s: &str) -> Option<(u32, &str)> {
     Some((result, &s[i..]))
 }
 
-/// If `arg` starts with `prefix`, returns the remainder of `arg` after `prefix`.
-/// Otherwise returns `None`.
+/// Returns the value portion of a long CLI option if `arg` begins with
+/// `prefix`, or `None` otherwise.
 ///
-/// Equivalent to C `longCommandWArg` (adapted to Rust ownership: the caller
-/// advances their own pointer by using the returned slice).
+/// For example, `long_command_w_arg("--block-size=64K", "--block-size=")`
+/// returns `Some("64K")`.  The returned slice borrows directly from `arg`.
 pub fn long_command_w_arg<'a>(arg: &'a str, prefix: &str) -> Option<&'a str> {
     arg.strip_prefix(prefix)
 }
@@ -150,10 +152,9 @@ mod tests {
 
     #[test]
     fn test_exe_name_match_prefix_only() {
+        // "lz4catx" starts with "lz4cat" but the remainder "x" is neither
+        // empty nor a '.'-prefixed extension, so it must not match.
         assert!(!exe_name_match("lz4catx", "lz4cat"));
-        // 'x' is not '\0' or '.'
-        // wait — "lz4catx".strip_prefix("lz4cat") == Some("x"), "x" doesn't start with '.'
-        // and is not empty → false ✓
     }
 
     // --- read_u32_from_str ---
@@ -220,7 +221,7 @@ mod tests {
 
     #[test]
     fn test_read_u32_trailing_garbage() {
-        // Mirrors C: "12Mfoo" → value=12582912, *stringPtr points at 'f'
+        // "12Mfoo": digits "12", suffix 'M' → 12 × 2²⁰ = 12 582 912; remainder "foo"
         let (val, rest) = read_u32_from_str("12Mfoo").unwrap();
         assert_eq!(val, 12582912);
         assert_eq!(rest, "foo");

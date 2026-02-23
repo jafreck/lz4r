@@ -1,19 +1,21 @@
-// file_io.rs — LZ4IO file open/close utilities.
-// Migrated from lz4io.c lines 347–455 and lz4io.h (lz4-1.10.0/programs).
-//
-// Migration decisions:
-// - C sentinel strings ("stdin", "stdout", "/dev/null") become Rust string
-//   constants STDIN_MARK, STDOUT_MARK, and NUL_MARK.
-// - `LZ4IO_openSrcFile` → `open_src_file` returning `Box<dyn Read>`.
-//   stdin is returned for the "stdin" sentinel; directories are rejected.
-// - `LZ4IO_openDstFile` → `open_dst_file` returning `Box<dyn Write>`.
-//   stdout sentinel returns stdout; devnull sentinel returns `io::sink()`.
-//   Overwrite prompting mirrors the C logic exactly.
-// - `LZ4IO_isSkippableMagicNumber` → `is_skippable_magic_number`.
-// - `LZ4IO_isDevNull / isStdin / isStdout` remain as private helpers.
-// - The C sparse-file `SET_SPARSE_FILE_MODE` is not applied here; callers
-//   that need sparse writes use `crate::io::sparse`.
-// - `g_displayLevel` is accessed via `crate::io::prefs::DISPLAY_LEVEL`.
+//! File I/O primitives for the LZ4 streaming pipeline.
+//!
+//! This module provides two entry points used by the higher-level I/O
+//! orchestration layer:
+//!
+//! - [`open_src_file`] — resolves a path string to a `Box<dyn Read>`,
+//!   handling the `"stdin"` sentinel and rejecting directories.
+//! - [`open_dst_file`] — resolves a path string to a [`DstFile`],
+//!   handling the `"stdout"` and `/dev/null` sentinels, enforcing the
+//!   overwrite policy from [`Prefs`], and tracking whether sparse writes are
+//!   appropriate for the resulting file descriptor.
+//!
+//! Sentinel string constants ([`STDIN_MARK`], [`STDOUT_MARK`], [`NUL_MARK`],
+//! [`NULL_OUTPUT`]) are re-exported so callers can compare against them without
+//! embedding magic strings.
+//!
+//! Verbosity-gated diagnostics are emitted via stderr using the global
+//! [`DISPLAY_LEVEL`] atomic.
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufReader, Read, Write};
@@ -24,7 +26,7 @@ use crate::io::prefs::{DISPLAY_LEVEL, LZ4IO_SKIPPABLE0, LZ4IO_SKIPPABLEMASK};
 use crate::util::is_directory;
 
 // ---------------------------------------------------------------------------
-// Sentinel strings (lz4io.h lines 42–49)
+// Sentinel strings
 // ---------------------------------------------------------------------------
 
 /// Sentinel: read from standard input.
@@ -43,7 +45,7 @@ pub const NUL_MARK: &str = "/dev/null";
 pub const NULL_OUTPUT: &str = "null";
 
 // ---------------------------------------------------------------------------
-// Private sentinel checks (lz4io.c lines 351–364)
+// Private sentinel checks
 // ---------------------------------------------------------------------------
 
 #[inline]
@@ -62,29 +64,31 @@ fn is_stdout(s: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// Skippable magic number check (lz4io.c lines 371–373)
+// Skippable magic number
 // ---------------------------------------------------------------------------
 
 /// Returns `true` if `magic` is in the LZ4 skippable-frame range
 /// `[0x184D2A50, 0x184D2A5F]`.
 ///
-/// Equivalent to `static int LZ4IO_isSkippableMagicNumber(unsigned int magic)`.
+/// Skippable frames carry user-defined metadata that conforming decoders must
+/// silently skip rather than treat as an error.
 #[inline]
 pub fn is_skippable_magic_number(magic: u32) -> bool {
     (magic & LZ4IO_SKIPPABLEMASK) == LZ4IO_SKIPPABLE0
 }
 
 // ---------------------------------------------------------------------------
-// open_src_file (lz4io.c lines 379–398)
+// Source file
 // ---------------------------------------------------------------------------
 
-/// Opens a source file for reading.
+/// Opens a source file for reading, returning a boxed [`Read`].
 ///
 /// - If `path` is the sentinel `"stdin"`, returns standard input.
-/// - If `path` is a directory, returns an error (directories are ignored).
-/// - Otherwise opens the file for binary reading.
+/// - If `path` is a directory, returns an [`io::ErrorKind::InvalidInput`] error.
+/// - Otherwise opens the file and wraps it in a [`BufReader`] for efficient
+///   sequential reads.
 ///
-/// Equivalent to `static FILE* LZ4IO_openSrcFile(const char* srcFileName)`.
+/// Diagnostics are printed to stderr when [`DISPLAY_LEVEL`] permits.
 pub fn open_src_file(path: &str) -> io::Result<Box<dyn Read>> {
     if is_stdin(path) {
         if DISPLAY_LEVEL.load(Ordering::Relaxed) >= 4 {
@@ -116,17 +120,20 @@ pub fn open_src_file(path: &str) -> io::Result<Box<dyn Read>> {
 }
 
 // ---------------------------------------------------------------------------
-// open_dst_file (lz4io.c lines 404–446)
+// Destination file
 // ---------------------------------------------------------------------------
 
-/// A `Box<dyn Write>` wrapper around a destination file, stdout, or a sink.
-/// When `is_stdout` is `true`, the inner writer is stdout.
-/// `sparse_mode` mirrors `(prefs->sparseFileSupport - (f==stdout)) > 0` from C.
+/// A write-capable destination produced by [`open_dst_file`].
+///
+/// Wraps either a regular [`File`], stdout, or a discard sink ([`io::sink`]).
+/// Callers inspect `is_stdout` to suppress terminal-unfriendly output (e.g.
+/// interactive progress bars) and `sparse_mode` to decide whether writes should
+/// be routed through [`crate::io::sparse`].
 pub struct DstFile {
     inner: Box<dyn Write>,
     pub is_stdout: bool,
-    /// Whether sparse writes should be used for this destination.
-    /// Equivalent to C's `int sparseMode = (sparseFileSupport - (f==stdout)) > 0`.
+    /// `true` when the underlying file descriptor supports sparse writes
+    /// (i.e. `prefs.sparse_file_support > 0` and the destination is not stdout).
     pub sparse_mode: bool,
 }
 
@@ -139,14 +146,20 @@ impl Write for DstFile {
     }
 }
 
-/// Opens a destination file for writing.
+/// Opens a destination for writing, returning a [`DstFile`].
 ///
-/// - `"stdout"` sentinel → stdout (wrapped in `DstFile` with `is_stdout=true`).
-/// - `/dev/null` / `"nul"` / `"null"` sentinel → `io::sink()`.
-/// - Otherwise: if `prefs.overwrite == false` and the file already exists,
-///   either print an error (display level ≤ 1) or prompt interactively.
+/// Resolves special sentinels before touching the filesystem:
+/// - `"stdout"` → stdout (`is_stdout = true`, `sparse_mode = false`).
+/// - [`NUL_MARK`] → [`io::sink`] (all bytes discarded, no file created).
 ///
-/// Equivalent to `static FILE* LZ4IO_openDstFile(const char*, const LZ4IO_prefs_t*)`.
+/// For regular paths, enforces the overwrite policy from `prefs`:
+/// - When `prefs.overwrite == false` and the file already exists, the
+///   behaviour depends on [`DISPLAY_LEVEL`]: at level ≤ 1 the call returns
+///   an [`io::ErrorKind::AlreadyExists`] error without prompting; at higher
+///   levels an interactive yes/no prompt is shown on stderr.
+///
+/// `sparse_mode` on the returned [`DstFile`] is `true` when
+/// `prefs.sparse_file_support > 0` and the destination is a regular file.
 pub fn open_dst_file(
     path: &str,
     prefs: &crate::io::prefs::Prefs,
@@ -181,7 +194,7 @@ pub fn open_dst_file(
         });
     }
 
-    // Overwrite check (lz4io.c lines 419–435)
+    // Overwrite guard: refuse or prompt before clobbering an existing file.
     if !prefs.overwrite {
         if Path::new(path).exists() {
             let display_level = DISPLAY_LEVEL.load(Ordering::Relaxed);
@@ -221,12 +234,13 @@ pub fn open_dst_file(
             e
         })?;
 
-    // Compute sparseMode mirroring C: (sparseFileSupport - (f==stdout)) > 0
-    // f is never stdout here, so: sparseMode = prefs.sparse_file_support > 0
+    // Sparse mode applies to regular files only, never to stdout.
+    // Because we have already returned for the stdout sentinel above,
+    // the destination here is always a real file.
     let sparse_mode = prefs.sparse_file_support > 0;
 
-    // On Windows, mark the file as sparse when sparse mode is active
-    // (equivalent to SET_SPARSE_FILE_MODE in platform.h).
+    // On Windows, mark the file handle as sparse so the OS can represent
+    // runs of zero bytes without allocating disk blocks.
     #[cfg(windows)]
     if sparse_mode {
         use std::os::windows::io::AsRawHandle;
@@ -300,9 +314,10 @@ mod tests {
 
     #[test]
     fn open_dst_file_null_output_not_sentinel() {
-        // "null" is NOT treated as a discard sentinel in open_dst_file —
-        // the C LZ4IO_openDstFile does not recognise it; only the CLI layer
-        // translates "null" to nulmark before calling into lz4io.
+        // "null" is NOT treated as a discard sentinel by open_dst_file.
+        // Only the CLI layer translates the user-visible string "null" to
+        // NUL_MARK before calling into this module; at this API level it is
+        // treated as an ordinary file path.
         // Attempting to open a file named "null" in the cwd will either succeed
         // (creating the file) or fail with a path error, but must not return
         // the sink path.

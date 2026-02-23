@@ -1,48 +1,58 @@
 //! Decompression dispatch and public API.
 //!
-//! Migrated from lz4io.c lines 2277–2555 (declaration #21):
-//! `LZ4IO_passThrough`, `skipStream`, `fseek_u32`, `selectDecoder`,
+//! This module is the top-level entry point for decompression.  It implements
+//! the frame-format dispatch loop: it reads the 4-byte magic number at the
+//! start of each chained frame and routes to the appropriate decoder:
+//!
+//! - [`crate::io::decompress_frame`] for LZ4 frame-format streams
+//! - [`crate::io::decompress_legacy`] for the legacy block-stream format
+//! - [`pass_through`] for unrecognised headers when pass-through mode is active
+//! - Skippable frames (`0x184D2A50`–`0x184D2A5F`) are silently discarded
+//!
+//! The public API exposes two functions:
+//! - [`decompress_filename`] — decompresses a single source/destination pair
+//! - [`decompress_multiple_filenames`] — decompresses a list of source files,
+//!   deriving destination names by stripping a suffix (e.g., `.lz4`)
+//!
+//! Corresponds to `LZ4IO_passThrough`, `skipStream`, `selectDecoder`,
 //! `LZ4IO_decompressSrcFile`, `LZ4IO_decompressDstFile`,
-//! `LZ4IO_decompressFilename`, `LZ4IO_decompressMultipleFilenames`.
+//! `LZ4IO_decompressFilename`, and `LZ4IO_decompressMultipleFilenames` in
+//! the reference implementation (`lz4io.c` lines 2277–2555).
 //!
-//! # Migration decisions
+//! # Design notes
 //!
-//! - **`g_magicRead` global eliminated**: `decode_legacy_stream` (task-017)
-//!   returns `(bytes, Option<u32>)`.  The `Option<u32>` carries the next-stream
-//!   magic number back to the dispatch loop, replacing the C module-level
-//!   global `g_magicRead` (lz4io.c line 1677).
+//! - **Magic number passing**: `decode_legacy_stream` returns
+//!   `(bytes, Option<u32>)`.  When the legacy stream is immediately followed
+//!   by another chained frame, the embedded next-stream magic is returned as
+//!   `Some(u32)` and consumed by the next dispatch iteration without an extra
+//!   read, avoiding the `g_magicRead` module-level global in the C reference
+//!   implementation (lz4io.c line 1677).
 //!
-//! - **`fseek_u32` eliminated**: Rust's `Seek::seek(SeekFrom::Current(n as i64))`
-//!   handles offsets up to 2^63 bytes on all supported platforms; the 32-bit
-//!   workaround loop in the C original is unnecessary.
+//! - **Skippable-frame seeking**: Skippable-frame payloads are consumed via
+//!   `skip_stream` (read-and-discard) rather than `fseek`.  This is correct
+//!   for both seekable files and non-seekable pipes; regular-file inputs pay a
+//!   minor read overhead compared to `fseek` but are functionally identical.
 //!
-//! - **`nbFrames` static local**: The C `static unsigned nbFrames` inside
-//!   `selectDecoder` is modelled as a local `nb_frames: u64` variable in
-//!   `decompress_loop`, eliminating implicit global state between calls.
+//! - **Frame counter scoping**: The C `selectDecoder` function maintains a
+//!   `static unsigned nbFrames` local that persists across calls.  The
+//!   equivalent `nb_frames` is a local variable scoped to a single call of
+//!   `decompress_loop`, eliminating implicit state shared between invocations.
 //!
-//! - **Sparse writes**: The frame and legacy decompressors (task-018 / task-017)
-//!   write to `impl Write` and cannot call `fwrite_sparse` themselves.  This
-//!   module wraps concrete output `File` handles in `SparseWriter`, which
-//!   forwards every `write` call through `fwrite_sparse`.  `fwrite_sparse_end`
-//!   is called once after the full dispatch loop.  The C implementation calls
-//!   `fwriteSparseEnd` at the end of *each* frame decoder; the deferred-end
-//!   approach here is functionally equivalent because no real data is written
-//!   in between (the sparse state is accumulated, not committed).
+//! - **Sparse writes**: The frame and legacy decoders write to `impl Write`
+//!   and cannot call `fwrite_sparse` themselves.  Concrete `File` outputs are
+//!   wrapped in [`SparseWriter`], which forwards every write through
+//!   `fwrite_sparse` and defers trailing-zeros finalisation until the entire
+//!   dispatch loop completes.  The C implementation calls `fwriteSparseEnd`
+//!   at the end of each frame decoder, but because no intervening real data is
+//!   written between frames, the deferred approach is functionally equivalent.
 //!
 //! - **File stat propagation**: Uses the `filetime` crate for mtime and
-//!   `std::fs::set_permissions` for mode bits, mirroring `UTIL_setFileStat`.
+//!   `std::fs::set_permissions` for mode bits, matching the behaviour of
+//!   `UTIL_setFileStat` in the reference implementation.
 //!
-//! - **Skip-on-non-seekable**: `fseek_u32` falls back to `skipStream` when
-//!   the file descriptor is not seekable (e.g., a pipe). In Rust we always
-//!   try `Seek::seek` first (for regular files) and fall back to `skip_stream`
-//!   if the seek fails.  The `open_src_file` helper returns `Box<dyn Read>` so
-//!   there is no compile-time seek bound; a specialised seek attempt is not
-//!   performed here — `skip_stream` is used for all skippable-frame skips.
-//!   For regular file inputs this is slightly less efficient but functionally
-//!   identical.
-//!
-//! - **Error handling**: C's `END_PROCESS(n, msg)` calls `exit()`.  In Rust all
-//!   errors are returned as `io::Error` with descriptive messages.
+//! - **Error handling**: The C `END_PROCESS(n, msg)` macro calls `exit()`.
+//!   All errors are returned as `io::Error` with descriptive messages so that
+//!   callers can handle or propagate them without terminating the process.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -221,8 +231,10 @@ fn decompress_loop<R: Read, W: Write>(
     let mut filesize: u64 = 0;
     // Equivalent to C's `static unsigned nbFrames = 0` in `selectDecoder`.
     let mut nb_frames: u64 = 0;
-    // Replaces `g_magicRead` global: set by legacy decoder when it hits the
-    // start of a chained frame (lz4io.c lines 1677, 2352–2354).
+    // When the legacy decoder encounters a chained-stream magic number embedded
+    // at the end of its own stream, it returns it as `Some(u32)`.  Storing it
+    // here lets the next iteration reuse that value without an extra 4-byte
+    // read (lz4io.c lines 1677, 2352–2354).
     let mut pending_magic: Option<u32> = None;
 
     loop {
@@ -618,18 +630,13 @@ pub fn decompress_multiple_filenames(
 mod tests {
     use super::*;
     use crate::io::prefs::Prefs;
-    use lz4_flex::frame::FrameEncoder;
     use std::io::{Cursor, Write};
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     /// Builds a minimal LZ4 frame-format stream for `data`.
     fn make_frame_stream(data: &[u8]) -> Vec<u8> {
-        let mut compressed = Vec::new();
-        let mut encoder = FrameEncoder::new(&mut compressed);
-        encoder.write_all(data).unwrap();
-        encoder.finish().unwrap();
-        compressed
+        crate::frame::compress_frame_to_vec(data)
     }
 
     /// Builds a legacy-format LZ4 stream for `data` (magic + size-prefixed blocks).
@@ -638,7 +645,7 @@ mod tests {
         let mut stream = Vec::new();
         stream.extend_from_slice(&LEGACY_MAGICNUMBER.to_le_bytes());
         for chunk in data.chunks(LEGACY_BLOCKSIZE) {
-            let compressed = lz4_flex::block::compress(chunk);
+            let compressed = crate::block::compress_block_to_vec(chunk);
             stream.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
             stream.extend_from_slice(&compressed);
         }
