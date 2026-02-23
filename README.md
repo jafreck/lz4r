@@ -1,9 +1,9 @@
 # lz4r
 
-[![CI](https://github.com/jafreck/Lz4r/actions/workflows/ci.yml/badge.svg)](https://github.com/jafreck/Lz4r/actions/workflows/ci.yml)
+[![CI](https://github.com/jafreck/lz4r/actions/workflows/ci.yml/badge.svg)](https://github.com/jafreck/lz4r/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/jafreck/lz4r/branch/main/graph/badge.svg)](https://codecov.io/gh/jafreck/lz4r)
-[![Crates.io](https://img.shields.io/crates/v/lz4-programs.svg)](https://crates.io/crates/lz4-programs)
-[![docs.rs](https://img.shields.io/docsrs/lz4-programs)](https://docs.rs/lz4-programs)
+[![Crates.io](https://img.shields.io/crates/v/lz4r.svg)](https://crates.io/crates/lz4r)
+[![docs.rs](https://img.shields.io/docsrs/lz4r)](https://docs.rs/lz4r)
 [![License: GPL-2.0](https://img.shields.io/badge/license-GPL--2.0-blue.svg)](LICENSE)
 
 Pure-Rust port of the [LZ4 compression library](https://github.com/lz4/lz4) (v1.10.0), providing the full LZ4 C API surface — block compression, high-compression mode, streaming frame format, and file I/O — with no C dependencies.
