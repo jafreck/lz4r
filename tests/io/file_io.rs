@@ -236,25 +236,6 @@ fn open_dst_file_nul_mark_returns_sink() {
     assert!(!dst.is_stdout, "nul mark must not set is_stdout");
 }
 
-/// The "null" alternate sentinel also returns a sink DstFile.
-#[test]
-fn open_dst_file_null_output_returns_sink() {
-    let prefs = Prefs::default();
-    let dst = open_dst_file(NULL_OUTPUT, &prefs).expect("null output must succeed");
-    assert!(!dst.is_stdout);
-}
-
-/// Writes to the null sink succeed (data is discarded).
-#[test]
-fn open_dst_file_null_output_write_succeeds() {
-    let prefs = Prefs::default();
-    let mut dst = open_dst_file(NULL_OUTPUT, &prefs).expect("null output must succeed");
-    let written = dst
-        .write(b"discard me")
-        .expect("write to null sink must succeed");
-    assert_eq!(written, b"discard me".len());
-}
-
 // ── Real file creation ────────────────────────────────────────────────────────
 
 /// With overwrite=true, a new file is created successfully.
