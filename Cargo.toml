@@ -66,3 +66,19 @@ path = "e2e/cli_integration.rs"
 [[test]]
 name = "e2e_legacy_format"
 path = "e2e/legacy_format.rs"
+
+[[test]]
+name = "e2e_block_oneshot"
+path = "e2e/block_oneshot.rs"
+
+[[test]]
+name = "e2e_block_streaming"
+path = "e2e/block_streaming.rs"
+
+[[test]]
+name = "e2e_hc_api"
+path = "e2e/hc_api.rs"
+
+[[test]]
+name = "e2e_error_handling"
+path = "e2e/error_handling.rs"

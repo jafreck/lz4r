@@ -62,3 +62,17 @@ pub fn compress_inplace_buffer_size(max_compressed_size: usize) -> usize {
 // ── Top-level re-exports ──────────────────────────────────────────────────────
 pub use block::compress::compress_default as lz4_compress_default;
 pub use block::decompress_api::decompress_safe as lz4_decompress_safe;
+
+// Block API — one-shot compression (needed by e2e tests)
+pub use block::{
+    compress_bound, compress_dest_size, compress_fast,
+    decompress_safe_partial, decompress_safe_using_dict,
+    LZ4_ACCELERATION_DEFAULT, LZ4_ACCELERATION_MAX, LZ4_MAX_INPUT_SIZE,
+    Lz4Error,
+};
+
+// Error types
+pub use block::decompress_core::DecompressError;
+
+// Frame API convenience re-exports
+pub use frame::{lz4f_compress_frame, lz4f_decompress};
