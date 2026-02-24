@@ -329,7 +329,6 @@ mod tests {
     use super::*;
     use crate::io::decompress_resources::DecompressResources;
     use crate::io::prefs::Prefs;
-    use std::io::Write;
 
     /// Compress `data` into a complete LZ4 frame using the native frame API.
     fn compress_frame(data: &[u8]) -> Vec<u8> {

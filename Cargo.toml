@@ -106,6 +106,9 @@ path = "e2e/hc_api.rs"
 name = "e2e_error_handling"
 path = "e2e/error_handling.rs"
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(has_sparse_files)'] }
+
 [[test]]
 name = "e2e_interop"
 path = "e2e/interop.rs"

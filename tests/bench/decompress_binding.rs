@@ -10,7 +10,6 @@
 //   - skip_checksums flag is accepted and does not panic or error
 
 use lz4::bench::decompress_binding::{decompress_frame_block, DecFunctionF, FrameDecompressor};
-use std::io;
 
 // ── Helper ──────────────────────────────────────────────────────────────────────────────────
 

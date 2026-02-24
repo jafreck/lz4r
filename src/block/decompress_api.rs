@@ -451,7 +451,7 @@ pub unsafe fn decompress_safe_continue(
     if ctx.prefix_size == 0 {
         // First call — no dictionary yet.
         debug_assert!(ctx.ext_dict_size == 0);
-        let mut tmp_dst = core::slice::from_raw_parts_mut(dst_ptr, max_output);
+        let tmp_dst = core::slice::from_raw_parts_mut(dst_ptr, max_output);
         let tmp_src = core::slice::from_raw_parts(src_ptr, src_size);
         result = decompress_safe(tmp_src, tmp_dst)?;
         ctx.prefix_size = result;

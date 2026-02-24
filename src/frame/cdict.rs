@@ -52,6 +52,7 @@ const MAX_DICT_SIZE: usize = 64 * 1024;
 pub struct Lz4FCDict {
     /// Trimmed copy of the user-supplied dictionary (at most 64 KB).
     /// Equivalent to `cdict->dictContent` in C.
+    #[allow(dead_code)]
     pub(crate) dict_content: Vec<u8>,
 
     /// Fast LZ4 stream pre-loaded with the dictionary data.

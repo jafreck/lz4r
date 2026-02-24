@@ -276,7 +276,7 @@ impl<W: Write> Write for Lz4WriteFile<W> {
                 .as_mut()
                 .expect("inner writer already taken")
                 .write_all(&self.dst_buf[..compressed])
-                .inspect_err(|e| {
+                .inspect_err(|_e| {
                     self.errored = true;
                 })?;
 

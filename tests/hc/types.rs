@@ -22,7 +22,7 @@
 
 use lz4::hc::types::{
     clear_tables, count_back, get_clevel_params, hash_ptr, hc_count, init_internal, mid_hash4,
-    mid_hash4_ptr, mid_hash7, mid_hash8_ptr, nb_common_bytes32, read64, read_le64, CParams,
+    mid_hash4_ptr, mid_hash7, mid_hash8_ptr, nb_common_bytes32, read64, read_le64,
     DictCtxDirective, HcCCtxInternal, HcStrategy, K_CL_TABLE, LZ4HC_CLEVEL_DEFAULT,
     LZ4HC_CLEVEL_MAX, LZ4HC_CLEVEL_MIN, LZ4HC_CLEVEL_OPT_MIN, LZ4HC_DICTIONARY_LOGSIZE,
     LZ4HC_HASHSIZE, LZ4HC_HASHTABLESIZE, LZ4HC_HASH_LOG, LZ4HC_HASH_MASK, LZ4HC_MAXD,

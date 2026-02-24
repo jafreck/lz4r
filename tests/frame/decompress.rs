@@ -2853,9 +2853,8 @@ fn decompress_one_byte_at_a_time(frame: &[u8]) -> Vec<u8> {
                     // Stuck — feed all remaining
                     let mut dst2 = vec![0u8; 65536];
                     match lz4f_decompress(&mut dctx, Some(&mut dst2), &frame[src_pos..], None) {
-                        Ok((sc2, dw2, _)) => {
+                        Ok((_sc2, dw2, _)) => {
                             output.extend_from_slice(&dst2[..dw2]);
-                            src_pos += sc2;
                         }
                         Err(e) => panic!("stuck recovery failed at pos {src_pos}: {e:?}"),
                     }
@@ -3024,16 +3023,15 @@ fn content_checksum_split_exercises_store_suffix() {
     let mut output = Vec::new();
     // Feed all but last 6 bytes (end mark + checksum overlap)
     let split = frame.len().saturating_sub(6);
-    let mut pos = 0usize;
 
     // Feed up to split
-    {
+    let mut pos = {
         let mut dst = vec![0u8; 4096];
         let (sc, dw, _hint) =
             lz4f_decompress(&mut dctx, Some(&mut dst), &frame[..split], None).unwrap();
         output.extend_from_slice(&dst[..dw]);
-        pos = sc;
-    }
+        sc
+    };
 
     // Feed remaining bytes one at a time
     while pos < frame.len() {
@@ -3786,10 +3784,9 @@ fn fragmented_content_checksum_suffix() {
         output.extend_from_slice(&dst[..dw2]);
         pos += sc2;
         if hint2 > 0 {
-            let (sc3, dw3, _) =
+            let (_sc3, dw3, _) =
                 lz4f_decompress(&mut dctx, Some(&mut dst), &frame[pos..], None).unwrap();
             output.extend_from_slice(&dst[..dw3]);
-            pos += sc3;
         }
     }
     assert_eq!(output, data);
@@ -3892,9 +3889,8 @@ fn one_byte_at_a_time_skippable_frame_staging() {
                     }
                     let mut dst2 = vec![0u8; 65536];
                     match lz4f_decompress(&mut dctx, Some(&mut dst2), &combined[pos..], None) {
-                        Ok((sc2, dw2, _)) => {
+                        Ok((_sc2, dw2, _)) => {
                             output.extend_from_slice(&dst2[..dw2]);
-                            pos += sc2;
                         }
                         Err(e) => panic!("stuck: {e:?}"),
                     }
@@ -3914,8 +3910,6 @@ fn one_byte_at_a_time_skippable_frame_staging() {
 /// Exercises StoreFrameHeader staging (L217).
 #[test]
 fn decode_header_with_content_size_and_dict_id() {
-    use lz4::frame::compress::lz4f_compress_frame;
-    use lz4::frame::header::lz4f_compress_frame_bound;
     let prefs = Preferences {
         frame_info: FrameInfo {
             content_size: 500,

@@ -18,7 +18,6 @@
 use lz4::io::compress_frame::CompressResources;
 use lz4::io::compress_mt::compress_filename_mt;
 use lz4::io::prefs::{Prefs, MB};
-use std::io::Write;
 use tempfile::TempDir;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -614,7 +613,7 @@ fn mt_hc_level_roundtrip() {
     let data = pattern_data(CHUNK_SIZE + 512);
     std::fs::write(&src_path, &data).unwrap();
 
-    let mut prefs = make_prefs(2);
+    let prefs = make_prefs(2);
     let mut ress = make_ress(&prefs);
     let mut in_size = 0u64;
     compress_filename_mt(
