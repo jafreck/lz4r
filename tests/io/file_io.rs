@@ -402,3 +402,28 @@ fn dst_file_write_empty_slice() {
     let written = dst.write(b"").expect("empty write must succeed");
     assert_eq!(written, 0);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 5: directory rejection, sparse_file_support warnings, display_level paths
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// open_src_file with a directory path returns Err(InvalidInput).
+#[test]
+fn open_src_file_directory_returns_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let result = open_src_file(dir.path().to_str().unwrap());
+    assert!(result.is_err(), "opening a directory must fail");
+}
+
+/// open_dst_file with sparse_file_support at display_level 0
+/// exercises the dst_file path without interfering with overwrite tests.
+#[test]
+fn open_dst_file_sparse_support() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("sparse_dst.bin");
+    let mut prefs = Prefs::default();
+    prefs.sparse_file_support = 1;
+    let result = open_dst_file(path.to_str().unwrap(), &prefs);
+    assert!(result.is_ok(), "open_dst_file with sparse must succeed");
+}
+

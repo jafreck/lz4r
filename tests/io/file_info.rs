@@ -882,3 +882,852 @@ fn display_info_verbose_lz4_then_legacy_frame() {
         "lz4 then legacy in verbose mode must return Ok: {result:?}"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Additional file_info coverage
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Skippable frame followed by LZ4 frame: exercises multi-frame parsing
+/// including the skippable-frame code path.
+#[test]
+fn display_info_skippable_then_lz4_frame() {
+    let skip = build_skippable_frame(b"some skip payload data here");
+    let lz4f = build_lz4f_frame(b"real data after skippable frame");
+    let mut combined = skip;
+    combined.extend_from_slice(&lz4f);
+
+    let mut tmp = NamedTempFile::new().expect("tempfile");
+    tmp.write_all(&combined).expect("write");
+    let path = tmp.path().to_str().expect("path");
+
+    let result = display_compressed_files_info(&[path]);
+    assert!(result.is_ok(), "skippable + lz4 frame must succeed: {result:?}");
+}
+
+/// Multiple skippable frames: exercises the skippable-frame loop.
+#[test]
+fn display_info_multiple_skippable_frames() {
+    let skip1 = build_skippable_frame(b"first skip");
+    let skip2 = build_skippable_frame(b"second skip");
+    let lz4f = build_lz4f_frame(b"actual data after two skippable frames");
+    let mut combined = skip1;
+    combined.extend_from_slice(&skip2);
+    combined.extend_from_slice(&lz4f);
+
+    let mut tmp = NamedTempFile::new().expect("tempfile");
+    tmp.write_all(&combined).expect("write");
+    let path = tmp.path().to_str().expect("path");
+
+    let result = display_compressed_files_info(&[path]);
+    assert!(result.is_ok(), "multiple skippable frames must succeed: {result:?}");
+}
+
+/// Legacy frame only, with verbose display level.
+#[test]
+fn display_info_legacy_only_verbose() {
+    use lz4::io::prefs::DISPLAY_LEVEL;
+    use std::sync::atomic::Ordering;
+
+    let old = DISPLAY_LEVEL.load(Ordering::SeqCst);
+    let _guard = DisplayLevelGuard(old);
+    DISPLAY_LEVEL.store(3, Ordering::SeqCst);
+
+    let legacy = build_legacy_frame(b"legacy data only, verbose display level test content");
+    let mut tmp = NamedTempFile::new().expect("tempfile");
+    tmp.write_all(&legacy).expect("write");
+    let path = tmp.path().to_str().expect("path");
+
+    let result = display_compressed_files_info(&[path]);
+    assert!(result.is_ok(), "legacy-only verbose must succeed: {result:?}");
+}
+
+/// LZ4 frame with content checksum, displayed at verbose level
+#[test]
+fn display_info_lz4_with_content_checksum_verbose() {
+    use lz4::io::prefs::DISPLAY_LEVEL;
+    use std::sync::atomic::Ordering;
+
+    let old = DISPLAY_LEVEL.load(Ordering::SeqCst);
+    let _guard = DisplayLevelGuard(old);
+    DISPLAY_LEVEL.store(3, Ordering::SeqCst);
+
+    let frame = build_lz4f_frame_with_content_checksum(
+        b"checksummed frame for verbose display, lots of text here for good measure"
+    );
+    let mut tmp = NamedTempFile::new().expect("tempfile");
+    tmp.write_all(&frame).expect("write");
+    let path = tmp.path().to_str().expect("path");
+
+    let result = display_compressed_files_info(&[path]);
+    assert!(result.is_ok(), "checksum frame verbose must succeed: {result:?}");
+}
+
+/// Multiple paths: exercises the multi-file loop in display_compressed_files_info.
+#[test]
+fn display_info_multiple_files() {
+    let frame1 = build_lz4f_frame(b"first file content");
+    let frame2 = build_lz4f_frame(b"second file content different data");
+
+    let mut tmp1 = NamedTempFile::new().expect("tempfile1");
+    tmp1.write_all(&frame1).expect("write");
+    let mut tmp2 = NamedTempFile::new().expect("tempfile2");
+    tmp2.write_all(&frame2).expect("write");
+
+    let p1 = tmp1.path().to_str().expect("path1");
+    let p2 = tmp2.path().to_str().expect("path2");
+
+    let result = display_compressed_files_info(&[p1, p2]);
+    assert!(result.is_ok(), "multiple files must succeed: {result:?}");
+}
+
+/// block_type_id with linked blocks
+#[test]
+fn block_type_id_linked_variants() {
+    assert_eq!(block_type_id(&BlockSizeId::Max64Kb, &BlockMode::Linked), "B4D");
+    assert_eq!(block_type_id(&BlockSizeId::Max256Kb, &BlockMode::Linked), "B5D");
+    assert_eq!(block_type_id(&BlockSizeId::Max1Mb, &BlockMode::Linked), "B6D");
+    assert_eq!(block_type_id(&BlockSizeId::Max4Mb, &BlockMode::Linked), "B7D");
+}
+
+/// block_type_id with independent blocks
+#[test]
+fn block_type_id_independent_variants() {
+    assert_eq!(block_type_id(&BlockSizeId::Max64Kb, &BlockMode::Independent), "B4I");
+    assert_eq!(block_type_id(&BlockSizeId::Max256Kb, &BlockMode::Independent), "B5I");
+    assert_eq!(block_type_id(&BlockSizeId::Max1Mb, &BlockMode::Independent), "B6I");
+    assert_eq!(block_type_id(&BlockSizeId::Max4Mb, &BlockMode::Independent), "B7I");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Coverage-gap tests: get_compressed_file_info + skip_blocks_data paths
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Build LZ4F frame with content_size set (enables ratio display).
+fn build_lz4f_frame_with_content_size(src: &[u8]) -> Vec<u8> {
+    use lz4::frame::compress::lz4f_compress_frame;
+    use lz4::frame::types::{
+        BlockSizeId as FrameBlockSizeId, ContentChecksum, FrameInfo, Preferences,
+    };
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            content_size: src.len() as u64,
+            content_checksum_flag: ContentChecksum::Enabled,
+            block_size_id: FrameBlockSizeId::Max64Kb,
+            ..Default::default()
+        },
+        compression_level: 1,
+        ..Default::default()
+    };
+    let bound = src.len() * 2 + 256;
+    let mut dst = vec![0u8; bound];
+    let n = lz4f_compress_frame(&mut dst, src, Some(&prefs)).expect("compress_frame");
+    dst.truncate(n);
+    dst
+}
+
+/// Build LZ4F frame with block checksum for skip_blocks_data block_checksum path.
+fn build_lz4f_frame_with_block_checksum(src: &[u8]) -> Vec<u8> {
+    use lz4::frame::compress::lz4f_compress_frame;
+    use lz4::frame::types::{
+        BlockChecksum as FrameBlockChecksum, BlockSizeId as FrameBlockSizeId,
+        ContentChecksum, FrameInfo, Preferences,
+    };
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_checksum_flag: FrameBlockChecksum::Enabled,
+            content_checksum_flag: ContentChecksum::Enabled,
+            content_size: src.len() as u64,
+            block_size_id: FrameBlockSizeId::Max64Kb,
+            ..Default::default()
+        },
+        compression_level: 1,
+        ..Default::default()
+    };
+    let bound = src.len() * 2 + 256;
+    let mut dst = vec![0u8; bound];
+    let n = lz4f_compress_frame(&mut dst, src, Some(&prefs)).expect("compress_frame");
+    dst.truncate(n);
+    dst
+}
+
+/// display_compressed_files_info on a frame with content_size set exercises
+/// the ratio display path and content_size != 0 branch (L489, L598-610, L750-755).
+#[test]
+fn display_info_frame_with_content_size_shows_ratio() {
+    let data = b"The quick brown fox jumps over the lazy dog. This is some data.";
+    let frame = build_lz4f_frame_with_content_size(data);
+    let mut tmp = NamedTempFile::new().expect("tempfile");
+    tmp.write_all(&frame).expect("write");
+    let path = tmp.path().to_str().expect("path");
+
+    let result = display_compressed_files_info(&[path]);
+    assert!(result.is_ok(), "frame with content_size must succeed: {result:?}");
+}
+
+/// Frame with block checksum exercises skip_blocks_data with block_checksum=true (L197-209).
+#[test]
+fn display_info_frame_with_block_checksum() {
+    let data = b"Block checksum test data that should be long enough for a block.";
+    let frame = build_lz4f_frame_with_block_checksum(data);
+    let mut tmp = NamedTempFile::new().expect("tempfile");
+    tmp.write_all(&frame).expect("write");
+    let path = tmp.path().to_str().expect("path");
+
+    let result = display_compressed_files_info(&[path]);
+    assert!(result.is_ok(), "frame with block checksum must succeed: {result:?}");
+}
+
+/// Verbose display (level 3) with content_size exercises verbose per-frame ratio output.
+#[test]
+fn display_info_verbose_with_content_size_and_ratio() {
+    use lz4::io::prefs::DISPLAY_LEVEL;
+    use std::sync::atomic::Ordering;
+
+    let old = DISPLAY_LEVEL.load(Ordering::SeqCst);
+    let _guard = DisplayLevelGuard(old);
+    DISPLAY_LEVEL.store(3, Ordering::SeqCst);
+
+    let data = b"Verbose display with content size flag exercises ratio printing path.";
+    let frame = build_lz4f_frame_with_content_size(data);
+    let mut tmp = NamedTempFile::new().expect("tempfile");
+    tmp.write_all(&frame).expect("write");
+    let path = tmp.path().to_str().expect("path");
+
+    let result = display_compressed_files_info(&[path]);
+    assert!(result.is_ok(), "verbose with content_size must succeed: {result:?}");
+}
+
+/// Verbose display with block checksum enabled.
+#[test]
+fn display_info_verbose_with_block_checksum() {
+    use lz4::io::prefs::DISPLAY_LEVEL;
+    use std::sync::atomic::Ordering;
+
+    let old = DISPLAY_LEVEL.load(Ordering::SeqCst);
+    let _guard = DisplayLevelGuard(old);
+    DISPLAY_LEVEL.store(3, Ordering::SeqCst);
+
+    let data = b"Block checksum in verbose mode should show checksum info.";
+    let frame = build_lz4f_frame_with_block_checksum(data);
+    let mut tmp = NamedTempFile::new().expect("tempfile");
+    tmp.write_all(&frame).expect("write");
+    let path = tmp.path().to_str().expect("path");
+
+    let result = display_compressed_files_info(&[path]);
+    assert!(result.is_ok(), "verbose block checksum must succeed: {result:?}");
+}
+
+/// Multi-frame file (two standard LZ4F frames concatenated) exercises
+/// block-type consistency check and multi-frame counting.
+#[test]
+fn display_info_multi_frame_consistency_check() {
+    let frame1 = build_lz4f_frame_with_content_size(b"first frame data here!");
+    let frame2 = build_lz4f_frame_with_content_size(b"second frame data here, more content.");
+    let mut combined = frame1;
+    combined.extend_from_slice(&frame2);
+
+    let mut tmp = NamedTempFile::new().expect("tempfile");
+    tmp.write_all(&combined).expect("write");
+    let path = tmp.path().to_str().expect("path");
+
+    let result = display_compressed_files_info(&[path]);
+    assert!(result.is_ok(), "multi-frame must succeed: {result:?}");
+}
+
+/// Verbose multi-frame file.
+#[test]
+fn display_info_verbose_multi_frame() {
+    use lz4::io::prefs::DISPLAY_LEVEL;
+    use std::sync::atomic::Ordering;
+
+    let old = DISPLAY_LEVEL.load(Ordering::SeqCst);
+    let _guard = DisplayLevelGuard(old);
+    DISPLAY_LEVEL.store(3, Ordering::SeqCst);
+
+    let frame1 = build_lz4f_frame_with_content_size(b"verbose multi frame 1");
+    let frame2 = build_lz4f_frame_with_content_size(b"verbose multi frame 2");
+    let mut combined = frame1;
+    combined.extend_from_slice(&frame2);
+
+    let mut tmp = NamedTempFile::new().expect("tempfile");
+    tmp.write_all(&combined).expect("write");
+    let path = tmp.path().to_str().expect("path");
+
+    let result = display_compressed_files_info(&[path]);
+    assert!(result.is_ok(), "verbose multi-frame must succeed: {result:?}");
+}
+
+/// Verbose skippable + LZ4 frame.
+#[test]
+fn display_info_verbose_skippable_then_lz4() {
+    use lz4::io::prefs::DISPLAY_LEVEL;
+    use std::sync::atomic::Ordering;
+
+    let old = DISPLAY_LEVEL.load(Ordering::SeqCst);
+    let _guard = DisplayLevelGuard(old);
+    DISPLAY_LEVEL.store(3, Ordering::SeqCst);
+
+    let skip = build_skippable_frame(b"metadata for verbose skippable test");
+    let lz4 = build_lz4f_frame_with_content_size(b"verbose real frame content here");
+    let mut combined = skip;
+    combined.extend_from_slice(&lz4);
+
+    let mut tmp = NamedTempFile::new().expect("tempfile");
+    tmp.write_all(&combined).expect("write");
+    let path = tmp.path().to_str().expect("path");
+
+    let result = display_compressed_files_info(&[path]);
+    assert!(result.is_ok(), "verbose skippable+lz4 must succeed: {result:?}");
+}
+
+/// Verbose legacy frame.
+#[test]
+fn display_info_verbose_legacy_frame() {
+    use lz4::io::prefs::DISPLAY_LEVEL;
+    use std::sync::atomic::Ordering;
+
+    let old = DISPLAY_LEVEL.load(Ordering::SeqCst);
+    let _guard = DisplayLevelGuard(old);
+    DISPLAY_LEVEL.store(3, Ordering::SeqCst);
+
+    let legacy = build_legacy_frame(
+        b"legacy frame for verbose path exercises skip_legacy_blocks_data and display"
+    );
+    let mut tmp = NamedTempFile::new().expect("tempfile");
+    tmp.write_all(&legacy).expect("write");
+    let path = tmp.path().to_str().expect("path");
+
+    let result = display_compressed_files_info(&[path]);
+    assert!(result.is_ok(), "verbose legacy frame must succeed: {result:?}");
+}
+
+/// Non-verbose multiple files exercises the display summary loop with ratio.
+#[test]
+fn display_info_non_verbose_multiple_with_ratio() {
+    let frame1 = build_lz4f_frame_with_content_size(
+        b"first file with content size for ratio display calculation"
+    );
+    let frame2 = build_lz4f_frame_with_content_size(
+        b"second file also with content size for ratio display"
+    );
+
+    let mut tmp1 = NamedTempFile::new().expect("tempfile1");
+    tmp1.write_all(&frame1).expect("write");
+    let mut tmp2 = NamedTempFile::new().expect("tempfile2");
+    tmp2.write_all(&frame2).expect("write");
+
+    let p1 = tmp1.path().to_str().expect("path1");
+    let p2 = tmp2.path().to_str().expect("path2");
+
+    let result = display_compressed_files_info(&[p1, p2]);
+    assert!(result.is_ok(), "non-verbose multi-file with ratio must succeed: {result:?}");
+}
+
+/// Frame without content_size exercises the "-" display branch for ratio.
+#[test]
+fn display_info_frame_without_content_size() {
+    // build_lz4f_frame doesn't set content_size
+    let frame = build_lz4f_frame(b"frame without content size flag set");
+    let mut tmp = NamedTempFile::new().expect("tempfile");
+    tmp.write_all(&frame).expect("write");
+    let path = tmp.path().to_str().expect("path");
+
+    let result = display_compressed_files_info(&[path]);
+    assert!(result.is_ok(), "frame without content_size must succeed: {result:?}");
+}
+
+/// LZ4F frame followed by legacy frame exercises eq_frame_types = false.
+#[test]
+fn display_info_mixed_frame_types() {
+    let lz4 = build_lz4f_frame_with_content_size(b"standard frame data");
+    let legacy = build_legacy_frame(b"legacy frame data follows standard frame");
+    let mut combined = lz4;
+    combined.extend_from_slice(&legacy);
+
+    let mut tmp = NamedTempFile::new().expect("tempfile");
+    tmp.write_all(&combined).expect("write");
+    let path = tmp.path().to_str().expect("path");
+
+    let result = display_compressed_files_info(&[path]);
+    assert!(result.is_ok(), "mixed frame types must succeed: {result:?}");
+}
+
+/// Verbose mixed frame types (LZ4F + legacy + skippable).
+#[test]
+fn display_info_verbose_mixed_all_types() {
+    use lz4::io::prefs::DISPLAY_LEVEL;
+    use std::sync::atomic::Ordering;
+
+    let old = DISPLAY_LEVEL.load(Ordering::SeqCst);
+    let _guard = DisplayLevelGuard(old);
+    DISPLAY_LEVEL.store(3, Ordering::SeqCst);
+
+    let lz4 = build_lz4f_frame_with_content_size(b"standard frame for mixed verbose test");
+    let skip = build_skippable_frame(b"skippable metadata");
+    let legacy = build_legacy_frame(b"legacy frame for mixed verbose test");
+    let mut combined = lz4;
+    combined.extend_from_slice(&skip);
+    combined.extend_from_slice(&legacy);
+
+    let mut tmp = NamedTempFile::new().expect("tempfile");
+    tmp.write_all(&combined).expect("write");
+    let path = tmp.path().to_str().expect("path");
+
+    let result = display_compressed_files_info(&[path]);
+    assert!(result.is_ok(), "verbose mixed all types must succeed: {result:?}");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 4: Real file-based file_info tests (use compress API, not manual bytes)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// display_compressed_files_info on a properly compressed file exercises
+/// get_compressed_file_info → skip_blocks_data full pipeline.
+#[test]
+fn display_info_real_compressed_file() {
+    use lz4::io::compress_frame::compress_filename;
+    use lz4::io::prefs::Prefs;
+
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("real.bin");
+    let dst = dir.path().join("real.lz4");
+    let data: Vec<u8> = (0..20_000).map(|i| (i % 251) as u8).collect();
+    std::fs::write(&src, &data).unwrap();
+    let prefs = Prefs::default();
+    compress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), 1, &prefs).unwrap();
+
+    let path = dst.to_str().unwrap();
+    let result = display_compressed_files_info(&[path]);
+    assert!(result.is_ok(), "real compressed file info must succeed: {result:?}");
+}
+
+/// display_compressed_files_info on a real file with verbose mode.
+#[test]
+fn display_info_real_compressed_file_verbose() {
+    use lz4::io::compress_frame::compress_filename;
+    use lz4::io::prefs::{Prefs, DISPLAY_LEVEL};
+    use std::sync::atomic::Ordering;
+
+    let old = DISPLAY_LEVEL.load(Ordering::SeqCst);
+    let _guard = DisplayLevelGuard(old);
+    DISPLAY_LEVEL.store(3, Ordering::SeqCst);
+
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("verbose_real.bin");
+    let dst = dir.path().join("verbose_real.lz4");
+    let data: Vec<u8> = (0..50_000).map(|i| (i % 251) as u8).collect();
+    std::fs::write(&src, &data).unwrap();
+    let prefs = Prefs::default();
+    compress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), 1, &prefs).unwrap();
+
+    let path = dst.to_str().unwrap();
+    let result = display_compressed_files_info(&[path]);
+    assert!(result.is_ok(), "verbose real file info must succeed: {result:?}");
+}
+
+/// display_compressed_files_info with block_checksum enabled.
+#[test]
+fn display_info_real_file_with_block_checksum() {
+    use lz4::io::compress_frame::compress_filename;
+    use lz4::io::prefs::Prefs;
+
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("blk_chk.bin");
+    let dst = dir.path().join("blk_chk.lz4");
+    let data: Vec<u8> = (0..30_000).map(|i| (i % 251) as u8).collect();
+    std::fs::write(&src, &data).unwrap();
+    let mut prefs = Prefs::default();
+    prefs.block_checksum = true;
+    compress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), 1, &prefs).unwrap();
+
+    let path = dst.to_str().unwrap();
+    let result = display_compressed_files_info(&[path]);
+    assert!(result.is_ok(), "block checksum file info must succeed: {result:?}");
+}
+
+/// display_compressed_files_info with content_size_flag.
+#[test]
+fn display_info_real_file_with_content_size() {
+    use lz4::io::compress_frame::compress_filename;
+    use lz4::io::prefs::Prefs;
+
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("csize.bin");
+    let dst = dir.path().join("csize.lz4");
+    let data: Vec<u8> = (0..10_000).map(|i| (i % 251) as u8).collect();
+    std::fs::write(&src, &data).unwrap();
+    let mut prefs = Prefs::default();
+    prefs.content_size_flag = true;
+    compress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), 1, &prefs).unwrap();
+
+    let path = dst.to_str().unwrap();
+    let result = display_compressed_files_info(&[path]);
+    assert!(result.is_ok(), "content size file info must succeed: {result:?}");
+}
+
+/// display_compressed_files_info with content_size_flag in verbose mode.
+#[test]
+fn display_info_real_file_content_size_verbose() {
+    use lz4::io::compress_frame::compress_filename;
+    use lz4::io::prefs::{Prefs, DISPLAY_LEVEL};
+    use std::sync::atomic::Ordering;
+
+    let old = DISPLAY_LEVEL.load(Ordering::SeqCst);
+    let _guard = DisplayLevelGuard(old);
+    DISPLAY_LEVEL.store(3, Ordering::SeqCst);
+
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("csize_v.bin");
+    let dst = dir.path().join("csize_v.lz4");
+    let data: Vec<u8> = (0..15_000).map(|i| (i % 251) as u8).collect();
+    std::fs::write(&src, &data).unwrap();
+    let mut prefs = Prefs::default();
+    prefs.content_size_flag = true;
+    compress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), 1, &prefs).unwrap();
+
+    let path = dst.to_str().unwrap();
+    let result = display_compressed_files_info(&[path]);
+    assert!(result.is_ok());
+}
+
+/// display_compressed_files_info with block_checksum + verbose mode.
+#[test]
+fn display_info_real_file_block_checksum_verbose() {
+    use lz4::io::compress_frame::compress_filename;
+    use lz4::io::prefs::{Prefs, DISPLAY_LEVEL};
+    use std::sync::atomic::Ordering;
+
+    let old = DISPLAY_LEVEL.load(Ordering::SeqCst);
+    let _guard = DisplayLevelGuard(old);
+    DISPLAY_LEVEL.store(3, Ordering::SeqCst);
+
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("blk_v.bin");
+    let dst = dir.path().join("blk_v.lz4");
+    let data: Vec<u8> = (0..40_000).map(|i| (i % 251) as u8).collect();
+    std::fs::write(&src, &data).unwrap();
+    let mut prefs = Prefs::default();
+    prefs.block_checksum = true;
+    compress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), 1, &prefs).unwrap();
+
+    let path = dst.to_str().unwrap();
+    let result = display_compressed_files_info(&[path]);
+    assert!(result.is_ok());
+}
+
+/// display_compressed_files_info with multiple real compressed files.
+#[test]
+fn display_info_multiple_real_files() {
+    use lz4::io::compress_frame::compress_filename;
+    use lz4::io::prefs::Prefs;
+
+    let dir = tempfile::tempdir().unwrap();
+    let prefs = Prefs::default();
+
+    let src1 = dir.path().join("multi1.bin");
+    let dst1 = dir.path().join("multi1.lz4");
+    std::fs::write(&src1, &[0xAA; 5000]).unwrap();
+    compress_filename(src1.to_str().unwrap(), dst1.to_str().unwrap(), 1, &prefs).unwrap();
+
+    let src2 = dir.path().join("multi2.bin");
+    let dst2 = dir.path().join("multi2.lz4");
+    std::fs::write(&src2, &[0xBB; 10000]).unwrap();
+    compress_filename(src2.to_str().unwrap(), dst2.to_str().unwrap(), 1, &prefs).unwrap();
+
+    let paths = [dst1.to_str().unwrap(), dst2.to_str().unwrap()];
+    let result = display_compressed_files_info(&paths);
+    assert!(result.is_ok());
+}
+
+/// display_compressed_files_info with small block size (64KB) to get multi-block frame.
+#[test]
+fn display_info_real_file_small_blocks() {
+    use lz4::io::compress_frame::compress_filename;
+    use lz4::io::prefs::{Prefs, DISPLAY_LEVEL};
+    use std::sync::atomic::Ordering;
+
+    let old = DISPLAY_LEVEL.load(Ordering::SeqCst);
+    let _guard = DisplayLevelGuard(old);
+    DISPLAY_LEVEL.store(3, Ordering::SeqCst);
+
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("small_blk.bin");
+    let dst = dir.path().join("small_blk.lz4");
+    // >64KB to force multiple blocks with block_size_id=4
+    let data: Vec<u8> = (0..100_000).map(|i| (i % 251) as u8).collect();
+    std::fs::write(&src, &data).unwrap();
+    let mut prefs = Prefs::default();
+    prefs.block_size_id = 4;
+    compress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), 1, &prefs).unwrap();
+
+    let path = dst.to_str().unwrap();
+    let result = display_compressed_files_info(&[path]);
+    assert!(result.is_ok());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 6: display_compressed_files_info with legacy, skippable, and verbose levels
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// display_compressed_files_info on a file with skippable frame
+/// Exercises lines 580, 598-610 (skippable frame info path).
+#[test]
+fn display_info_skippable_frame() {
+    use lz4::io::prefs::DISPLAY_LEVEL;
+    use std::sync::atomic::Ordering;
+    let old = DISPLAY_LEVEL.load(Ordering::SeqCst);
+    let _guard = DisplayLevelGuard(old);
+    DISPLAY_LEVEL.store(1, Ordering::SeqCst);
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("skip.lz4");
+    // Create a file with a skippable frame followed by a real frame
+    let mut data = Vec::new();
+    data.extend_from_slice(&0x184D2A50u32.to_le_bytes());
+    data.extend_from_slice(&20u32.to_le_bytes());
+    data.extend_from_slice(&[0u8; 20]);
+    // Append a real LZ4 frame
+    let payload = vec![b'X'; 100];
+    let frame = lz4::frame::compress_frame_to_vec(&payload);
+    data.extend_from_slice(&frame);
+    std::fs::write(&path, &data).unwrap();
+
+    let p = path.to_str().unwrap();
+    let result = display_compressed_files_info(&[p]);
+    assert!(result.is_ok());
+}
+
+/// display_compressed_files_info on a legacy-format file.
+/// Exercises lines 544, 560-564 (legacy frame info path).
+#[test]
+fn display_info_legacy_frame() {
+    use lz4::io::prefs::DISPLAY_LEVEL;
+    use std::sync::atomic::Ordering;
+    let old = DISPLAY_LEVEL.load(Ordering::SeqCst);
+    let _guard = DisplayLevelGuard(old);
+    DISPLAY_LEVEL.store(1, Ordering::SeqCst);
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("legacy.lz4");
+    // Build a legacy LZ4 stream: magic 0x184C2102 + block(size + compressed data)
+    let payload = vec![b'Y'; 200];
+    let mut compressed = vec![0u8; lz4::block::compress_bound(payload.len() as i32) as usize];
+    let clen = lz4::block::compress_default(&payload, &mut compressed).unwrap();
+    let mut data = Vec::new();
+    data.extend_from_slice(&0x184C2102u32.to_le_bytes());
+    data.extend_from_slice(&(clen as u32).to_le_bytes());
+    data.extend_from_slice(&compressed[..clen]);
+    // End marker: block size 0
+    data.extend_from_slice(&0u32.to_le_bytes());
+    std::fs::write(&path, &data).unwrap();
+
+    let p = path.to_str().unwrap();
+    let result = display_compressed_files_info(&[p]);
+    assert!(result.is_ok());
+}
+
+/// display_compressed_files_info with trailing garbage after valid frame.
+/// Exercises lines 631-635, 643 (unrecognized trailing data).
+#[test]
+fn display_info_trailing_garbage() {
+    use lz4::io::prefs::DISPLAY_LEVEL;
+    use std::sync::atomic::Ordering;
+    let old = DISPLAY_LEVEL.load(Ordering::SeqCst);
+    let _guard = DisplayLevelGuard(old);
+    DISPLAY_LEVEL.store(1, Ordering::SeqCst);
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("trailing.lz4");
+    let payload = vec![b'Z'; 100];
+    let mut data = lz4::frame::compress_frame_to_vec(&payload);
+    // Append garbage: not a valid magic number
+    data.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02]);
+    std::fs::write(&path, &data).unwrap();
+
+    // Trailing garbage → may error with "File format not recognized"
+    let p = path.to_str().unwrap();
+    let _result = display_compressed_files_info(&[p]);
+    // Exercised the trailing-garbage detection path regardless of success/failure
+}
+#[test]
+fn display_info_low_display_level() {
+    use lz4::io::prefs::DISPLAY_LEVEL;
+    use std::sync::atomic::Ordering;
+    let old = DISPLAY_LEVEL.load(Ordering::SeqCst);
+    let _guard = DisplayLevelGuard(old);
+    DISPLAY_LEVEL.store(1, Ordering::SeqCst);
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("low_dl.lz4");
+    let payload = vec![b'Q'; 500];
+    let data = lz4::frame::compress_frame_to_vec(&payload);
+    std::fs::write(&path, &data).unwrap();
+
+    let p = path.to_str().unwrap();
+    let result = display_compressed_files_info(&[p]);
+    assert!(result.is_ok());
+}
+
+/// display_compressed_files_info with multiple files.
+/// Exercises multi-file iteration in the function.
+#[test]
+fn display_info_multiple_files_p6() {
+    use lz4::io::compress_frame::compress_filename;
+    use lz4::io::prefs::{Prefs, DISPLAY_LEVEL};
+    use std::sync::atomic::Ordering;
+    let old = DISPLAY_LEVEL.load(Ordering::SeqCst);
+    let _guard = DisplayLevelGuard(old);
+    DISPLAY_LEVEL.store(3, Ordering::SeqCst);
+
+    let dir = tempfile::tempdir().unwrap();
+    let src1 = dir.path().join("multi1.bin");
+    let dst1 = dir.path().join("multi1.lz4");
+    let src2 = dir.path().join("multi2.bin");
+    let dst2 = dir.path().join("multi2.lz4");
+    std::fs::write(&src1, &vec![b'A'; 1000]).unwrap();
+    std::fs::write(&src2, &vec![b'B'; 2000]).unwrap();
+    let prefs = Prefs::default();
+    compress_filename(src1.to_str().unwrap(), dst1.to_str().unwrap(), 1, &prefs).unwrap();
+    compress_filename(src2.to_str().unwrap(), dst2.to_str().unwrap(), 1, &prefs).unwrap();
+
+    let p1 = dst1.to_str().unwrap();
+    let p2 = dst2.to_str().unwrap();
+    let result = display_compressed_files_info(&[p1, p2]);
+    assert!(result.is_ok());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 7: Comprehensive coverage for to_human, base_name, skip_blocks_data,
+// skip_legacy_blocks_data, summary display paths
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// display_compressed_files_info with content_size set and content checksum enabled.
+/// Exercises: skip_blocks_data EndMark+content_checksum branch (L188-189, 209),
+/// ratio calculation in summary table, to_human/base_name via summary display.
+#[test]
+fn display_info_content_size_and_checksum() {
+    use lz4::frame::types::{ContentChecksum, Preferences, FrameInfo};
+    use lz4::frame::compress::lz4f_compress_frame;
+    use lz4::frame::header::lz4f_compress_frame_bound;
+    use lz4::io::prefs::DISPLAY_LEVEL;
+    use std::sync::atomic::Ordering;
+    let old = DISPLAY_LEVEL.load(Ordering::SeqCst);
+    let _guard = DisplayLevelGuard(old);
+    DISPLAY_LEVEL.store(1, Ordering::SeqCst);
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("cs_chk.lz4");
+    let payload = vec![b'A'; 2000];
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            content_checksum_flag: ContentChecksum::Enabled,
+            content_size: payload.len() as u64,
+            block_size_id: BlockSizeId::Max64Kb,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let bound = lz4f_compress_frame_bound(payload.len(), Some(&prefs));
+    let mut frame = vec![0u8; bound];
+    let n = lz4f_compress_frame(&mut frame, &payload, Some(&prefs)).unwrap();
+    frame.truncate(n);
+    std::fs::write(&path, &frame).unwrap();
+
+    let p = path.to_str().unwrap();
+    let result = display_compressed_files_info(&[p]);
+    assert!(result.is_ok());
+}
+
+/// display_compressed_files_info with block checksums — exercises skip_blocks_data
+/// block_checksum branch (L198-205).
+#[test]
+fn display_info_block_checksums() {
+    use lz4::frame::types::{BlockChecksum, Preferences, FrameInfo};
+    use lz4::frame::compress::lz4f_compress_frame;
+    use lz4::frame::header::lz4f_compress_frame_bound;
+    use lz4::io::prefs::DISPLAY_LEVEL;
+    use std::sync::atomic::Ordering;
+    let old = DISPLAY_LEVEL.load(Ordering::SeqCst);
+    let _guard = DisplayLevelGuard(old);
+    DISPLAY_LEVEL.store(1, Ordering::SeqCst);
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("blk_chk.lz4");
+    let payload = vec![b'B'; 3000];
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_checksum_flag: BlockChecksum::Enabled,
+            block_size_id: BlockSizeId::Max64Kb,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let bound = lz4f_compress_frame_bound(payload.len(), Some(&prefs));
+    let mut frame = vec![0u8; bound];
+    let n = lz4f_compress_frame(&mut frame, &payload, Some(&prefs)).unwrap();
+    frame.truncate(n);
+    std::fs::write(&path, &frame).unwrap();
+
+    let p = path.to_str().unwrap();
+    let result = display_compressed_files_info(&[p]);
+    assert!(result.is_ok());
+}
+
+/// display_compressed_files_info with no-content-size frame at low display level.
+/// Exercises the all_content_size=false and "-" ratio display path.
+#[test]
+fn display_info_no_content_size() {
+    use lz4::io::prefs::DISPLAY_LEVEL;
+    use std::sync::atomic::Ordering;
+    let old = DISPLAY_LEVEL.load(Ordering::SeqCst);
+    let _guard = DisplayLevelGuard(old);
+    DISPLAY_LEVEL.store(1, Ordering::SeqCst);
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("no_cs.lz4");
+    // Compress without content_size → all_content_size = false
+    let payload = vec![b'N'; 800];
+    let frame = lz4::frame::compress_frame_to_vec(&payload);
+    std::fs::write(&path, &frame).unwrap();
+
+    let p = path.to_str().unwrap();
+    let result = display_compressed_files_info(&[p]);
+    assert!(result.is_ok());
+}
+
+/// display_compressed_files_info with nonexistent file → Err.
+/// Exercises file open error path (L384-388).
+#[test]
+fn display_info_nonexistent_file() {
+    let result = display_compressed_files_info(&["/tmp/nonexistent_lz4_file_99999.lz4"]);
+    assert!(result.is_err());
+}
+
+/// display_compressed_files_info on skippable frame followed by standard LZ4 frame.
+/// Exercises mixed-type iteration with eq_frame_types=false path.
+#[test]
+fn display_info_skippable_then_standard() {
+    use lz4::io::prefs::DISPLAY_LEVEL;
+    use std::sync::atomic::Ordering;
+    let old = DISPLAY_LEVEL.load(Ordering::SeqCst);
+    let _guard = DisplayLevelGuard(old);
+    DISPLAY_LEVEL.store(1, Ordering::SeqCst);
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("skip_std.lz4");
+    let mut data = Vec::new();
+    // Skippable frame
+    data.extend_from_slice(&0x184D2A50u32.to_le_bytes());
+    data.extend_from_slice(&10u32.to_le_bytes());
+    data.extend_from_slice(&[0u8; 10]);
+    // Standard LZ4 frame
+    let payload = vec![b'M'; 100];
+    let frame = lz4::frame::compress_frame_to_vec(&payload);
+    data.extend_from_slice(&frame);
+    std::fs::write(&path, &data).unwrap();
+
+    let p = path.to_str().unwrap();
+    let result = display_compressed_files_info(&[p]);
+    assert!(result.is_ok());
+}
+

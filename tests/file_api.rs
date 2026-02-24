@@ -456,3 +456,95 @@ fn compressed_output_smaller_than_repetitive_input() {
         original.len()
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 5: Additional coverage tests for file.rs
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Writer that errors after N bytes to test the sticky errored flag path.
+struct BrokenWriter {
+    inner: Vec<u8>,
+    remaining: usize,
+}
+
+impl BrokenWriter {
+    fn new(fail_after: usize) -> Self {
+        BrokenWriter {
+            inner: Vec::new(),
+            remaining: fail_after,
+        }
+    }
+}
+
+impl Write for BrokenWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.remaining == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "intentional write error",
+            ));
+        }
+        let n = buf.len().min(self.remaining);
+        self.inner.extend_from_slice(&buf[..n]);
+        self.remaining -= n;
+        Ok(n)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Write error (sticky errored flag) prevents double-finalization in Drop.
+#[test]
+fn write_file_write_error_sets_errored_flag() {
+    // The writer will fail after accepting the header, so the first
+    // write_all of compressed data should trigger the errored flag.
+    let broken = BrokenWriter::new(50); // Fail after 50 bytes (header fits, data fails)
+    let mut lz4w = Lz4WriteFile::open(broken, None).expect("open");
+    // Write enough data to trigger a compressed block write
+    let result = lz4w.write_all(&[0xAA; 100_000]);
+    // The write should fail
+    assert!(result.is_err(), "Write should fail on broken writer");
+    // Drop should NOT panic — errored flag prevents finalization attempt
+    drop(lz4w);
+}
+
+/// Using BlockSizeId::Default exercises the Default match arm in block_size_from_id.
+#[test]
+fn write_file_with_block_size_default() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_size_id: BlockSizeId::Default,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let original = vec![0xCCu8; 200_000];
+    let compressed = {
+        let mut lz4w = Lz4WriteFile::open(Vec::new(), Some(&prefs)).expect("open");
+        lz4w.write_all(&original).unwrap();
+        lz4w.finish().expect("finish")
+    };
+    let recovered = decompress_frame(&compressed);
+    assert_eq!(recovered, original);
+}
+
+/// Large data with Max4Mb block size exercises finish() writing end mark.
+#[test]
+fn write_file_large_data_finish() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_size_id: BlockSizeId::Max4Mb,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let original: Vec<u8> = (0..500_000).map(|i| (i % 251) as u8).collect();
+    let compressed = {
+        let mut lz4w = Lz4WriteFile::open(Vec::new(), Some(&prefs)).expect("open");
+        lz4w.write_all(&original).unwrap();
+        lz4w.finish().expect("finish")
+    };
+    let recovered = decompress_frame(&compressed);
+    assert_eq!(recovered, original);
+}

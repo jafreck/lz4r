@@ -583,3 +583,70 @@ fn bench_mem_display_level_0_succeeds() {
     );
     assert!(result.is_ok());
 }
+
+// ── Multi-file block partitioning ────────────────────────────────────────────
+
+#[test]
+fn bench_mem_with_file_sizes_non_empty() {
+    // Non-empty file_sizes array exercises the per-file block partitioning path.
+    let src = make_1mb_buf();
+    let config = default_config_0s();
+    let mut strategy = build_compression_parameters(1, src.len(), src.len());
+    let mut decompressor = FrameDecompressor::new();
+    // Partition: two "files" of 512KB each within the 1MB buffer
+    let file_sizes = vec![512 * 1024, 512 * 1024];
+    let result = bench_mem(
+        &src,
+        "multi-file",
+        &config,
+        1,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &file_sizes,
+    );
+    assert!(result.is_ok());
+    let r = result.unwrap();
+    assert_eq!(r.src_size, src.len());
+}
+
+#[test]
+fn bench_mem_with_file_sizes_single_file() {
+    let src = make_64k_text();
+    let config = default_config_0s();
+    let mut strategy = build_compression_parameters(1, src.len(), src.len());
+    let mut decompressor = FrameDecompressor::new();
+    let file_sizes = vec![src.len()];
+    let result = bench_mem(
+        &src,
+        "single-file",
+        &config,
+        1,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &file_sizes,
+    );
+    assert!(result.is_ok());
+}
+
+#[test]
+fn bench_mem_display_level_2_succeeds() {
+    // display_level=2 exercises the verbose output branches.
+    let src = make_4k_zeros();
+    let mut config = default_config_0s();
+    config.set_notification_level(2);
+    let mut strategy = build_compression_parameters(1, src.len(), src.len());
+    let mut decompressor = FrameDecompressor::new();
+    let result = bench_mem(
+        &src,
+        "verbose",
+        &config,
+        1,
+        &mut *strategy,
+        &mut decompressor,
+        b"",
+        &[],
+    );
+    assert!(result.is_ok());
+}

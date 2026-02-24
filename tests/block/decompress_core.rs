@@ -394,3 +394,204 @@ fn decompress_safe_using_dict_malformed_input_with_dict() {
         Err(DecompressError::MalformedInput)
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Additional decompress edge cases for coverage
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn decompress_safe_zero_capacity_dst_with_empty_block() {
+    // src == [0] (empty LZ4 block — just a zero token) with zero-length dst
+    // should return Ok(0) via the special case at the top of decompress_safe.
+    let src = [0u8; 1];
+    let mut dst: [u8; 0] = [];
+    let result = decompress_safe(&src, &mut dst);
+    assert_eq!(result, Ok(0));
+}
+
+#[test]
+fn decompress_safe_zero_capacity_dst_with_nonempty_block() {
+    // A non-empty block with zero-length dst should error.
+    let src = [0x10u8, 0x41]; // token=0x10 means 1 literal 'A'
+    let mut dst: [u8; 0] = [];
+    let result = decompress_safe(&src, &mut dst);
+    assert_eq!(result, Err(DecompressError::MalformedInput));
+}
+
+#[test]
+fn decompress_safe_partial_target_exceeds_dst_len() {
+    // target_output_size > dst.len() should be clamped to dst.len()
+    let src_data = b"hello world, this is a test of partial decompression!";
+    let mut compressed = vec![0u8; compress_bound(src_data.len() as i32) as usize];
+    let n = compress_default(src_data, &mut compressed).unwrap();
+    let compressed = &compressed[..n];
+
+    let mut dst = vec![0u8; src_data.len()];
+    let result = decompress_safe_partial(compressed, &mut dst, src_data.len() + 1000);
+    assert!(result.is_ok());
+    let decoded = result.unwrap();
+    assert_eq!(&dst[..decoded], src_data.as_ref());
+}
+
+#[test]
+fn decompress_safe_partial_small_target() {
+    // Partial decompression with a target smaller than full output
+    let src_data: Vec<u8> = (0..1024).map(|i| (i % 251) as u8).collect();
+    let mut compressed = vec![0u8; compress_bound(src_data.len() as i32) as usize];
+    let n = compress_default(&src_data, &mut compressed).unwrap();
+    let compressed = &compressed[..n];
+
+    let mut dst = vec![0u8; 1024];
+    // Request only first 100 bytes
+    let result = decompress_safe_partial(compressed, &mut dst, 100);
+    assert!(result.is_ok());
+    let decoded = result.unwrap();
+    // Should have decoded at least 100 bytes
+    assert!(decoded >= 100, "should decode at least target: {decoded}");
+    assert_eq!(&dst[..100], &src_data[..100]);
+}
+
+#[test]
+fn decompress_safe_using_dict_roundtrip_with_dict() {
+    // Compress with dictionary, then decompress with same dictionary
+    let dict: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+
+    let mut stream = Lz4Stream::new();
+    stream.load_dict(&dict);
+    let src: Vec<u8> = (0..2048).map(|i| (i % 251) as u8).collect();
+    let mut dst = vec![0u8; compress_bound(src.len() as i32) as usize];
+    let n = stream.compress_fast_continue(&src, &mut dst, 1);
+    assert!(n > 0);
+
+    let mut decoded = vec![0u8; src.len()];
+    let d = decompress_safe_using_dict(&dst[..n as usize], &mut decoded, &dict).unwrap();
+    assert_eq!(&decoded[..d], &src[..]);
+}
+
+#[test]
+fn decompress_safe_using_dict_empty_dict_same_as_no_dict() {
+    // Empty dict should delegate to decompress_safe internally
+    let src_data = b"some test data for decompression with empty dict";
+    let mut compressed = vec![0u8; compress_bound(src_data.len() as i32) as usize];
+    let n = compress_default(src_data, &mut compressed).unwrap();
+
+    let mut dst1 = vec![0u8; src_data.len()];
+    let mut dst2 = vec![0u8; src_data.len()];
+
+    let r1 = decompress_safe(&compressed[..n], &mut dst1).unwrap();
+    let r2 = decompress_safe_using_dict(&compressed[..n], &mut dst2, &[]).unwrap();
+
+    assert_eq!(r1, r2);
+    assert_eq!(&dst1[..r1], &dst2[..r2]);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 6: Ext-dict match copy, partial decode, and streaming ext-dict
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// decompress_safe_partial with small target_output_size (lines 531-541).
+#[test]
+fn decompress_safe_partial_small_target_p6() {
+    // Compress 10KB of data, then partial-decode requesting only 500 bytes
+    let data: Vec<u8> = (0..10_000).map(|i| (i % 251) as u8).collect();
+    let mut compressed = vec![0u8; compress_bound(data.len() as i32) as usize];
+    let n = compress_default(&data, &mut compressed).unwrap();
+    let mut dst = vec![0u8; 500]; // only 500 bytes of output capacity
+    let r = decompress_safe_partial(&compressed[..n], &mut dst, 500);
+    assert!(r.is_ok());
+    let decoded = r.unwrap();
+    assert!(decoded <= 500);
+    assert_eq!(&dst[..decoded], &data[..decoded]);
+}
+
+/// Ext-dict decompression where match spans dict boundary (lines 325, 328, 345-346, 370).
+/// Stream compress with force_ext_dict to create cross-boundary references,
+/// then decompress with the dict.
+#[test]
+fn ext_dict_match_crosses_boundary() {
+    // Block 1: reference data
+    let block1: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+    let mut stream = Lz4Stream::new();
+    let mut dst1 = vec![0u8; compress_bound(block1.len() as i32) as usize];
+    let n1 = unsafe {
+        stream.compress_force_ext_dict(
+            block1.as_ptr(),
+            dst1.as_mut_ptr(),
+            block1.len() as i32,
+            dst1.len() as i32,
+        )
+    };
+    assert!(n1 > 0);
+
+    // Block 2: same pattern → back-references into block1 (ext dict)
+    let block2: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+    let mut dst2 = vec![0u8; compress_bound(block2.len() as i32) as usize];
+    let n2 = unsafe {
+        stream.compress_force_ext_dict(
+            block2.as_ptr(),
+            dst2.as_mut_ptr(),
+            block2.len() as i32,
+            dst2.len() as i32,
+        )
+    };
+    assert!(n2 > 0);
+    // n2 should be small since block2 is identical to block1 (back-references)
+    assert!(n2 < n1);
+
+    // Decompress block2 using block1 as ext dict
+    let mut decoded = vec![0u8; block2.len()];
+    let d = decompress_safe_using_dict(&dst2[..n2 as usize], &mut decoded, &block1).unwrap();
+    assert_eq!(&decoded[..d], &block2[..]);
+}
+
+/// Decompress with ext-dict that produces overlapping match copy (lines 421-458).
+/// Create data with short-offset repeating pattern, compress as ext-dict block.
+#[test]
+fn ext_dict_overlapping_copy() {
+    // Create a repeating pattern that will produce overlapping matches
+    let base: Vec<u8> = (0..2048).map(|i| (i as u8).wrapping_mul(7)).collect();
+    let mut stream = Lz4Stream::new();
+    // First block: establish dict
+    let mut dst1 = vec![0u8; compress_bound(base.len() as i32) as usize];
+    let n1 = unsafe {
+        stream.compress_force_ext_dict(
+            base.as_ptr(),
+            dst1.as_mut_ptr(),
+            base.len() as i32,
+            dst1.len() as i32,
+        )
+    };
+    assert!(n1 > 0);
+
+    // Second block: slightly modified base → partial dict matches
+    let mut block2 = base.clone();
+    for i in (0..block2.len()).step_by(3) {
+        block2[i] = block2[i].wrapping_add(1);
+    }
+    let mut dst2 = vec![0u8; compress_bound(block2.len() as i32) as usize];
+    let n2 = unsafe {
+        stream.compress_force_ext_dict(
+            block2.as_ptr(),
+            dst2.as_mut_ptr(),
+            block2.len() as i32,
+            dst2.len() as i32,
+        )
+    };
+    assert!(n2 > 0);
+
+    let mut decoded = vec![0u8; block2.len()];
+    let d = decompress_safe_using_dict(&dst2[..n2 as usize], &mut decoded, &base).unwrap();
+    assert_eq!(&decoded[..d], &block2[..]);
+}
+
+/// Short-offset match decompression (line 580).
+/// Compress "abcabcabc..." which produces short-offset (3-byte) matches.
+#[test]
+fn decompress_short_offset_matches() {
+    let data: Vec<u8> = b"abcabc".iter().cycle().take(5000).copied().collect();
+    let mut compressed = vec![0u8; compress_bound(data.len() as i32) as usize];
+    let n = compress_default(&data, &mut compressed).unwrap();
+    let mut decoded = vec![0u8; data.len()];
+    let d = decompress_safe(&compressed[..n], &mut decoded).unwrap();
+    assert_eq!(&decoded[..d], &data[..]);
+}

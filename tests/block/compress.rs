@@ -598,3 +598,468 @@ fn compress_default_empty_input_produces_one_zero_byte() {
     assert_eq!(n, 1, "empty input should produce exactly 1 byte");
     assert_eq!(dst[0], 0x00, "single 0x00 token for empty input");
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FillOutput mode — additional coverage
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn compress_dest_size_very_tiny_dst_16_bytes() {
+    // Tiny 16-byte output buffer exercises the FillOutput early-exit path where
+    // the budget is exhausted before any match can be encoded.
+    let src: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+    let mut dst = vec![0u8; 16];
+    let result = compress_dest_size(&src, &mut dst);
+    assert!(result.is_ok());
+    let (consumed, compressed) = result.unwrap();
+    assert!(consumed > 0 && consumed < src.len());
+    assert!(compressed > 0 && compressed <= 16);
+}
+
+#[test]
+fn compress_dest_size_fill_output_with_alternating_pattern() {
+    // Pattern of alternating short matches triggers the 'next_match inner loop
+    // in FillOutput: "ABCDABCD" repeated forces re-match after the first sequence.
+    let pattern = b"ABCDABCD";
+    let src: Vec<u8> = pattern.iter().cycle().take(8192).copied().collect();
+    let mut dst = vec![0u8; 64];
+    let result = compress_dest_size(&src, &mut dst);
+    assert!(result.is_ok());
+    let (consumed, compressed) = result.unwrap();
+    assert!(consumed > 0);
+    assert!(compressed > 0 && compressed <= 64);
+}
+
+#[test]
+fn compress_dest_size_ext_state_fill_output_cycling_data() {
+    // Exercise compress_dest_size_ext_state with cycling data and tight output.
+    let src: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+    let mut dst = vec![0u8; 48];
+    let mut src_consumed = src.len() as i32;
+    let mut state = StreamStateInternal::new();
+    let result = unsafe {
+        compress_dest_size_ext_state(
+            &mut state as *mut _,
+            src.as_ptr(),
+            dst.as_mut_ptr(),
+            &mut src_consumed as *mut _,
+            48,
+            1,
+        )
+    };
+    assert!(result.is_ok());
+    let n = result.unwrap();
+    assert!(n > 0 && n <= 48);
+    assert!((src_consumed as usize) < src.len());
+}
+
+#[test]
+fn compress_dest_size_fill_output_roundtrip_partial() {
+    // Compress with dest_size (partial), then decompress what was consumed.
+    use lz4::block::decompress_core::decompress_safe;
+    let src: Vec<u8> = (0..8192).map(|i| (i % 251) as u8).collect();
+    let mut dst = vec![0u8; 128];
+    let (consumed, compressed) = compress_dest_size(&src, &mut dst).unwrap();
+    // Decompress just the consumed portion
+    let mut decoded = vec![0u8; consumed];
+    let decoded_len = decompress_safe(&dst[..compressed], &mut decoded).unwrap();
+    assert_eq!(&decoded[..decoded_len], &src[..consumed]);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// External dictionary / streaming — coverage for UsingExtDict branches
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn streaming_ext_dict_via_compress_force_ext_dict() {
+    // compress_force_ext_dict forces UsingExtDict for every block,
+    // exercising the external dictionary match-search and count branches.
+    let mut stream = lz4::block::stream::Lz4Stream::new();
+
+    // Block 1: initial data
+    let block1: Vec<u8> = (0..2048).map(|i| (i % 251) as u8).collect();
+    let mut dst1 = make_dst(block1.len());
+    let n1 = unsafe {
+        stream.compress_force_ext_dict(
+            block1.as_ptr(),
+            dst1.as_mut_ptr(),
+            block1.len() as i32,
+            dst1.len() as i32,
+        )
+    };
+    assert!(n1 > 0);
+
+    // Block 2: overlapping data should find ext-dict matches
+    let block2: Vec<u8> = (0..2048).map(|i| (i % 251) as u8).collect();
+    let mut dst2 = make_dst(block2.len());
+    let n2 = unsafe {
+        stream.compress_force_ext_dict(
+            block2.as_ptr(),
+            dst2.as_mut_ptr(),
+            block2.len() as i32,
+            dst2.len() as i32,
+        )
+    };
+    assert!(n2 > 0);
+    // Second block should compress better due to ext-dict matches
+    assert!(n2 < n1, "ext-dict block should be smaller: {n2} vs {n1}");
+}
+
+#[test]
+fn streaming_with_dict_load_then_compress_fast_continue() {
+    // load_dict + compress_fast_continue exercises dict-based compression.
+    use lz4::block::decompress_core::decompress_safe_using_dict;
+    let dict: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+
+    let mut stream = lz4::block::stream::Lz4Stream::new();
+    stream.load_dict(&dict);
+
+    // First block: shares dict data
+    let src1: Vec<u8> = (0..2048).map(|i| (i % 251) as u8).collect();
+    let mut dst1 = make_dst(src1.len());
+    let n1 = stream.compress_fast_continue(&src1, &mut dst1, 1);
+    assert!(n1 > 0);
+
+    // Verify roundtrip using dict
+    let mut dec = vec![0u8; src1.len()];
+    let d = decompress_safe_using_dict(&dst1[..n1 as usize], &mut dec, &dict).unwrap();
+    assert_eq!(&dec[..d], &src1[..]);
+}
+
+#[test]
+fn streaming_two_contiguous_blocks_prefix_mode() {
+    // Two blocks in the same buffer: second uses WithPrefix64k
+    let mut stream = lz4::block::stream::Lz4Stream::new();
+    let mut ring = vec![0u8; 64 * 1024 * 2]; // 128KB ring
+
+    let block1: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+    ring[..block1.len()].copy_from_slice(&block1);
+
+    let mut dst1 = make_dst(block1.len());
+    let n1 = stream.compress_fast_continue(&ring[..block1.len()], &mut dst1, 1);
+    assert!(n1 > 0);
+
+    // Block 2 right after block1 in ring — contiguous → WithPrefix64k
+    let block2: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+    let offset = block1.len();
+    ring[offset..offset + block2.len()].copy_from_slice(&block2);
+
+    let mut dst2 = make_dst(block2.len());
+    let n2 = stream.compress_fast_continue(
+        &ring[offset..offset + block2.len()],
+        &mut dst2,
+        1,
+    );
+    assert!(n2 > 0);
+    // Second block should be smaller due to prefix matching
+    assert!(n2 < n1, "prefix block should compress better: {n2} vs {n1}");
+}
+
+#[test]
+fn streaming_non_contiguous_blocks_ext_dict() {
+    // Two blocks in separate allocations: second triggers UsingExtDict
+    let mut stream = lz4::block::stream::Lz4Stream::new();
+
+    let block1: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+    let mut dst1 = make_dst(block1.len());
+    let n1 = stream.compress_fast_continue(&block1, &mut dst1, 1);
+    assert!(n1 > 0);
+
+    // Block 2 in different allocation → non-contiguous → UsingExtDict
+    let block2: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+    let mut dst2 = make_dst(block2.len());
+    let n2 = stream.compress_fast_continue(&block2, &mut dst2, 1);
+    assert!(n2 > 0);
+}
+
+#[test]
+fn streaming_multi_block_ext_dict_roundtrip() {
+    // 4 blocks non-contiguous: ext-dict matching across all blocks.
+    use lz4::block::decompress_core::decompress_safe;
+    let mut stream = lz4::block::stream::Lz4Stream::new();
+
+    let mut compressed_blocks: Vec<(Vec<u8>, usize, Vec<u8>)> = Vec::new();
+
+    for i in 0..4u64 {
+        let block: Vec<u8> = (0..2048).map(|j| ((j + i * 50) % 251) as u8).collect();
+        let mut dst = make_dst(block.len());
+        let n = stream.compress_fast_continue(&block, &mut dst, 1);
+        assert!(n > 0);
+        compressed_blocks.push((block, n as usize, dst));
+    }
+
+    // Verify the first block decompresses correctly (no dict needed)
+    let (ref orig, n, ref cmp) = compressed_blocks[0];
+    let mut dec = vec![0u8; orig.len()];
+    let d = decompress_safe(&cmp[..n], &mut dec).unwrap();
+    assert_eq!(&dec[..d], &orig[..]);
+}
+
+#[test]
+fn compress_fast_ext_state_fast_reset_high_acceleration() {
+    // High acceleration value exercises different step sizes in the search loop.
+    let src: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+    let mut dst = make_dst(src.len());
+    let mut state = StreamStateInternal::new();
+    let result = unsafe {
+        compress_fast_ext_state_fast_reset(
+            &mut state,
+            src.as_ptr(),
+            src.len() as i32,
+            dst.as_mut_ptr(),
+            dst.len() as i32,
+            100,
+        )
+    };
+    assert!(result.is_ok());
+    assert!(result.unwrap() > 0);
+}
+
+#[test]
+fn compress_fast_ext_state_fast_reset_max_acceleration() {
+    let src: Vec<u8> = (0..2048).map(|i| (i % 251) as u8).collect();
+    let mut dst = make_dst(src.len());
+    let mut state = StreamStateInternal::new();
+    let result = unsafe {
+        compress_fast_ext_state_fast_reset(
+            &mut state,
+            src.as_ptr(),
+            src.len() as i32,
+            dst.as_mut_ptr(),
+            dst.len() as i32,
+            LZ4_ACCELERATION_MAX + 100, // should be clamped
+        )
+    };
+    assert!(result.is_ok());
+    assert!(result.unwrap() > 0);
+}
+
+#[test]
+fn compress_fast_ext_state_fast_reset_zero_acceleration() {
+    // Zero acceleration should be clamped to DEFAULT
+    let src: Vec<u8> = (0..2048).map(|i| (i % 251) as u8).collect();
+    let mut dst = make_dst(src.len());
+    let mut state = StreamStateInternal::new();
+    let result = unsafe {
+        compress_fast_ext_state_fast_reset(
+            &mut state,
+            src.as_ptr(),
+            src.len() as i32,
+            dst.as_mut_ptr(),
+            dst.len() as i32,
+            0,
+        )
+    };
+    assert!(result.is_ok());
+    assert!(result.unwrap() > 0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 6: compress_dest_size (FillOutput) and fast_reset DictSmall paths
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn compress_dest_size_basic_roundtrip() {
+    // Exercises the safe wrapper (line 1004) and guaranteed-success path (1062-1065)
+    let src: Vec<u8> = (0..10000).map(|i| (i % 251) as u8).collect();
+    let mut dst = vec![0u8; compress_bound(src.len() as i32) as usize * 2];
+    let (consumed, compressed) = compress_dest_size(&src, &mut dst).unwrap();
+    assert_eq!(consumed, src.len());
+    assert!(compressed > 0);
+    let mut dec = vec![0u8; src.len()];
+    let n = lz4::block::decompress_safe(&dst[..compressed], &mut dec).unwrap();
+    assert_eq!(&dec[..n], &src[..]);
+}
+
+#[test]
+fn compress_dest_size_undersized_dst_filloutput() {
+    // FillOutput: dst < compress_bound. Exercises lines 384, 425-426, 468-490, 705, 716
+    let src: Vec<u8> = (0..10000).map(|i| (i % 251) as u8).collect();
+    let bound = compress_bound(src.len() as i32) as usize;
+    let dst_cap = bound * 6 / 10;
+    let mut dst = vec![0u8; dst_cap];
+    let (consumed, compressed) = compress_dest_size(&src, &mut dst).unwrap();
+    assert!(consumed <= src.len());
+    assert!(compressed > 0);
+    let mut dec = vec![0u8; consumed + 1024];
+    let n = lz4::block::decompress_safe(&dst[..compressed], &mut dec).unwrap();
+    assert_eq!(&dec[..n], &src[..consumed]);
+}
+
+#[test]
+fn compress_dest_size_tiny_dst_filloutput() {
+    // FillOutput with extremely small dst — forces early bail (line 384, 425)
+    let src: Vec<u8> = (0..5000).map(|i| (i % 251) as u8).collect();
+    let mut dst = vec![0u8; 50];
+    let (consumed, compressed) = compress_dest_size(&src, &mut dst).unwrap();
+    if compressed > 0 {
+        let mut dec = vec![0u8; consumed + 256];
+        let n = lz4::block::decompress_safe(&dst[..compressed], &mut dec).unwrap();
+        assert_eq!(&dec[..n], &src[..consumed]);
+    }
+}
+
+#[test]
+fn compress_dest_size_highly_compressible_match_shorten() {
+    // Long matches with undersized dst: FillOutput shortens matches (lines 468-490)
+    let src: Vec<u8> = vec![b'A'; 20000];
+    let bound = compress_bound(src.len() as i32) as usize;
+    let mut dst = vec![0u8; bound / 4];
+    let (consumed, compressed) = compress_dest_size(&src, &mut dst).unwrap();
+    assert!(consumed > 0);
+    assert!(compressed > 0);
+    let mut dec = vec![0u8; consumed + 256];
+    let n = lz4::block::decompress_safe(&dst[..compressed], &mut dec).unwrap();
+    assert_eq!(&dec[..n], &src[..consumed]);
+}
+
+#[test]
+fn compress_dest_size_small_input_byu16() {
+    // Small input (<64KB) → ByU16 table in FillOutput (lines 1066-1074)
+    let src: Vec<u8> = (0..1000).map(|i| (i % 251) as u8).collect();
+    let mut dst = vec![0u8; 200];
+    let (consumed, compressed) = compress_dest_size(&src, &mut dst).unwrap();
+    assert!(consumed <= src.len());
+    if compressed > 0 {
+        let mut dec = vec![0u8; consumed + 256];
+        let n = lz4::block::decompress_safe(&dst[..compressed], &mut dec).unwrap();
+        assert_eq!(&dec[..n], &src[..consumed]);
+    }
+}
+
+#[test]
+fn compress_dest_size_large_input_byu32() {
+    // Large input (≥64KB) → ByU32 in FillOutput (lines 1072-1074)
+    let src: Vec<u8> = (0..100_000).map(|i| (i % 251) as u8).collect();
+    let bound = compress_bound(src.len() as i32) as usize;
+    let mut dst = vec![0u8; bound / 2];
+    let (consumed, compressed) = compress_dest_size(&src, &mut dst).unwrap();
+    assert!(consumed <= src.len());
+    assert!(compressed > 0);
+    let mut dec = vec![0u8; consumed + 256];
+    let n = lz4::block::decompress_safe(&dst[..compressed], &mut dec).unwrap();
+    assert_eq!(&dec[..n], &src[..consumed]);
+}
+
+#[test]
+fn compress_dest_size_zero_capacity() {
+    // dst capacity = 0 → compressed output is 0
+    let src: Vec<u8> = vec![b'A'; 100];
+    let mut dst = vec![0u8; 0];
+    let result = compress_dest_size(&src, &mut dst);
+    match result {
+        Ok((_consumed, compressed)) => {
+            assert_eq!(compressed, 0);
+        }
+        Err(_) => {} // error for zero capacity is acceptable
+    }
+}
+
+#[test]
+fn compress_dest_size_empty_input() {
+    // Empty input with FillOutput — line 705
+    let src: Vec<u8> = vec![];
+    let mut dst = vec![0u8; 10];
+    let (consumed, compressed) = compress_dest_size(&src, &mut dst).unwrap();
+    assert_eq!(consumed, 0);
+    assert_eq!(compressed, 1); // single 0x00 token
+}
+
+#[test]
+fn compress_dest_size_ext_state_roundtrip() {
+    let src: Vec<u8> = (0..5000).map(|i| (i % 251) as u8).collect();
+    let bound = compress_bound(src.len() as i32) as usize;
+    let mut dst = vec![0u8; bound];
+    let mut state = StreamStateInternal::new();
+    let mut consumed = src.len() as i32;
+    let result = unsafe {
+        compress_dest_size_ext_state(
+            &mut state,
+            src.as_ptr(),
+            dst.as_mut_ptr(),
+            &mut consumed,
+            dst.len() as i32,
+            1,
+        )
+    };
+    let compressed = result.unwrap();
+    assert!(compressed > 0);
+    let mut dec = vec![0u8; consumed as usize + 256];
+    let n = lz4::block::decompress_safe(&dst[..compressed], &mut dec).unwrap();
+    assert_eq!(&dec[..n], &src[..consumed as usize]);
+}
+
+#[test]
+fn fast_reset_small_input_dictsmall_notlimited() {
+    // Lines 815-827: ByU16 + NotLimited + DictSmall (current_offset != 0)
+    let mut state = StreamStateInternal::new();
+    let src1: Vec<u8> = (0..500).map(|i| (i % 251) as u8).collect();
+    let bound1 = compress_bound(src1.len() as i32) as usize;
+    let mut dst1 = vec![0u8; bound1];
+    let _ = unsafe {
+        compress_fast_ext_state_fast_reset(
+            &mut state, src1.as_ptr(), src1.len() as i32,
+            dst1.as_mut_ptr(), dst1.len() as i32, 1,
+        )
+    }.unwrap();
+
+    // Second: small input, full dst → NotLimited + DictSmall
+    let src2: Vec<u8> = (0..300).map(|i| (i % 199) as u8).collect();
+    let bound2 = compress_bound(src2.len() as i32) as usize;
+    let mut dst2 = vec![0u8; bound2];
+    let n2 = unsafe {
+        compress_fast_ext_state_fast_reset(
+            &mut state, src2.as_ptr(), src2.len() as i32,
+            dst2.as_mut_ptr(), dst2.len() as i32, 1,
+        )
+    }.unwrap();
+    assert!(n2 > 0);
+    let mut dec = vec![0u8; src2.len()];
+    let n = lz4::block::decompress_safe(&dst2[..n2], &mut dec).unwrap();
+    assert_eq!(&dec[..n], &src2[..]);
+}
+
+#[test]
+fn fast_reset_small_input_limited_dictsmall() {
+    // Lines 877-890: ByU16 + LimitedOutput + DictSmall
+    let mut state = StreamStateInternal::new();
+    let src1: Vec<u8> = (0..400).map(|i| (i % 251) as u8).collect();
+    let bound1 = compress_bound(src1.len() as i32) as usize;
+    let mut dst1 = vec![0u8; bound1];
+    let _ = unsafe {
+        compress_fast_ext_state_fast_reset(
+            &mut state, src1.as_ptr(), src1.len() as i32,
+            dst1.as_mut_ptr(), dst1.len() as i32, 1,
+        )
+    }.unwrap();
+
+    // Second: small input, undersized dst → LimitedOutput + DictSmall
+    let src2: Vec<u8> = (0..300).map(|i| (i % 199) as u8).collect();
+    let bound2 = compress_bound(src2.len() as i32) as usize;
+    let dst_cap = bound2 * 8 / 10;
+    let mut dst2 = vec![0u8; dst_cap];
+    let _ = unsafe {
+        compress_fast_ext_state_fast_reset(
+            &mut state, src2.as_ptr(), src2.len() as i32,
+            dst2.as_mut_ptr(), dst2.len() as i32, 1,
+        )
+    };
+    // Either succeeds or fails — both exercise the path
+}
+
+#[test]
+fn fast_reset_large_limited() {
+    // Line 859: fast_reset large input + limited output → ByU32+LimitedOutput
+    let mut state = StreamStateInternal::new();
+    let src: Vec<u8> = (0..100_000).map(|i| (i % 251) as u8).collect();
+    let bound = compress_bound(src.len() as i32) as usize;
+    let dst_cap = bound * 9 / 10;
+    let mut dst = vec![0u8; dst_cap];
+    let result = unsafe {
+        compress_fast_ext_state_fast_reset(
+            &mut state, src.as_ptr(), src.len() as i32,
+            dst.as_mut_ptr(), dst.len() as i32, 1,
+        )
+    };
+    assert!(result.is_ok());
+}

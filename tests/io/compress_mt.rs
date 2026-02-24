@@ -515,3 +515,284 @@ fn nonexistent_src_returns_error() {
     );
     assert!(result.is_err(), "must return Err for nonexistent src");
 }
+
+// ── Phase 4: Additional MT coverage tests ────────────────────────────────────
+
+/// MT compression with linked blocks (non-independent).
+/// Exercises prefix extraction and linked-block frame construction.
+#[test]
+fn mt_linked_blocks_roundtrip() {
+    let dir = TempDir::new().unwrap();
+    let src_path = dir.path().join("linked.bin");
+    let dst_path = dir.path().join("linked.lz4");
+    let data = pattern_data(CHUNK_SIZE + 1024); // just over one chunk
+    std::fs::write(&src_path, &data).unwrap();
+
+    let mut prefs = make_prefs(2);
+    prefs.block_independence = false; // linked blocks
+    let mut ress = make_ress(&prefs);
+    let mut in_size = 0u64;
+    compress_filename_mt(
+        &mut in_size,
+        &mut ress,
+        src_path.to_str().unwrap(),
+        dst_path.to_str().unwrap(),
+        1,
+        &prefs,
+    ).unwrap();
+    assert!(dst_path.exists());
+    let compressed = std::fs::read(&dst_path).unwrap();
+    assert!(starts_with_lz4_magic(&compressed));
+    assert_eq!(in_size, data.len() as u64);
+}
+
+/// MT compression with content checksum enabled.
+/// Exercises XXH32 accumulation and checksum finalization.
+#[test]
+fn mt_content_checksum_enabled() {
+    let dir = TempDir::new().unwrap();
+    let src_path = dir.path().join("checksum.bin");
+    let dst_path = dir.path().join("checksum.lz4");
+    let data = pattern_data(CHUNK_SIZE * 2 + 100); // > 2 chunks
+    std::fs::write(&src_path, &data).unwrap();
+
+    let mut prefs = make_prefs(2);
+    prefs.stream_checksum = true;
+    let mut ress = make_ress(&prefs);
+    let mut in_size = 0u64;
+    compress_filename_mt(
+        &mut in_size,
+        &mut ress,
+        src_path.to_str().unwrap(),
+        dst_path.to_str().unwrap(),
+        1,
+        &prefs,
+    ).unwrap();
+    let c = std::fs::read(&dst_path).unwrap();
+    assert!(starts_with_lz4_magic(&c));
+    // With content checksum, frame ends with end_mark (4 bytes) + checksum (4 bytes)
+    let end_mark = &c[c.len() - 8..c.len() - 4];
+    assert_eq!(end_mark, &[0u8; 4]);
+}
+
+/// MT compression with content_size flag set.
+#[test]
+fn mt_content_size_flag() {
+    let dir = TempDir::new().unwrap();
+    let src_path = dir.path().join("sized.bin");
+    let dst_path = dir.path().join("sized.lz4");
+    let data = pattern_data(500);
+    std::fs::write(&src_path, &data).unwrap();
+
+    let mut prefs = make_prefs(2);
+    prefs.content_size_flag = true;
+    let mut ress = make_ress(&prefs);
+    let mut in_size = 0u64;
+    compress_filename_mt(
+        &mut in_size,
+        &mut ress,
+        src_path.to_str().unwrap(),
+        dst_path.to_str().unwrap(),
+        1,
+        &prefs,
+    ).unwrap();
+    let c = std::fs::read(&dst_path).unwrap();
+    assert!(starts_with_lz4_magic(&c));
+    // FLG byte at index 4, content_size flag is bit 3
+    assert_ne!(c[4] & 0x08, 0, "content_size flag must be set");
+}
+
+/// MT compression at HC level (9) to exercise HC context creation in MT path.
+#[test]
+fn mt_hc_level_roundtrip() {
+    let dir = TempDir::new().unwrap();
+    let src_path = dir.path().join("hc.bin");
+    let dst_path = dir.path().join("hc.lz4");
+    let data = pattern_data(CHUNK_SIZE + 512);
+    std::fs::write(&src_path, &data).unwrap();
+
+    let mut prefs = make_prefs(2);
+    let mut ress = make_ress(&prefs);
+    let mut in_size = 0u64;
+    compress_filename_mt(
+        &mut in_size,
+        &mut ress,
+        src_path.to_str().unwrap(),
+        dst_path.to_str().unwrap(),
+        9, // HC level
+        &prefs,
+    ).unwrap();
+    let c = std::fs::read(&dst_path).unwrap();
+    assert!(starts_with_lz4_magic(&c));
+}
+
+/// MT compression with small file (single-block path).
+#[test]
+fn mt_single_block_fast_path() {
+    let dir = TempDir::new().unwrap();
+    let src_path = dir.path().join("tiny.bin");
+    let dst_path = dir.path().join("tiny.lz4");
+    let data = pattern_data(100); // much smaller than CHUNK_SIZE
+    std::fs::write(&src_path, &data).unwrap();
+
+    let prefs = make_prefs(4); // multiple workers but tiny file
+    let mut ress = make_ress(&prefs);
+    let mut in_size = 0u64;
+    compress_filename_mt(
+        &mut in_size,
+        &mut ress,
+        src_path.to_str().unwrap(),
+        dst_path.to_str().unwrap(),
+        1,
+        &prefs,
+    ).unwrap();
+    let c = std::fs::read(&dst_path).unwrap();
+    assert!(starts_with_lz4_magic(&c));
+    assert_eq!(in_size, 100);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 5: Large file MT compression to exercise streaming path (L256-498)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Compress a file much larger than CHUNK_SIZE (4MB) to exercise the
+/// multi-block parallel compression loop with rayon par_iter.
+#[test]
+fn mt_large_file_multiblock_roundtrip() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("large_mt.bin");
+    let dst = dir.path().join("large_mt.lz4");
+    // 5MB of semi-compressible data — larger than CHUNK_SIZE to get 2+ chunks
+    let data: Vec<u8> = (0..5 * MB).map(|i| (i % 251) as u8).collect();
+    std::fs::write(&src, &data).unwrap();
+    let prefs = make_prefs(4);
+    let mut ress = make_ress(&prefs);
+    let mut in_size = 0u64;
+    compress_filename_mt(
+        &mut in_size,
+        &mut ress,
+        src.to_str().unwrap(),
+        dst.to_str().unwrap(),
+        1,
+        &prefs,
+    )
+    .expect("large MT compress must succeed");
+    assert_eq!(in_size, data.len() as u64);
+
+    // Verify decompression
+    let c = std::fs::read(&dst).unwrap();
+    let dec = lz4::frame::decompress_frame_to_vec(&c).unwrap();
+    assert_eq!(dec, data);
+}
+
+/// Compress large file with stream_checksum + content_size_flag to exercise
+/// checksum accumulation and content-size header paths in MT.
+#[test]
+fn mt_large_file_with_checksums() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("large_cs.bin");
+    let dst = dir.path().join("large_cs.lz4");
+    let data: Vec<u8> = (0..5 * MB).map(|i| (i % 251) as u8).collect();
+    std::fs::write(&src, &data).unwrap();
+    let mut prefs = make_prefs(2);
+    prefs.stream_checksum = true;
+    prefs.content_size_flag = true;
+    let mut ress = make_ress(&prefs);
+    let mut in_size = 0u64;
+    compress_filename_mt(
+        &mut in_size,
+        &mut ress,
+        src.to_str().unwrap(),
+        dst.to_str().unwrap(),
+        1,
+        &prefs,
+    )
+    .expect("large MT with checksums must succeed");
+    let c = std::fs::read(&dst).unwrap();
+    let dec = lz4::frame::decompress_frame_to_vec(&c).unwrap();
+    assert_eq!(dec, data);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 6: MT linked blocks + content checksum + remove_src + small blocks
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// MT with linked blocks + content checksum (lines 320-324, 472, 478-482).
+#[test]
+fn mt_linked_blocks_content_checksum() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("mt_linked.bin");
+    let dst = dir.path().join("mt_linked.lz4");
+    // > CHUNK_SIZE=4MB to hit multi-batch path (lines 379, 388-389, 401, 412, 433)
+    let data: Vec<u8> = (0..5 * MB).map(|i| (i % 251) as u8).collect();
+    std::fs::write(&src, &data).unwrap();
+    let mut prefs = make_prefs(2);
+    prefs.block_independence = false; // linked blocks
+    prefs.stream_checksum = true;
+    prefs.content_size_flag = true;
+    let mut ress = make_ress(&prefs);
+    let mut in_size = 0u64;
+    compress_filename_mt(
+        &mut in_size,
+        &mut ress,
+        src.to_str().unwrap(),
+        dst.to_str().unwrap(),
+        1,
+        &prefs,
+    )
+    .expect("MT linked with checksums must succeed");
+    let c = std::fs::read(&dst).unwrap();
+    let dec = lz4::frame::decompress_frame_to_vec(&c).unwrap();
+    assert_eq!(dec, data);
+}
+
+/// MT compression with content_size_flag on small file (lines 256, 260).
+#[test]
+fn mt_content_size_small_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("mt_cs_small.bin");
+    let dst = dir.path().join("mt_cs_small.lz4");
+    let data: Vec<u8> = (0..50_000).map(|i| (i % 251) as u8).collect();
+    std::fs::write(&src, &data).unwrap();
+    let mut prefs = make_prefs(2);
+    prefs.content_size_flag = true;
+    let mut ress = make_ress(&prefs);
+    let mut in_size = 0u64;
+    compress_filename_mt(
+        &mut in_size,
+        &mut ress,
+        src.to_str().unwrap(),
+        dst.to_str().unwrap(),
+        1,
+        &prefs,
+    )
+    .expect("MT content_size small must succeed");
+    let c = std::fs::read(&dst).unwrap();
+    let dec = lz4::frame::decompress_frame_to_vec(&c).unwrap();
+    assert_eq!(dec, data);
+}
+
+/// MT with remove_src_file (lines 497-498).
+#[test]
+fn mt_remove_src_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("mt_rm.bin");
+    let dst = dir.path().join("mt_rm.lz4");
+    let data = vec![b'R'; 5000];
+    std::fs::write(&src, &data).unwrap();
+    let mut prefs = make_prefs(2);
+    prefs.remove_src_file = true;
+    let mut ress = make_ress(&prefs);
+    let mut in_size = 0u64;
+    compress_filename_mt(
+        &mut in_size,
+        &mut ress,
+        src.to_str().unwrap(),
+        dst.to_str().unwrap(),
+        1,
+        &prefs,
+    )
+    .expect("MT with remove_src must succeed");
+    assert!(!src.exists(), "source should be removed after MT --rm");
+    assert!(dst.exists());
+}

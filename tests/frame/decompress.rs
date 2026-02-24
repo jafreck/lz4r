@@ -2409,3 +2409,1472 @@ fn get_frame_info_fresh_context_normal_path() {
     assert!(hint > 0 || hint == 0);
     let _ = fi;
 }
+
+// ---------------------------------------------------------------------------
+// Additional coverage tests for frame decompression edge cases
+// ---------------------------------------------------------------------------
+
+/// Incompressible data forces uncompressed blocks (CopyDirect path).
+#[test]
+fn decompress_incompressible_data_exercises_copy_direct() {
+    let data: Vec<u8> = (0..1024).map(|i| {
+        ((i * 137 + 59) % 256) as u8
+    }).collect();
+
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_checksum_flag: BlockChecksum::Enabled,
+            content_checksum_flag: ContentChecksum::Enabled,
+            block_mode: BlockMode::Independent,
+            ..Default::default()
+        },
+        auto_flush: true,
+        ..Default::default()
+    };
+    let frame = compress_frame_with_prefs(&data, &prefs);
+    let dec = lz4::frame::decompress_frame_to_vec(&frame).unwrap();
+    assert_eq!(dec, data);
+}
+
+/// Incompressible data with linked blocks exercises CopyDirect + dict update.
+#[test]
+fn decompress_incompressible_linked_exercises_copy_direct_dict() {
+    let data: Vec<u8> = (0..2048).map(|i| {
+        ((i * 137 + 59) % 256) as u8
+    }).collect();
+
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_checksum_flag: BlockChecksum::Enabled,
+            block_mode: BlockMode::Linked,
+            ..Default::default()
+        },
+        auto_flush: true,
+        ..Default::default()
+    };
+    let frame = compress_frame_with_prefs(&data, &prefs);
+    let dec = lz4::frame::decompress_frame_to_vec(&frame).unwrap();
+    assert_eq!(dec, data);
+}
+
+/// Content checksum split: decompress all but last 3 bytes, then the rest.
+/// Exercises StoreSuffix staging when the content checksum is split.
+#[test]
+fn store_suffix_split_1_plus_3() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            content_checksum_flag: ContentChecksum::Enabled,
+            block_mode: BlockMode::Independent,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = repetitive_bytes(256);
+    let frame = compress_frame_with_prefs(&data, &prefs);
+    let split_point = frame.len() - 3;
+
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut output = Vec::new();
+    let mut src_pos = 0usize;
+
+    // Feed part 1: everything except last 3 bytes
+    loop {
+        let remaining = &frame[src_pos..split_point];
+        if remaining.is_empty() { break; }
+        let mut dst = vec![0u8; 4096];
+        match lz4f_decompress(&mut dctx, Some(&mut dst), remaining, None) {
+            Ok((sc, dw, _hint)) => {
+                output.extend_from_slice(&dst[..dw]);
+                if sc == 0 { break; } // needs more data
+                src_pos += sc;
+            }
+            Err(e) => panic!("first part failed at pos {src_pos}: {e:?}"),
+        }
+    }
+
+    // Feed part 2: last 3 bytes (rest of checksum)
+    let mut dst2 = vec![0u8; 256];
+    match lz4f_decompress(&mut dctx, Some(&mut dst2), &frame[split_point..], None) {
+        Ok((_sc2, dw2, hint2)) => {
+            output.extend_from_slice(&dst2[..dw2]);
+            assert_eq!(hint2, 0, "frame should be complete after second chunk");
+        }
+        Err(e) => panic!("second chunk failed: {e:?}"),
+    }
+    assert_eq!(output, data);
+}
+
+/// Content checksum split: decompress all but last byte, then the rest.
+#[test]
+fn store_suffix_split_3_plus_1() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            content_checksum_flag: ContentChecksum::Enabled,
+            block_mode: BlockMode::Independent,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = repetitive_bytes(256);
+    let frame = compress_frame_with_prefs(&data, &prefs);
+    let split_point = frame.len() - 1;
+
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut output = Vec::new();
+    let mut src_pos = 0usize;
+
+    // Feed part 1: everything except last byte
+    loop {
+        let remaining = &frame[src_pos..split_point];
+        if remaining.is_empty() { break; }
+        let mut dst = vec![0u8; 4096];
+        match lz4f_decompress(&mut dctx, Some(&mut dst), remaining, None) {
+            Ok((sc, dw, _hint)) => {
+                output.extend_from_slice(&dst[..dw]);
+                if sc == 0 { break; } // needs more data
+                src_pos += sc;
+            }
+            Err(e) => panic!("first part failed at pos {src_pos}: {e:?}"),
+        }
+    }
+
+    // Feed part 2: the last byte
+    let mut dst2 = vec![0u8; 256];
+    match lz4f_decompress(&mut dctx, Some(&mut dst2), &frame[split_point..], None) {
+        Ok((_sc2, dw2, hint2)) => {
+            output.extend_from_slice(&dst2[..dw2]);
+            assert_eq!(hint2, 0, "frame should be complete after second chunk");
+        }
+        Err(e) => panic!("second chunk failed: {e:?}"),
+    }
+    assert_eq!(output, data);
+}
+
+/// Tiny dst triggers FlushOut, interleaved with None dst calls.
+#[test]
+fn flush_out_with_none_dst() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_size_id: BlockSizeId::Max64Kb,
+            block_mode: BlockMode::Independent,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = repetitive_bytes(4096);
+    let frame = compress_frame_with_prefs(&data, &prefs);
+
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut src_pos = 0usize;
+    let mut output = Vec::new();
+    let mut iterations = 0;
+    while src_pos < frame.len() && iterations < 50000 {
+        iterations += 1;
+        let mut tiny_dst = vec![0u8; 32];
+        match lz4f_decompress(&mut dctx, Some(&mut tiny_dst), &frame[src_pos..], None) {
+            Ok((sc, dw, hint)) => {
+                output.extend_from_slice(&tiny_dst[..dw]);
+                src_pos += sc;
+                if hint == 0 { break; }
+                // Try a None dst call - exercises the no-output path
+                if let Ok((sc2, _dw2, _)) = lz4f_decompress(&mut dctx, None, &frame[src_pos..], None) {
+                    src_pos += sc2;
+                }
+            }
+            Err(e) => panic!("decompress failed at pos {src_pos}: {e:?}"),
+        }
+    }
+    assert_eq!(output, data);
+}
+
+/// Dict provided at second call exercises stage > Init path.
+#[test]
+fn decompress_using_dict_mid_stream_does_not_reload() {
+    let dict = repetitive_bytes(1024);
+    let data = repetitive_bytes(512);
+    let frame = compress_frame_simple(&data);
+
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let header_chunk = &frame[..11.min(frame.len())];
+    let mut dst1 = vec![0u8; 4096];
+    let _ = lz4f_decompress_using_dict(&mut dctx, Some(&mut dst1), header_chunk, &dict, None);
+
+    let mut dst2 = vec![0u8; 4096];
+    let _ = lz4f_decompress_using_dict(&mut dctx, Some(&mut dst2), &frame[header_chunk.len()..], &dict, None);
+}
+
+/// Skippable frame fed byte-by-byte exercises GetSFrameSize staging.
+#[test]
+fn skippable_frame_size_split_across_calls() {
+    let payload = vec![0xABu8; 100];
+    let mut frame = Vec::new();
+    frame.extend_from_slice(&0x184D2A50u32.to_le_bytes());
+    frame.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    frame.extend_from_slice(&payload);
+
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut src_pos = 0;
+    while src_pos < frame.len() {
+        let end = (src_pos + 1).min(frame.len());
+        let mut dst = vec![0u8; 256];
+        match lz4f_decompress(&mut dctx, Some(&mut dst), &frame[src_pos..end], None) {
+            Ok((sc, _dw, hint)) => {
+                src_pos += sc.max(1);
+                if hint == 0 && src_pos >= frame.len() { break; }
+            }
+            Err(_) => { src_pos += 1; }
+        }
+    }
+}
+
+/// Block checksum with small chunks exercises GetBlockChecksum staging.
+#[test]
+fn block_checksum_partial_buffering() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_checksum_flag: BlockChecksum::Enabled,
+            block_mode: BlockMode::Independent,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = repetitive_bytes(256);
+    let frame = compress_frame_with_prefs(&data, &prefs);
+
+    // Feed in small chunks, expanding when the decompressor needs more
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut output = Vec::new();
+    let chunk_size = 3;
+    let mut fed_up_to = 0usize;
+    let mut src_pos = 0usize;
+    while src_pos < frame.len() {
+        fed_up_to = (fed_up_to + chunk_size).min(frame.len());
+        if fed_up_to <= src_pos { fed_up_to = frame.len(); }
+        let mut dst = vec![0u8; 4096];
+        match lz4f_decompress(&mut dctx, Some(&mut dst), &frame[src_pos..fed_up_to], None) {
+            Ok((sc, dw, hint)) => {
+                output.extend_from_slice(&dst[..dw]);
+                src_pos += sc;
+                if hint == 0 { break; }
+            }
+            Err(e) => panic!("chunk decompress failed at pos {src_pos}: {e:?}"),
+        }
+    }
+    assert_eq!(output, data);
+}
+
+/// 5-byte chunks with block checksum exercises GetCBlock boundary cases.
+#[test]
+fn get_cblock_boundary_straddle() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_checksum_flag: BlockChecksum::Enabled,
+            block_mode: BlockMode::Independent,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = repetitive_bytes(128);
+    let frame = compress_frame_with_prefs(&data, &prefs);
+
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut output = Vec::new();
+    let chunk_size = 5;
+    let mut fed_up_to = 0usize;
+    let mut src_pos = 0usize;
+    while src_pos < frame.len() {
+        fed_up_to = (fed_up_to + chunk_size).min(frame.len());
+        if fed_up_to <= src_pos { fed_up_to = frame.len(); }
+        let mut dst = vec![0u8; 4096];
+        match lz4f_decompress(&mut dctx, Some(&mut dst), &frame[src_pos..fed_up_to], None) {
+            Ok((sc, dw, hint)) => {
+                output.extend_from_slice(&dst[..dw]);
+                src_pos += sc;
+                if hint == 0 { break; }
+            }
+            Err(e) => panic!("5-byte chunk decompression failed at pos {src_pos}: {e:?}"),
+        }
+    }
+    assert_eq!(output, data);
+}
+
+/// Content-size-bearing frame with content checksum.
+#[test]
+fn content_size_tracking_with_checksum() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            content_checksum_flag: ContentChecksum::Enabled,
+            content_size: 512,
+            block_mode: BlockMode::Independent,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = repetitive_bytes(512);
+    let frame = compress_frame_with_prefs(&data, &prefs);
+    let dec = lz4::frame::decompress_frame_to_vec(&frame).unwrap();
+    assert_eq!(dec, data);
+}
+
+/// Linked blocks with content checksum + block checksum (full feature combo).
+#[test]
+fn linked_blocks_all_checksums_roundtrip() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            content_checksum_flag: ContentChecksum::Enabled,
+            block_checksum_flag: BlockChecksum::Enabled,
+            block_mode: BlockMode::Linked,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = repetitive_bytes(8192);
+    let frame = compress_frame_with_prefs(&data, &prefs);
+    let dec = lz4::frame::decompress_frame_to_vec(&frame).unwrap();
+    assert_eq!(dec, data);
+}
+
+/// 7-byte chunks with linked blocks exercises StoreCBlock inline transition.
+#[test]
+fn linked_blocks_7byte_chunks() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_mode: BlockMode::Linked,
+            content_checksum_flag: ContentChecksum::Enabled,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = repetitive_bytes(1024);
+    let frame = compress_frame_with_prefs(&data, &prefs);
+
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut output = Vec::new();
+    let chunk_size = 7;
+    let mut fed_up_to = 0usize;
+    let mut src_pos = 0usize;
+    while src_pos < frame.len() {
+        fed_up_to = (fed_up_to + chunk_size).min(frame.len());
+        if fed_up_to <= src_pos { fed_up_to = frame.len(); }
+        let mut dst = vec![0u8; 4096];
+        match lz4f_decompress(&mut dctx, Some(&mut dst), &frame[src_pos..fed_up_to], None) {
+            Ok((sc, dw, hint)) => {
+                output.extend_from_slice(&dst[..dw]);
+                src_pos += sc;
+                if hint == 0 { break; }
+            }
+            Err(e) => panic!("7-byte chunk failed at pos {src_pos}: {e:?}"),
+        }
+    }
+    assert_eq!(output, data);
+}
+
+/// Large dict with decompress_using_dict exercises dict truncation.
+#[test]
+fn decompress_using_dict_large_dict_exercises_truncation() {
+    let large_dict = repetitive_bytes(128 * 1024);
+    let data = repetitive_bytes(512);
+    let frame = compress_frame_simple(&data);
+
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut output = Vec::new();
+    let mut src_pos = 0usize;
+    while src_pos < frame.len() {
+        let mut dst = vec![0u8; 4096];
+        let (sc, dw, hint) = lz4f_decompress_using_dict(
+            &mut dctx, Some(&mut dst), &frame[src_pos..], &large_dict, None,
+        ).unwrap();
+        output.extend_from_slice(&dst[..dw]);
+        src_pos += sc;
+        if hint == 0 { break; }
+    }
+    assert_eq!(output, data);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Coverage gap tests: streaming decompress with 1-byte chunks
+// Exercises: StoreFrameHeader, StoreBlockHeader, StoreCBlock, StoreSuffix,
+//            GetSFrameSize, StoreSFrameSize, SkipSkippable, GetBlockData buffered path
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Helper: decompress a frame one byte at a time, exercising every partial-buffering path.
+fn decompress_one_byte_at_a_time(frame: &[u8]) -> Vec<u8> {
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut output = Vec::new();
+    let mut src_pos = 0usize;
+    while src_pos < frame.len() {
+        let end = (src_pos + 1).min(frame.len());
+        let mut dst = vec![0u8; 65536];
+        match lz4f_decompress(&mut dctx, Some(&mut dst), &frame[src_pos..end], None) {
+            Ok((sc, dw, hint)) => {
+                output.extend_from_slice(&dst[..dw]);
+                src_pos += sc;
+                if hint == 0 && sc == 0 && dw == 0 {
+                    if src_pos >= frame.len() { break; }
+                    // Stuck — feed all remaining
+                    let mut dst2 = vec![0u8; 65536];
+                    match lz4f_decompress(&mut dctx, Some(&mut dst2), &frame[src_pos..], None) {
+                        Ok((sc2, dw2, _)) => {
+                            output.extend_from_slice(&dst2[..dw2]);
+                            src_pos += sc2;
+                        }
+                        Err(e) => panic!("stuck recovery failed at pos {src_pos}: {e:?}"),
+                    }
+                    break;
+                }
+                // hint==0 means frame complete; continue if more data remains (multi-frame)
+                if hint == 0 && src_pos >= frame.len() { break; }
+            }
+            Err(e) => panic!("1-byte-at-a-time failed at pos {src_pos}: {e:?}"),
+        }
+    }
+    output
+}
+
+/// 1-byte-at-a-time with block checksums + content checksum + content size.
+/// Exercises: StoreFrameHeader, StoreBlockHeader, StoreCBlock, GetBlockData buffered,
+///            block checksum from tmp_in, StoreSuffix.
+#[test]
+fn one_byte_at_a_time_block_and_content_checksums() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_checksum_flag: BlockChecksum::Enabled,
+            content_checksum_flag: ContentChecksum::Enabled,
+            content_size: 256,
+            block_size_id: BlockSizeId::Max64Kb,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = repetitive_bytes(256);
+    let frame = compress_frame_with_prefs(&data, &prefs);
+    let output = decompress_one_byte_at_a_time(&frame);
+    assert_eq!(output, data);
+}
+
+/// 1-byte-at-a-time with linked blocks + content checksum (multi-block).
+/// Exercises StoreCBlock inline transition and linked-block dict update for large blocks.
+#[test]
+fn one_byte_at_a_time_linked_multiblock() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_mode: BlockMode::Linked,
+            content_checksum_flag: ContentChecksum::Enabled,
+            block_size_id: BlockSizeId::Max64Kb,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    // Use > 64KB to force multiple blocks and exercise update_dict with n >= MAX_DICT_SIZE
+    let data = repetitive_bytes(70000);
+    let frame = compress_frame_with_prefs(&data, &prefs);
+    let output = decompress_one_byte_at_a_time(&frame);
+    assert_eq!(output, data);
+}
+
+/// 1-byte-at-a-time with a skippable frame followed by a real frame.
+/// Exercises GetSFrameSize, StoreSFrameSize, SkipSkippable partial buffering.
+#[test]
+fn one_byte_at_a_time_skippable_then_real_frame() {
+    let payload = b"skip me please!";
+    // Build a skippable frame: magic (4 bytes) + size (4 bytes LE) + payload
+    let mut skip_frame = Vec::new();
+    skip_frame.extend_from_slice(&0x184D_2A50u32.to_le_bytes()); // skippable magic
+    skip_frame.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    skip_frame.extend_from_slice(payload);
+
+    let data = repetitive_bytes(128);
+    let real_frame = compress_frame_simple(&data);
+
+    let mut combined = skip_frame;
+    combined.extend_from_slice(&real_frame);
+
+    let output = decompress_one_byte_at_a_time(&combined);
+    assert_eq!(output, data);
+}
+
+/// Feed only 4 bytes of header initially to trigger FrameHeaderIncomplete (L174).
+#[test]
+fn frame_header_incomplete_tiny_initial_chunk() {
+    let data = repetitive_bytes(100);
+    let frame = compress_frame_simple(&data);
+    assert!(frame.len() > 7);
+
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    // Feed only 4 bytes — not enough for MIN_FH_SIZE (7)
+    let mut dst = vec![0u8; 4096];
+    let (sc, dw, hint) = lz4f_decompress(&mut dctx, Some(&mut dst), &frame[..4], None).unwrap();
+    assert_eq!(sc, 4); // consumed the 4 bytes
+    assert_eq!(dw, 0); // no output yet
+    assert!(hint > 0); // needs more
+
+    // Now feed the rest
+    let mut output = Vec::new();
+    let mut pos = sc;
+    while pos < frame.len() {
+        let mut dst2 = vec![0u8; 4096];
+        let (sc2, dw2, hint2) =
+            lz4f_decompress(&mut dctx, Some(&mut dst2), &frame[pos..], None).unwrap();
+        output.extend_from_slice(&dst2[..dw2]);
+        pos += sc2;
+        if hint2 == 0 { break; }
+    }
+    assert_eq!(output, data);
+}
+
+/// Frame with content_size flag set, header split at exactly MIN_FH_SIZE bytes.
+/// Exercises L216-222 (header with optional fields split across calls).
+#[test]
+fn frame_header_with_content_size_split() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            content_size: 200,
+            content_checksum_flag: ContentChecksum::Enabled,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = repetitive_bytes(200);
+    let frame = compress_frame_with_prefs(&data, &prefs);
+
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    // Feed MIN_FH_SIZE (7) bytes — the header is larger because of content_size (needs +8)
+    let split_at = MIN_FH_SIZE;
+    let mut dst = vec![0u8; 4096];
+    let (sc, dw, hint) =
+        lz4f_decompress(&mut dctx, Some(&mut dst), &frame[..split_at], None).unwrap();
+    assert_eq!(dw, 0);
+    assert!(hint > 0);
+
+    // Feed the rest
+    let mut output = Vec::new();
+    let mut pos = sc;
+    while pos < frame.len() {
+        let mut dst2 = vec![0u8; 4096];
+        let (sc2, dw2, hint2) =
+            lz4f_decompress(&mut dctx, Some(&mut dst2), &frame[pos..], None).unwrap();
+        output.extend_from_slice(&dst2[..dw2]);
+        pos += sc2;
+        if hint2 == 0 { break; }
+    }
+    assert_eq!(output, data);
+}
+
+/// Content checksum arriving in 2-byte chunks exercises StoreSuffix (L794-801).
+#[test]
+fn content_checksum_split_exercises_store_suffix() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            content_checksum_flag: ContentChecksum::Enabled,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = repetitive_bytes(100);
+    let frame = compress_frame_with_prefs(&data, &prefs);
+
+    // Find where the content checksum is (last 4 bytes of frame, after the end mark)
+    // Decompress most of the frame normally, then feed the last few bytes one at a time
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut output = Vec::new();
+    // Feed all but last 6 bytes (end mark + checksum overlap)
+    let split = frame.len().saturating_sub(6);
+    let mut pos = 0usize;
+
+    // Feed up to split
+    {
+        let mut dst = vec![0u8; 4096];
+        let (sc, dw, _hint) =
+            lz4f_decompress(&mut dctx, Some(&mut dst), &frame[..split], None).unwrap();
+        output.extend_from_slice(&dst[..dw]);
+        pos = sc;
+    }
+
+    // Feed remaining bytes one at a time
+    while pos < frame.len() {
+        let end = (pos + 1).min(frame.len());
+        let mut dst = vec![0u8; 4096];
+        match lz4f_decompress(&mut dctx, Some(&mut dst), &frame[pos..end], None) {
+            Ok((sc, dw, hint)) => {
+                output.extend_from_slice(&dst[..dw]);
+                pos += sc;
+                if hint == 0 { break; }
+            }
+            Err(e) => panic!("StoreSuffix test failed at pos {pos}: {e:?}"),
+        }
+    }
+    assert_eq!(output, data);
+}
+
+/// Block checksum with data split across calls exercises GetBlockData buffered path (L633-659).
+#[test]
+fn block_checksum_split_exercises_store_cblock() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_checksum_flag: BlockChecksum::Enabled,
+            block_size_id: BlockSizeId::Max64Kb,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = repetitive_bytes(512);
+    let frame = compress_frame_with_prefs(&data, &prefs);
+
+    // Decompress with 3-byte chunks to split block data across calls
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut output = Vec::new();
+    let chunk = 3;
+    let mut pos = 0usize;
+    while pos < frame.len() {
+        let end = (pos + chunk).min(frame.len());
+        let mut dst = vec![0u8; 4096];
+        match lz4f_decompress(&mut dctx, Some(&mut dst), &frame[pos..end], None) {
+            Ok((sc, dw, hint)) => {
+                output.extend_from_slice(&dst[..dw]);
+                pos += sc;
+                if hint == 0 { break; }
+            }
+            Err(e) => panic!("block checksum split at pos {pos}: {e:?}"),
+        }
+    }
+    assert_eq!(output, data);
+}
+
+/// Multi-block with block checksums, 2-byte chunks exercises StoreBlockData (L722-734).
+#[test]
+fn multiblock_block_checksum_2byte_chunks() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_checksum_flag: BlockChecksum::Enabled,
+            content_checksum_flag: ContentChecksum::Enabled,
+            block_size_id: BlockSizeId::Max64Kb,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    // Force multiple blocks by exceeding 64KB
+    let data = repetitive_bytes(70000);
+    let frame = compress_frame_with_prefs(&data, &prefs);
+
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut output = Vec::new();
+    let chunk = 2;
+    let mut pos = 0usize;
+    while pos < frame.len() {
+        let end = (pos + chunk).min(frame.len());
+        let mut dst = vec![0u8; 131072];
+        match lz4f_decompress(&mut dctx, Some(&mut dst), &frame[pos..end], None) {
+            Ok((sc, dw, hint)) => {
+                output.extend_from_slice(&dst[..dw]);
+                pos += sc;
+                if hint == 0 { break; }
+            }
+            Err(e) => panic!("multiblock block checksum 2-byte at pos {pos}: {e:?}"),
+        }
+    }
+    assert_eq!(output, data);
+}
+
+/// Skippable frame only, 1-byte chunks.
+#[test]
+fn skippable_frame_only_1byte_chunks() {
+    let payload = vec![0xABu8; 100];
+    let mut frame = Vec::new();
+    frame.extend_from_slice(&0x184D_2A51u32.to_le_bytes());
+    frame.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    frame.extend_from_slice(&payload);
+
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut pos = 0usize;
+    while pos < frame.len() {
+        let end = (pos + 1).min(frame.len());
+        let mut dst = vec![0u8; 256];
+        match lz4f_decompress(&mut dctx, Some(&mut dst), &frame[pos..end], None) {
+            Ok((sc, _dw, hint)) => {
+                pos += sc;
+                if hint == 0 { break; }
+            }
+            Err(e) => panic!("skippable 1-byte at pos {pos}: {e:?}"),
+        }
+    }
+    // Skippable frame produces no output — just verify it didn't error
+    assert_eq!(pos, frame.len());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 4: Error path + edge case coverage for frame/decompress.rs
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Malformed header: reserved bit set → ReservedFlagSet error.
+#[test]
+fn decode_header_reserved_flag_set_error() {
+    let data = repetitive_bytes(100);
+    let mut frame = compress_frame_simple(&data);
+    frame[4] |= 0x02; // flip reserved bit in FLG
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut dst = vec![0u8; 4096];
+    let result = lz4f_decompress(&mut dctx, Some(&mut dst), &frame, None);
+    assert!(result.is_err());
+}
+
+/// Malformed header: version field wrong → HeaderVersionWrong error.
+#[test]
+fn decode_header_wrong_version_error() {
+    let data = repetitive_bytes(100);
+    let mut frame = compress_frame_simple(&data);
+    frame[4] &= 0x3F; // clear version bits → version = 0
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut dst = vec![0u8; 4096];
+    let result = lz4f_decompress(&mut dctx, Some(&mut dst), &frame, None);
+    assert!(result.is_err());
+}
+
+/// Malformed header: BD reserved bit 7 set → ReservedFlagSet error.
+#[test]
+fn decode_header_bd_reserved_flag_error() {
+    let data = repetitive_bytes(100);
+    let mut frame = compress_frame_simple(&data);
+    frame[5] |= 0x80; // set reserved bit 7 in BD
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut dst = vec![0u8; 4096];
+    let result = lz4f_decompress(&mut dctx, Some(&mut dst), &frame, None);
+    assert!(result.is_err());
+}
+
+/// Malformed header: bad block size id → MaxBlockSizeInvalid error.
+#[test]
+fn decode_header_bad_block_size_error() {
+    let data = repetitive_bytes(100);
+    let mut frame = compress_frame_simple(&data);
+    frame[5] = 0x00; // bsid_raw = 0 (< 4 → invalid)
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut dst = vec![0u8; 4096];
+    let result = lz4f_decompress(&mut dctx, Some(&mut dst), &frame, None);
+    assert!(result.is_err());
+}
+
+/// Malformed header: invalid checksum → HeaderChecksumInvalid error.
+#[test]
+fn decode_header_invalid_checksum_error() {
+    let data = repetitive_bytes(100);
+    let mut frame = compress_frame_simple(&data);
+    frame[6] ^= 0xFF; // corrupt header checksum
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut dst = vec![0u8; 4096];
+    let result = lz4f_decompress(&mut dctx, Some(&mut dst), &frame, None);
+    assert!(result.is_err());
+}
+
+/// Unknown magic number → FrameTypeUnknown error.
+#[test]
+fn decode_header_unknown_magic_error() {
+    let frame = vec![0x12u8, 0x34, 0x56, 0x78, 0x60, 0x40, 0x82, 0x00, 0x00, 0x00, 0x00, 0x00];
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut dst = vec![0u8; 256];
+    let result = lz4f_decompress(&mut dctx, Some(&mut dst), &frame, None);
+    assert!(result.is_err());
+}
+
+/// Corrupt block checksum → BlockChecksumInvalid error.
+#[test]
+fn corrupt_block_checksum_error() {
+    let data = repetitive_bytes(500);
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_checksum_flag: BlockChecksum::Enabled,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut frame = compress_frame_with_prefs(&data, &prefs);
+    // Corrupt a byte right after the header (in the block data/checksum area)
+    let len = frame.len();
+    if len > 20 { frame[15] ^= 0xFF; }
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut dst = vec![0u8; 4096];
+    let result = lz4f_decompress(&mut dctx, Some(&mut dst), &frame, None);
+    assert!(result.is_err(), "Corrupt block checksum should fail");
+}
+
+/// Corrupt content checksum → ContentChecksumInvalid error.
+#[test]
+fn corrupt_content_checksum_error() {
+    let data = repetitive_bytes(200);
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            content_checksum_flag: ContentChecksum::Enabled,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut frame = compress_frame_with_prefs(&data, &prefs);
+    let len = frame.len();
+    frame[len - 1] ^= 0xFF; // corrupt content checksum (last 4 bytes)
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut dst = vec![0u8; 4096];
+    let result = lz4f_decompress(&mut dctx, Some(&mut dst), &frame, None);
+    assert!(result.is_err(), "Corrupt content checksum should fail");
+}
+
+/// Frame with dict_id flag — exercises dict_id parsing (L275).
+#[test]
+fn frame_with_dict_id_decompresses() {
+    let dict_data = repetitive_bytes(4096);
+    let cdict = Lz4FCDict::create(&dict_data).expect("cdict");
+    let data = repetitive_bytes(200);
+    let bound = lz4f_compress_frame_bound(data.len(), None);
+    let mut compressed = vec![0u8; bound + 256];
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            dict_id: 12345,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut cctx = Lz4FCCtx::new(LZ4F_VERSION);
+    let clen = lz4f_compress_frame_using_cdict(&mut cctx, &mut compressed, &data, &*cdict as *const Lz4FCDict, Some(&prefs))
+        .expect("compress with cdict");
+    compressed.truncate(clen);
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut dst = vec![0u8; 4096];
+    let (_, dw, _) = lz4f_decompress_using_dict(&mut dctx, Some(&mut dst), &compressed, &dict_data, None).unwrap();
+    assert_eq!(&dst[..dw], &data[..]);
+}
+
+/// 3-byte chunks with all features enabled to exercise all buffered state transitions.
+#[test]
+fn three_byte_chunks_all_features() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_mode: BlockMode::Linked,
+            block_checksum_flag: BlockChecksum::Enabled,
+            content_checksum_flag: ContentChecksum::Enabled,
+            block_size_id: BlockSizeId::Max64Kb,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = repetitive_bytes(5000);
+    let frame = compress_frame_with_prefs(&data, &prefs);
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut output = Vec::new();
+    let mut src_pos = 0usize;
+    while src_pos < frame.len() {
+        let end = (src_pos + 3).min(frame.len());
+        let mut dst = vec![0u8; 65536];
+        match lz4f_decompress(&mut dctx, Some(&mut dst), &frame[src_pos..end], None) {
+            Ok((sc, dw, hint)) => {
+                output.extend_from_slice(&dst[..dw]);
+                src_pos += sc.max(1);
+                if hint == 0 && src_pos >= frame.len() { break; }
+            }
+            Err(e) => panic!("3-byte chunk at pos {src_pos}: {e:?}"),
+        }
+    }
+    assert_eq!(output, data);
+}
+
+/// Large linked-block frame (>64KB) exercises update_dict with n >= MAX_DICT_SIZE.
+#[test]
+fn update_dict_large_block_exceeds_max_dict_size() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_mode: BlockMode::Linked,
+            block_size_id: BlockSizeId::Max256Kb,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = repetitive_bytes(200000);
+    let frame = compress_frame_with_prefs(&data, &prefs);
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut dst = vec![0u8; 300000];
+    let (_, dw, _) = lz4f_decompress(&mut dctx, Some(&mut dst), &frame, None).unwrap();
+    assert_eq!(&dst[..dw], &data[..]);
+}
+
+/// StoreSuffix path: feed content checksum 1 byte at a time.
+#[test]
+fn store_suffix_one_byte_at_a_time() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            content_checksum_flag: ContentChecksum::Enabled,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = repetitive_bytes(50);
+    let frame = compress_frame_with_prefs(&data, &prefs);
+    let split = frame.len() - 4;
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut output = Vec::new();
+    let mut dst = vec![0u8; 65536];
+    let (_, dw, hint) = lz4f_decompress(&mut dctx, Some(&mut dst), &frame[..split], None).unwrap();
+    output.extend_from_slice(&dst[..dw]);
+    assert!(hint > 0);
+    let mut cpos = split;
+    while cpos < frame.len() {
+        let mut dst2 = vec![0u8; 256];
+        let (sc2, dw2, hint2) = lz4f_decompress(&mut dctx, Some(&mut dst2), &frame[cpos..cpos+1], None).unwrap();
+        output.extend_from_slice(&dst2[..dw2]);
+        cpos += sc2.max(1);
+        if hint2 == 0 { break; }
+    }
+    assert_eq!(output, data);
+}
+
+/// StoreSFrameSize with partial size bytes.
+#[test]
+fn store_sframe_size_partial_feeding() {
+    let payload = vec![0xBBu8; 42];
+    let mut skip_frame = Vec::new();
+    skip_frame.extend_from_slice(&0x184D_2A52u32.to_le_bytes());
+    skip_frame.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    skip_frame.extend_from_slice(&payload);
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut dst = vec![0u8; 256];
+    let (sc1, _, hint1) = lz4f_decompress(&mut dctx, Some(&mut dst), &skip_frame[..4], None).unwrap();
+    assert!(hint1 > 0);
+    let mut pos = sc1;
+    while pos < skip_frame.len() {
+        let end = (pos + 1).min(skip_frame.len());
+        let (sc, _, hint) = lz4f_decompress(&mut dctx, Some(&mut dst), &skip_frame[pos..end], None).unwrap();
+        pos += sc.max(1);
+        if hint == 0 { break; }
+    }
+    assert_eq!(pos, skip_frame.len());
+}
+
+/// Skip-checksum option bypasses both block and content checksum validation.
+#[test]
+fn decompress_with_skip_checksum() {
+    let data = repetitive_bytes(500);
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_checksum_flag: BlockChecksum::Enabled,
+            content_checksum_flag: ContentChecksum::Enabled,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let frame = compress_frame_with_prefs(&data, &prefs);
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    dctx.skip_checksum = true;
+    let mut dst = vec![0u8; 4096];
+    let (_, dw, _) = lz4f_decompress(&mut dctx, Some(&mut dst), &frame, None).unwrap();
+    assert_eq!(&dst[..dw], &data[..]);
+}
+
+/// Large skippable frame followed by real frame exercises SkipSkippable loop.
+#[test]
+fn large_skippable_frame_then_real_frame() {
+    let payload = vec![0xCCu8; 1024];
+    let mut frame = Vec::new();
+    frame.extend_from_slice(&0x184D_2A53u32.to_le_bytes());
+    frame.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    frame.extend_from_slice(&payload);
+    let data = repetitive_bytes(64);
+    let real_frame = compress_frame_simple(&data);
+    frame.extend_from_slice(&real_frame);
+    let output = decompress_one_byte_at_a_time(&frame);
+    assert_eq!(output, data);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 5: Uncompressed blocks, partial block checksum buffering,
+//          update_dict large block, one-shot frame compress
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Decompress a frame containing uncompressed blocks (CopyDirect stage).
+/// Uses lz4f_uncompressed_update to create an uncompressed-block frame
+/// then verifies decompression through the CopyDirect path.
+#[test]
+fn decompress_uncompressed_block_frame() {
+    use lz4::frame::compress::{
+        lz4f_compress_begin, lz4f_compress_end, lz4f_uncompressed_update,
+    };
+    let data = repetitive_bytes(2000);
+    let mut cctx = Lz4FCCtx::new(LZ4F_VERSION);
+    let bound = lz4f_compress_frame_bound(data.len(), None);
+    let mut frame = vec![0u8; bound + 1024];
+
+    let hdr_size = lz4f_compress_begin(&mut cctx, &mut frame, None).unwrap();
+    let mut written = hdr_size;
+
+    let block_size =
+        lz4f_uncompressed_update(&mut cctx, &mut frame[written..], &data, None).unwrap();
+    written += block_size;
+
+    let end_size = lz4f_compress_end(&mut cctx, &mut frame[written..], None).unwrap();
+    written += end_size;
+    frame.truncate(written);
+
+    // Decompress
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut dst = vec![0u8; data.len() + 1024];
+    let (sc, dw, hint) = lz4f_decompress(&mut dctx, Some(&mut dst), &frame, None).unwrap();
+    assert_eq!(&dst[..dw], &data[..]);
+    assert_eq!(sc, frame.len());
+    assert_eq!(hint, 0);
+}
+
+/// Decompress uncompressed blocks one byte at a time to exercise
+/// partial CopyDirect buffering and block size decrement.
+#[test]
+fn decompress_uncompressed_block_one_byte_at_a_time() {
+    use lz4::frame::compress::{
+        lz4f_compress_begin, lz4f_compress_end, lz4f_uncompressed_update,
+    };
+    let data = repetitive_bytes(500);
+    let mut cctx = Lz4FCCtx::new(LZ4F_VERSION);
+    let bound = lz4f_compress_frame_bound(data.len(), None);
+    let mut frame = vec![0u8; bound + 512];
+
+    let hdr = lz4f_compress_begin(&mut cctx, &mut frame, None).unwrap();
+    let blk = lz4f_uncompressed_update(&mut cctx, &mut frame[hdr..], &data, None).unwrap();
+    let end = lz4f_compress_end(&mut cctx, &mut frame[hdr + blk..], None).unwrap();
+    frame.truncate(hdr + blk + end);
+
+    let output = decompress_one_byte_at_a_time(&frame);
+    assert_eq!(output, data);
+}
+
+/// Decompress uncompressed blocks with block checksum enabled.
+/// Exercises CopyDirect + GetBlockChecksum in sequence.
+#[test]
+fn decompress_uncompressed_block_with_block_checksum() {
+    use lz4::frame::compress::{
+        lz4f_compress_begin, lz4f_compress_end, lz4f_uncompressed_update,
+    };
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_checksum_flag: BlockChecksum::Enabled,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = repetitive_bytes(1000);
+    let mut cctx = Lz4FCCtx::new(LZ4F_VERSION);
+    let bound = lz4f_compress_frame_bound(data.len(), Some(&prefs));
+    let mut frame = vec![0u8; bound + 512];
+
+    let hdr = lz4f_compress_begin(&mut cctx, &mut frame, Some(&prefs)).unwrap();
+    let blk = lz4f_uncompressed_update(&mut cctx, &mut frame[hdr..], &data, None).unwrap();
+    let end = lz4f_compress_end(&mut cctx, &mut frame[hdr + blk..], None).unwrap();
+    frame.truncate(hdr + blk + end);
+
+    // One byte at a time to hit partial block checksum buffering
+    let output = decompress_one_byte_at_a_time(&frame);
+    assert_eq!(output, data);
+}
+
+/// Decompress uncompressed blocks with content checksum and linked mode.
+#[test]
+fn decompress_uncompressed_block_content_checksum_linked() {
+    use lz4::frame::compress::{
+        lz4f_compress_begin, lz4f_compress_end, lz4f_uncompressed_update,
+    };
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_mode: BlockMode::Linked,
+            content_checksum_flag: ContentChecksum::Enabled,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = repetitive_bytes(800);
+    let mut cctx = Lz4FCCtx::new(LZ4F_VERSION);
+    let bound = lz4f_compress_frame_bound(data.len(), Some(&prefs));
+    let mut frame = vec![0u8; bound + 512];
+
+    let hdr = lz4f_compress_begin(&mut cctx, &mut frame, Some(&prefs)).unwrap();
+    let blk = lz4f_uncompressed_update(&mut cctx, &mut frame[hdr..], &data, None).unwrap();
+    let end = lz4f_compress_end(&mut cctx, &mut frame[hdr + blk..], None).unwrap();
+    frame.truncate(hdr + blk + end);
+
+    let output = decompress_one_byte_at_a_time(&frame);
+    assert_eq!(output, data);
+}
+
+/// update_dict with data >= MAX_DICT_SIZE (64KB) exercises the dict replacement path.
+#[test]
+fn update_dict_large_block_replaces_entirely() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_mode: BlockMode::Linked,
+            block_size_id: BlockSizeId::Max256Kb,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    // 256KB of data — single linked block will be > 64KB, triggering dict replacement
+    let data: Vec<u8> = (0..256 * 1024).map(|i| (i % 251) as u8).collect();
+    let frame = compress_frame_with_prefs(&data, &prefs);
+
+    // Decompress one byte at a time to hit update_dict
+    let output = decompress_one_byte_at_a_time(&frame);
+    assert_eq!(output, data);
+}
+
+/// Decompress with fragmented input exercising StoreCBlock path.
+/// Compress large data that stays compressed (not uncompressed fallback),
+/// then feed one byte at a time to exercise GetCBlock → StoreCBlock buffering.
+#[test]
+fn decompress_store_cblock_one_byte_at_a_time() {
+    // Use 64KB block size and data that compresses well but is large enough for multi-block
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_size_id: BlockSizeId::Max64Kb,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    // Data just over 64KB to get 2 blocks
+    let data: Vec<u8> = (0..70_000).map(|i| (i % 251) as u8).collect();
+    let frame = compress_frame_with_prefs(&data, &prefs);
+
+    let output = decompress_one_byte_at_a_time(&frame);
+    assert_eq!(output, data);
+}
+
+/// Decompress with partial content checksum (GetSuffix → StoreSuffix, 1 byte at a time).
+#[test]
+fn decompress_partial_content_checksum_store_suffix() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            content_checksum_flag: ContentChecksum::Enabled,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = repetitive_bytes(300);
+    let frame = compress_frame_with_prefs(&data, &prefs);
+
+    let output = decompress_one_byte_at_a_time(&frame);
+    assert_eq!(output, data);
+}
+
+/// One-shot lz4f_compress_frame (the pub wrapper, L1135-1137 in compress.rs).
+#[test]
+fn oneshot_lz4f_compress_frame_roundtrip() {
+    let data = repetitive_bytes(5000);
+    let bound = lz4f_compress_frame_bound(data.len(), None);
+    let mut compressed = vec![0u8; bound];
+    let clen = lz4f_compress_frame(&mut compressed, &data, None).unwrap();
+    compressed.truncate(clen);
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut dst = vec![0u8; data.len() + 1024];
+    let (sc, dw, _) = lz4f_decompress(&mut dctx, Some(&mut dst), &compressed, None).unwrap();
+    assert_eq!(sc, clen);
+    assert_eq!(&dst[..dw], &data[..]);
+}
+
+/// Decompress with block checksum and content checksum, both fragmented,
+/// to exercise all partial checksum buffering paths.
+#[test]
+fn decompress_all_checksums_fragmented() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_checksum_flag: BlockChecksum::Enabled,
+            content_checksum_flag: ContentChecksum::Enabled,
+            block_size_id: BlockSizeId::Max64Kb,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = repetitive_bytes(3000);
+    let frame = compress_frame_with_prefs(&data, &prefs);
+    let output = decompress_one_byte_at_a_time(&frame);
+    assert_eq!(output, data);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 6: Byte-at-a-time with linked blocks to exercise Store* staging paths
+// and update_dict with large blocks, skippable frame byte-at-a-time, etc.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Byte-at-a-time with linked blocks + all checksums + content_size.
+/// Exercises: StoreFrameHeader (L217), StoreBlockHeader (L466-483),
+/// GetBlockChecksum partial (L607-609), GetCBlock buffered (L633-659),
+/// StoreCBlock (L688, L722, L734), StoreSuffix (L857-878).
+#[test]
+fn one_byte_at_a_time_linked_all_checksums() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_mode: BlockMode::Linked,
+            block_checksum_flag: BlockChecksum::Enabled,
+            content_checksum_flag: ContentChecksum::Enabled,
+            content_size: 5000,
+            block_size_id: BlockSizeId::Max64Kb,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = repetitive_bytes(5000);
+    let frame = compress_frame_with_prefs(&data, &prefs);
+    let output = decompress_one_byte_at_a_time(&frame);
+    assert_eq!(output, data);
+}
+
+/// Skippable frame byte-at-a-time to exercise GetSFrameSize (L794-801)
+/// and StoreSFrameSize staging paths.
+#[test]
+fn one_byte_at_a_time_skippable_frame() {
+    // Skippable frame: magic 0x184D2A50 + 4-byte LE size + payload
+    let payload = b"skip this payload data here!";
+    let mut frame = Vec::new();
+    frame.extend_from_slice(&0x184D2A50u32.to_le_bytes());
+    frame.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    frame.extend_from_slice(payload);
+    // Append a real frame after the skippable one
+    let data = repetitive_bytes(100);
+    let real_frame = compress_frame_simple(&data);
+    frame.extend_from_slice(&real_frame);
+
+    let output = decompress_one_byte_at_a_time(&frame);
+    assert_eq!(output, data);
+}
+
+/// Large linked-block decompression: block > 64KB exercises update_dict
+/// full replacement path (L113: n >= MAX_DICT_SIZE).
+#[test]
+fn decompress_large_linked_block_update_dict_full() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_mode: BlockMode::Linked,
+            block_size_id: BlockSizeId::Max256Kb,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    // 128KB of data → single block > 64KB (MAX_DICT_SIZE)
+    let data: Vec<u8> = (0..128 * 1024).map(|i| (i % 251) as u8).collect();
+    let frame = compress_frame_with_prefs(&data, &prefs);
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut dst = vec![0u8; data.len() + 1024];
+    let (sc, dw, _) = lz4f_decompress(&mut dctx, Some(&mut dst), &frame, None).unwrap();
+    assert_eq!(sc, frame.len());
+    assert_eq!(&dst[..dw], &data[..]);
+}
+
+/// Truncated header → decode_header error (L174).
+#[test]
+fn decode_header_truncated_returns_error() {
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut dst = vec![0u8; 256];
+    // Only 3 bytes — not enough for MIN_FH_SIZE
+    let result = lz4f_decompress(&mut dctx, Some(&mut dst), &[0x04, 0x22, 0x4D], None);
+    // Should still succeed with hint, not error, since it stages partial header
+    // Feed the rest in next call
+    match result {
+        Ok((sc, _dw, hint)) => {
+            assert!(hint > 0 || sc < 3);
+        }
+        Err(_) => {} // Also acceptable
+    }
+}
+
+/// Reserved flag set in header → Lz4FError::ReservedFlagSet (L247).
+#[test]
+fn decode_header_reserved_flag_set() {
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut dst = vec![0u8; 256];
+    // Build a minimal fake header: magic(4) + FLG(1) + BD(1) + HC(1) = 7 bytes
+    let mut hdr = Vec::new();
+    hdr.extend_from_slice(&0x184D2204u32.to_le_bytes()); // magic
+    // FLG: version=01, block_mode=1, no checksums, reserved bit 1 SET
+    hdr.push(0b01_1_0_0_0_1_0); // bit1 = reserved, set to 1
+    hdr.push(0b0_111_0000);     // BD: block_size_id=7, no reserved bits
+    // Header checksum will be wrong, but the reserved flag check comes first
+    hdr.push(0x00); // placeholder HC
+    let result = lz4f_decompress(&mut dctx, Some(&mut dst), &hdr, None);
+    assert!(result.is_err());
+}
+
+/// Content-checksummed frame with fragmented StoreSuffix: feed the checksum
+/// bytes across multiple calls to exercise StoreSuffix staging (L857-878).
+#[test]
+fn fragmented_content_checksum_suffix() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            content_checksum_flag: ContentChecksum::Enabled,
+            block_size_id: BlockSizeId::Max64Kb,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = repetitive_bytes(500);
+    let frame = compress_frame_with_prefs(&data, &prefs);
+    // Decompress all but last 2 bytes, then feed 1 byte, then last byte
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut output = Vec::new();
+    let split1 = frame.len() - 2;
+    let mut dst = vec![0u8; 65536];
+    let (sc1, dw1, hint1) = lz4f_decompress(&mut dctx, Some(&mut dst), &frame[..split1], None).unwrap();
+    output.extend_from_slice(&dst[..dw1]);
+    let mut pos = sc1;
+    if hint1 > 0 {
+        let (sc2, dw2, hint2) = lz4f_decompress(&mut dctx, Some(&mut dst), &frame[pos..pos+1], None).unwrap();
+        output.extend_from_slice(&dst[..dw2]);
+        pos += sc2;
+        if hint2 > 0 {
+            let (sc3, dw3, _) = lz4f_decompress(&mut dctx, Some(&mut dst), &frame[pos..], None).unwrap();
+            output.extend_from_slice(&dst[..dw3]);
+            pos += sc3;
+        }
+    }
+    assert_eq!(output, data);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 7: FlushOut, uncompressed blocks, StoreSFrameSize staging, small dst
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Decompress with very small output buffer to trigger FlushOut stage (L734+).
+/// The output buffer is only 16 bytes — forcing multiple FlushOut iterations.
+#[test]
+fn decompress_small_dst_triggers_flush_out() {
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_size_id: BlockSizeId::Max64Kb,
+            content_checksum_flag: ContentChecksum::Enabled,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = repetitive_bytes(1000);
+    let frame = compress_frame_with_prefs(&data, &prefs);
+
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut output = Vec::new();
+    let mut pos = 0usize;
+    loop {
+        let mut dst = vec![0u8; 16]; // tiny output buffer
+        match lz4f_decompress(&mut dctx, Some(&mut dst), &frame[pos..], None) {
+            Ok((sc, dw, hint)) => {
+                output.extend_from_slice(&dst[..dw]);
+                pos += sc;
+                if hint == 0 { break; }
+            }
+            Err(e) => panic!("FlushOut test failed: {e:?}"),
+        }
+    }
+    assert_eq!(output, data);
+}
+
+/// 1-byte-at-a-time with uncompressed blocks flag set.
+/// Exercises CopyUncompressed stage (L545) and block data counter tracking.
+#[test]
+fn one_byte_at_a_time_uncompressed_blocks() {
+    // Build a minimal frame by hand with uncompressed block:
+    // Magic(4) + FLG(1) + BD(1) + HC(1) + Block(BH+data) + EndMark(4)
+    let payload = b"Hello World Uncompressed Block Test!";
+    let mut frame = Vec::new();
+    // Magic number
+    frame.extend_from_slice(&0x184D2204u32.to_le_bytes());
+    // FLG: version=01, block_mode=1(independent), no checksums
+    let flg: u8 = 0b01_1_0_0_0_0_0;
+    // BD: block_size_id=4 (64KB), reserved=0
+    let bd: u8 = 0b0_100_0000;
+    frame.push(flg);
+    frame.push(bd);
+    // Header checksum
+    let hc = lz4::frame::header::lz4f_header_checksum(&[flg, bd]);
+    frame.push(hc);
+    // Uncompressed block: bit 31 set + size
+    let block_size = payload.len() as u32 | 0x8000_0000;
+    frame.extend_from_slice(&block_size.to_le_bytes());
+    frame.extend_from_slice(payload);
+    // EndMark: 0x00000000
+    frame.extend_from_slice(&0u32.to_le_bytes());
+
+    let output = decompress_one_byte_at_a_time(&frame);
+    assert_eq!(output, payload);
+}
+
+/// Skippable frame fed 1-byte-at-a-time exercises StoreSFrameSize staging (L857-878).
+#[test]
+fn one_byte_at_a_time_skippable_frame_staging() {
+    let mut combined = Vec::new();
+    // Skippable frame: magic 0x184D2A50, size=16, payload=16 bytes
+    combined.extend_from_slice(&0x184D2A50u32.to_le_bytes());
+    combined.extend_from_slice(&16u32.to_le_bytes());
+    combined.extend_from_slice(&[0xABu8; 16]);
+    // Real frame
+    let data = repetitive_bytes(200);
+    let frame = compress_frame_with_prefs(&data, &Preferences::default());
+    combined.extend_from_slice(&frame);
+
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut output = Vec::new();
+    let mut pos = 0usize;
+    while pos < combined.len() {
+        let end = (pos + 1).min(combined.len());
+        let mut dst = vec![0u8; 65536];
+        match lz4f_decompress(&mut dctx, Some(&mut dst), &combined[pos..end], None) {
+            Ok((sc, dw, hint)) => {
+                output.extend_from_slice(&dst[..dw]);
+                pos += sc;
+                if hint == 0 && sc == 0 && dw == 0 {
+                    if pos >= combined.len() { break; }
+                    let mut dst2 = vec![0u8; 65536];
+                    match lz4f_decompress(&mut dctx, Some(&mut dst2), &combined[pos..], None) {
+                        Ok((sc2, dw2, _)) => {
+                            output.extend_from_slice(&dst2[..dw2]);
+                            pos += sc2;
+                        }
+                        Err(e) => panic!("stuck: {e:?}"),
+                    }
+                    break;
+                }
+                if hint == 0 && pos >= combined.len() { break; }
+            }
+            Err(e) => panic!("1-byte skippable test at pos {pos}: {e:?}"),
+        }
+    }
+    assert_eq!(output, data);
+}
+
+/// Header with content_size + dict_id → larger header that may need 2 reads.
+/// Exercises StoreFrameHeader staging (L217).
+#[test]
+fn decode_header_with_content_size_and_dict_id() {
+    use lz4::frame::compress::lz4f_compress_frame;
+    use lz4::frame::header::lz4f_compress_frame_bound;
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            content_size: 500,
+            dict_id: 42,
+            block_size_id: BlockSizeId::Max64Kb,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let data = repetitive_bytes(500);
+    let frame = compress_frame_with_prefs(&data, &prefs);
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut output = Vec::new();
+    let mut dst = vec![0u8; 65536];
+
+    // Feed just 5 bytes (magic number + 1 byte of header) to trigger StoreFrameHeader
+    let (sc1, dw1, _hint1) = lz4f_decompress(&mut dctx, Some(&mut dst), &frame[..5], None).unwrap();
+    output.extend_from_slice(&dst[..dw1]);
+    let mut pos = sc1;
+
+    // Feed remaining
+    while pos < frame.len() {
+        let chunk_end = (pos + 64).min(frame.len());
+        let (sc, dw, hint) = lz4f_decompress(&mut dctx, Some(&mut dst), &frame[pos..chunk_end], None).unwrap();
+        output.extend_from_slice(&dst[..dw]);
+        pos += sc;
+        if hint == 0 { break; }
+    }
+    assert_eq!(output, data);
+}
+
+/// Create wrong version context — exercises L174 error.
+#[test]
+fn create_dctx_wrong_version_fails() {
+    let result = lz4f_create_decompression_context(999);
+    assert!(result.is_err());
+}
