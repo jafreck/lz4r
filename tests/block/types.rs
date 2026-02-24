@@ -693,7 +693,9 @@ fn make_reference_overlap(src: &[u8], offset: usize, len: usize) -> Vec<u8> {
 fn memcpy_using_offset_offset_3() {
     // Pattern: "abc" repeated with offset 3
     let mut buf = vec![0u8; 256];
-    buf[0] = b'a'; buf[1] = b'b'; buf[2] = b'c';
+    buf[0] = b'a';
+    buf[1] = b'b';
+    buf[2] = b'c';
     let dst_start = 3usize;
     let copy_len = 64usize;
     let expected = make_reference_overlap(&buf[..3], 3, copy_len);
@@ -711,7 +713,9 @@ fn memcpy_using_offset_offset_3() {
 #[test]
 fn memcpy_using_offset_offset_5() {
     let mut buf = vec![0u8; 256];
-    for i in 0..5 { buf[i] = (i as u8 + 1) * 10; }
+    for i in 0..5 {
+        buf[i] = (i as u8 + 1) * 10;
+    }
     let dst_start = 5usize;
     let copy_len = 40usize;
     let expected = make_reference_overlap(&buf[..5], 5, copy_len);
@@ -729,7 +733,9 @@ fn memcpy_using_offset_offset_5() {
 #[test]
 fn memcpy_using_offset_offset_6() {
     let mut buf = vec![0u8; 256];
-    for i in 0..6 { buf[i] = (i as u8 + 1) * 11; }
+    for i in 0..6 {
+        buf[i] = (i as u8 + 1) * 11;
+    }
     let dst_start = 6usize;
     let copy_len = 48usize;
     let expected = make_reference_overlap(&buf[..6], 6, copy_len);
@@ -747,7 +753,9 @@ fn memcpy_using_offset_offset_6() {
 #[test]
 fn memcpy_using_offset_offset_7() {
     let mut buf = vec![0u8; 256];
-    for i in 0..7 { buf[i] = (i as u8 + 1) * 13; }
+    for i in 0..7 {
+        buf[i] = (i as u8 + 1) * 13;
+    }
     let dst_start = 7usize;
     let copy_len = 56usize;
     let expected = make_reference_overlap(&buf[..7], 7, copy_len);
@@ -766,7 +774,9 @@ fn memcpy_using_offset_offset_7() {
 fn memcpy_using_offset_offset_8_fast_path() {
     // offset >= 8 uses the simple non-overlapping copy path
     let mut buf = vec![0u8; 256];
-    for i in 0..8 { buf[i] = (i as u8 + 1) * 17; }
+    for i in 0..8 {
+        buf[i] = (i as u8 + 1) * 17;
+    }
     let dst_start = 8usize;
     let copy_len = 32usize;
     let expected = make_reference_overlap(&buf[..8], 8, copy_len);
@@ -784,7 +794,9 @@ fn memcpy_using_offset_offset_8_fast_path() {
 #[test]
 fn memcpy_using_offset_offset_16_large() {
     let mut buf = vec![0u8; 512];
-    for i in 0..16 { buf[i] = (i as u8) * 7; }
+    for i in 0..16 {
+        buf[i] = (i as u8) * 7;
+    }
     let dst_start = 16usize;
     let copy_len = 128usize;
     let expected = make_reference_overlap(&buf[..16], 16, copy_len);

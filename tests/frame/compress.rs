@@ -14,9 +14,7 @@ use lz4::frame::compress::{
     lz4f_create_compression_context, lz4f_flush, lz4f_free_compression_context,
     lz4f_uncompressed_update, CompressOptions, LZ4F_MAGIC_NUMBER, LZ4F_VERSION,
 };
-use lz4::frame::decompress::{
-    lz4f_decompress, lz4f_reset_decompression_context, Lz4FDCtx,
-};
+use lz4::frame::decompress::{lz4f_decompress, lz4f_reset_decompression_context, Lz4FDCtx};
 use lz4::frame::header::lz4f_compress_frame_bound;
 use lz4::frame::types::{
     BlockChecksum, BlockMode, BlockSizeId, ContentChecksum, FrameInfo, Lz4FCCtx, Preferences,
@@ -1394,7 +1392,8 @@ fn linked_blocks_non_stable_src_dict_save() {
             stable_src: false,
             ..Default::default()
         };
-        let blk = lz4f_compress_update(&mut cctx, &mut dst[written..], &block, Some(&opts)).unwrap();
+        let blk =
+            lz4f_compress_update(&mut cctx, &mut dst[written..], &block, Some(&opts)).unwrap();
         written += blk;
         all_data.extend_from_slice(&block);
     }
@@ -1443,4 +1442,3 @@ fn hc_linked_blocks_multiblock() {
     let (_, dw, _) = lz4f_decompress(&mut dctx, Some(&mut out), &dst[..written], None).unwrap();
     assert_eq!(&out[..dw], &all_data[..]);
 }
-

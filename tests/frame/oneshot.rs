@@ -71,11 +71,13 @@ fn compress_frame_to_vec_incompressible_data() {
     // Random-like data: each byte unique enough to prevent compression
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
-    let data: Vec<u8> = (0..512).map(|i| {
-        let mut h = DefaultHasher::new();
-        i.hash(&mut h);
-        (h.finish() & 0xFF) as u8
-    }).collect();
+    let data: Vec<u8> = (0..512)
+        .map(|i| {
+            let mut h = DefaultHasher::new();
+            i.hash(&mut h);
+            (h.finish() & 0xFF) as u8
+        })
+        .collect();
     let compressed = compress_frame_to_vec(&data);
     assert!(!compressed.is_empty());
     let decompressed = decompress_frame_to_vec(&compressed).unwrap();

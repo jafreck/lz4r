@@ -635,6 +635,8 @@ fn custom_mem_debug_format() {
     let cm = CustomMem::default();
     let s = format!("{:?}", cm);
     // Should contain the struct name and field information
-    assert!(s.contains("CustomMem"), "Debug output should contain 'CustomMem': {s}");
+    assert!(
+        s.contains("CustomMem"),
+        "Debug output should contain 'CustomMem': {s}"
+    );
 }
-

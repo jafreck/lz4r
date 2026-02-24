@@ -1011,7 +1011,10 @@ fn compress_filename_remove_src_file() {
     prefs.remove_src_file = true;
     compress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), 1, &prefs)
         .expect("compress with remove_src_file must succeed");
-    assert!(!src.exists(), "source file should be removed after compression");
+    assert!(
+        !src.exists(),
+        "source file should be removed after compression"
+    );
     let out = std::fs::read(&dst).unwrap();
     let dec = lz4::frame::decompress_frame_to_vec(&out).unwrap();
     assert_eq!(dec, data.as_ref());
@@ -1043,7 +1046,10 @@ fn compress_filename_with_dictionary() {
         .expect("compress with dictionary must succeed");
 
     let out = std::fs::read(&dst).unwrap();
-    assert!(!out.is_empty(), "compressed output with dict should not be empty");
+    assert!(
+        !out.is_empty(),
+        "compressed output with dict should not be empty"
+    );
 }
 
 /// Compress with large dictionary (>64KB) exercises the circular buffer wrap path.
@@ -1495,4 +1501,3 @@ fn compress_real_file_copies_stat() {
         .expect("real file compress must succeed");
     assert!(dst.exists());
 }
-

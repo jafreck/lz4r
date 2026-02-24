@@ -629,7 +629,10 @@ fn decompress_filename_pass_through_non_lz4_file() {
 
     let result = decompress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), &prefs);
     // pass_through should succeed and copy the data as-is
-    assert!(result.is_ok(), "pass_through on non-LZ4 file must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "pass_through on non-LZ4 file must succeed: {result:?}"
+    );
     let out = fs::read(&dst).unwrap();
     assert_eq!(out, data);
 }
@@ -665,7 +668,10 @@ fn decompress_filename_remove_src_file() {
 
     let result = decompress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), &prefs);
     assert!(result.is_ok());
-    assert!(!src.exists(), "source file should be removed after decompression");
+    assert!(
+        !src.exists(),
+        "source file should be removed after decompression"
+    );
     let out = fs::read(&dst).unwrap();
     assert_eq!(out, data.as_ref());
 }
@@ -733,7 +739,10 @@ fn decompress_filename_skippable_frame_prepended() {
 
     let prefs = Prefs::default();
     let result = decompress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), &prefs);
-    assert!(result.is_ok(), "skippable + frame must decompress: {result:?}");
+    assert!(
+        result.is_ok(),
+        "skippable + frame must decompress: {result:?}"
+    );
     let out = fs::read(&dst).unwrap();
     assert_eq!(out, data.as_ref());
 }
@@ -771,7 +780,10 @@ fn decompress_filename_sparse_zeros() {
     prefs.sparse_file_support = 2; // auto-select sparse
 
     let result = decompress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), &prefs);
-    assert!(result.is_ok(), "sparse decompression must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "sparse decompression must succeed: {result:?}"
+    );
     let out = fs::read(&dst).unwrap();
     assert_eq!(out, data);
 }
@@ -825,12 +837,11 @@ fn decompress_filename_test_mode() {
     let mut prefs = Prefs::default();
     prefs.test_mode = true;
 
-    let result = decompress_filename(
-        src.to_str().unwrap(),
-        "/dev/null",
-        &prefs,
+    let result = decompress_filename(src.to_str().unwrap(), "/dev/null", &prefs);
+    assert!(
+        result.is_ok(),
+        "test mode decompress should succeed: {result:?}"
     );
-    assert!(result.is_ok(), "test mode decompress should succeed: {result:?}");
 }
 
 /// Decompress legacy format with block checksum.
@@ -862,7 +873,10 @@ fn decompress_filename_sparse_forced() {
     prefs.sparse_file_support = 2; // forced
 
     let result = decompress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), &prefs);
-    assert!(result.is_ok(), "sparse forced decompress must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "sparse forced decompress must succeed: {result:?}"
+    );
     let output = fs::read(&dst).unwrap();
     assert_eq!(output, data);
 }
@@ -902,7 +916,10 @@ fn decompress_filename_remove_src() {
     prefs.remove_src_file = true;
 
     let result = decompress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), &prefs);
-    assert!(result.is_ok(), "decompress with remove should succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "decompress with remove should succeed: {result:?}"
+    );
     assert!(dst.exists());
     assert!(!src.exists(), "source should be removed");
 }
@@ -926,13 +943,21 @@ fn decompress_frame_with_block_checksum() {
     };
     let bound = lz4::frame::header::lz4f_compress_frame_bound(data.len(), Some(&prefs_frame));
     let mut compressed = vec![0u8; bound];
-    let n = lz4::frame::compress::lz4f_compress_frame(&mut compressed, &data, Some(&prefs_frame)).unwrap();
+    let n = lz4::frame::compress::lz4f_compress_frame(&mut compressed, &data, Some(&prefs_frame))
+        .unwrap();
     compressed.truncate(n);
     fs::write(&src_path, &compressed).unwrap();
 
     let prefs = Prefs::default();
-    let result = decompress_filename(src_path.to_str().unwrap(), dst_path.to_str().unwrap(), &prefs);
-    assert!(result.is_ok(), "block checksum decompress must succeed: {result:?}");
+    let result = decompress_filename(
+        src_path.to_str().unwrap(),
+        dst_path.to_str().unwrap(),
+        &prefs,
+    );
+    assert!(
+        result.is_ok(),
+        "block checksum decompress must succeed: {result:?}"
+    );
     assert_eq!(fs::read(&dst_path).unwrap(), data);
 }
 
@@ -962,8 +987,15 @@ fn decompress_skippable_then_standard_frame() {
 
     fs::write(&src_path, &combined).unwrap();
     let prefs = Prefs::default();
-    let result = decompress_filename(src_path.to_str().unwrap(), dst_path.to_str().unwrap(), &prefs);
-    assert!(result.is_ok(), "skip+standard decompress must succeed: {result:?}");
+    let result = decompress_filename(
+        src_path.to_str().unwrap(),
+        dst_path.to_str().unwrap(),
+        &prefs,
+    );
+    assert!(
+        result.is_ok(),
+        "skip+standard decompress must succeed: {result:?}"
+    );
     assert_eq!(fs::read(&dst_path).unwrap(), data);
 }
 
@@ -983,7 +1015,11 @@ fn decompress_pass_through_non_lz4_file() {
     prefs.overwrite = true;
     prefs.test_mode = false;
 
-    let result = decompress_filename(src_path.to_str().unwrap(), dst_path.to_str().unwrap(), &prefs);
+    let result = decompress_filename(
+        src_path.to_str().unwrap(),
+        dst_path.to_str().unwrap(),
+        &prefs,
+    );
     assert!(result.is_ok(), "pass_through must succeed: {result:?}");
     assert_eq!(fs::read(&dst_path).unwrap(), data.as_slice());
 }
@@ -1006,7 +1042,8 @@ fn decompress_multiblock_frame() {
         compressed_path.to_str().unwrap(),
         1,
         &cprefs,
-    ).unwrap();
+    )
+    .unwrap();
 
     let dst_path = dir.path().join("large.out");
     let prefs = Prefs::default();
@@ -1015,7 +1052,10 @@ fn decompress_multiblock_frame() {
         dst_path.to_str().unwrap(),
         &prefs,
     );
-    assert!(result.is_ok(), "multiblock decompress must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "multiblock decompress must succeed: {result:?}"
+    );
     assert_eq!(fs::read(&dst_path).unwrap(), data);
 }
 
@@ -1040,7 +1080,8 @@ fn decompress_multiblock_with_sparse() {
         compressed_path.to_str().unwrap(),
         1,
         &cprefs,
-    ).unwrap();
+    )
+    .unwrap();
 
     let dst_path = dir.path().join("sparse.out");
     let mut prefs = Prefs::default();
@@ -1054,7 +1095,7 @@ fn decompress_multiblock_with_sparse() {
     assert_eq!(fs::read(&dst_path).unwrap(), data);
 }
 
-/// Decompress with content_checksum + block_checksum + linked blocks 
+/// Decompress with content_checksum + block_checksum + linked blocks
 /// exercises all checksum verification and dict update paths in decompress_loop.
 #[test]
 fn decompress_all_features_multiblock() {
@@ -1076,7 +1117,8 @@ fn decompress_all_features_multiblock() {
         compressed_path.to_str().unwrap(),
         1,
         &cprefs,
-    ).unwrap();
+    )
+    .unwrap();
 
     let dst_path = dir.path().join("allfeats.out");
     let prefs = Prefs::default();
@@ -1085,7 +1127,10 @@ fn decompress_all_features_multiblock() {
         dst_path.to_str().unwrap(),
         &prefs,
     );
-    assert!(result.is_ok(), "all features decompress must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "all features decompress must succeed: {result:?}"
+    );
     assert_eq!(fs::read(&dst_path).unwrap(), data);
 }
 
@@ -1099,7 +1144,11 @@ fn decompress_non_lz4_without_passthrough_fails() {
     fs::write(&src_path, b"This is not LZ4 data").unwrap();
 
     let prefs = Prefs::default();
-    let result = decompress_filename(src_path.to_str().unwrap(), dst_path.to_str().unwrap(), &prefs);
+    let result = decompress_filename(
+        src_path.to_str().unwrap(),
+        dst_path.to_str().unwrap(),
+        &prefs,
+    );
     assert!(result.is_err(), "non-LZ4 without pass_through must fail");
 }
 
@@ -1119,7 +1168,10 @@ fn decompress_remove_src_file() {
     prefs.remove_src_file = true;
     let result = decompress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), &prefs);
     assert!(result.is_ok());
-    assert!(!src.exists(), "source should be deleted after decompress --rm");
+    assert!(
+        !src.exists(),
+        "source should be deleted after decompress --rm"
+    );
     assert_eq!(fs::read(&dst).unwrap(), data);
 }
 
@@ -1236,11 +1288,7 @@ fn decompress_pass_through_non_lz4() {
     let mut prefs = Prefs::default();
     prefs.pass_through = true;
     prefs.overwrite = true;
-    let result = decompress_filename(
-        src.to_str().unwrap(),
-        dst.to_str().unwrap(),
-        &prefs,
-    );
+    let result = decompress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), &prefs);
     // pass_through should copy the file
     assert!(result.is_ok());
     assert_eq!(fs::read(&dst).unwrap(), content);
@@ -1260,11 +1308,7 @@ fn decompress_with_sparse_enabled() {
     let mut prefs = Prefs::default();
     prefs.sparse_file_support = 1;
     prefs.overwrite = true;
-    let result = decompress_filename(
-        src.to_str().unwrap(),
-        dst.to_str().unwrap(),
-        &prefs,
-    );
+    let result = decompress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), &prefs);
     assert!(result.is_ok());
     assert_eq!(fs::read(&dst).unwrap(), data);
 }
@@ -1296,11 +1340,7 @@ fn decompress_legacy_then_standard() {
     fs::write(&src, &data).unwrap();
     let mut prefs = Prefs::default();
     prefs.overwrite = true;
-    let result = decompress_filename(
-        src.to_str().unwrap(),
-        dst.to_str().unwrap(),
-        &prefs,
-    );
+    let result = decompress_filename(src.to_str().unwrap(), dst.to_str().unwrap(), &prefs);
     // Exercising the dispatch path is what matters
     if let Ok(_stats) = result {
         let out = fs::read(&dst).unwrap();

@@ -1392,7 +1392,10 @@ fn compress_hc_dest_size_fill_output_tiny_dst() {
     };
     // FillOutput: should produce some output, consuming only part of input
     if n > 0 {
-        assert!(src_size <= src.len() as i32, "FillOutput should consume partial input");
+        assert!(
+            src_size <= src.len() as i32,
+            "FillOutput should consume partial input"
+        );
     }
 }
 
@@ -1443,7 +1446,10 @@ fn load_dict_hc_lz4mid_level_exercises_fill_htable() {
             dst.len() as i32,
         )
     };
-    assert!(n > 0, "compression after LZ4Mid load_dict must succeed: {n}");
+    assert!(
+        n > 0,
+        "compression after LZ4Mid load_dict must succeed: {n}"
+    );
 }
 
 /// load_dict_hc with large dict (>32KB) exercises fill_htable fine-pass.
@@ -1557,7 +1563,10 @@ fn save_dict_hc_larger_than_prefix() {
     let mut save_buf = vec![0u8; 8192];
     // Request more than was compressed
     let saved = unsafe { save_dict_hc(&mut stream, save_buf.as_mut_ptr(), save_buf.len() as i32) };
-    assert!(saved >= 0 && saved <= 64, "saved must not exceed prefix: {saved}");
+    assert!(
+        saved >= 0 && saved <= 64,
+        "saved must not exceed prefix: {saved}"
+    );
 }
 
 /// Multi-block streaming with save_dict_hc between blocks.
@@ -1654,11 +1663,18 @@ fn compress_hc_dest_size_fill_output_hash_chain_overflow() {
     let mut src_size = src.len() as i32;
     let n = unsafe {
         compress_hc_dest_size(
-            &mut stream, src.as_ptr(), dst.as_mut_ptr(),
-            &mut src_size, dst.len() as i32, 4,
+            &mut stream,
+            src.as_ptr(),
+            dst.as_mut_ptr(),
+            &mut src_size,
+            dst.len() as i32,
+            4,
         )
     };
-    assert!(n > 0, "FillOutput hash_chain overflow must produce output: {n}");
+    assert!(
+        n > 0,
+        "FillOutput hash_chain overflow must produce output: {n}"
+    );
 }
 
 /// FillOutput overflow at level 2 (lz4mid) — tight buffer mid-stream.
@@ -1670,8 +1686,12 @@ fn compress_hc_dest_size_fill_output_lz4mid_overflow() {
     let mut src_size = src.len() as i32;
     let n = unsafe {
         compress_hc_dest_size(
-            &mut stream, src.as_ptr(), dst.as_mut_ptr(),
-            &mut src_size, dst.len() as i32, 2,
+            &mut stream,
+            src.as_ptr(),
+            dst.as_mut_ptr(),
+            &mut src_size,
+            dst.len() as i32,
+            2,
         )
     };
     assert!(n > 0, "FillOutput lz4mid must produce output: {n}");
@@ -1686,8 +1706,12 @@ fn compress_hc_dest_size_fill_output_optimal_overflow() {
     let mut src_size = src.len() as i32;
     let n = unsafe {
         compress_hc_dest_size(
-            &mut stream, src.as_ptr(), dst.as_mut_ptr(),
-            &mut src_size, dst.len() as i32, 10,
+            &mut stream,
+            src.as_ptr(),
+            dst.as_mut_ptr(),
+            &mut src_size,
+            dst.len() as i32,
+            10,
         )
     };
     assert!(n > 0, "FillOutput optimal must produce output: {n}");
@@ -1703,8 +1727,12 @@ fn compress_hc_dest_size_fill_output_final_run_truncation() {
     let mut src_size = src.len() as i32;
     let n = unsafe {
         compress_hc_dest_size(
-            &mut stream, src.as_ptr(), dst.as_mut_ptr(),
-            &mut src_size, dst.len() as i32, 6,
+            &mut stream,
+            src.as_ptr(),
+            dst.as_mut_ptr(),
+            &mut src_size,
+            dst.len() as i32,
+            6,
         )
     };
     if n > 0 {
@@ -1723,8 +1751,12 @@ fn compress_hc_dest_size_fill_output_at_each_level() {
         let mut src_size = src.len() as i32;
         let n = unsafe {
             compress_hc_dest_size(
-                &mut stream, src.as_ptr(), dst.as_mut_ptr(),
-                &mut src_size, target as i32, level,
+                &mut stream,
+                src.as_ptr(),
+                dst.as_mut_ptr(),
+                &mut src_size,
+                target as i32,
+                level,
             )
         };
         assert!(n >= 0, "FillOutput at level {level} should not crash");
@@ -1753,11 +1785,18 @@ fn favor_dec_speed_match_cap_optimal() {
     favor_decompression_speed(&mut stream, true);
     let n = unsafe {
         compress_hc_ext_state_fast_reset(
-            &mut stream, src.as_ptr(), dst.as_mut_ptr(),
-            src.len() as i32, dst.len() as i32, 11,
+            &mut stream,
+            src.as_ptr(),
+            dst.as_mut_ptr(),
+            src.len() as i32,
+            dst.len() as i32,
+            11,
         )
     };
-    assert!(n > 0, "favor_dec_speed with optimal level must succeed: {n}");
+    assert!(
+        n > 0,
+        "favor_dec_speed with optimal level must succeed: {n}"
+    );
     let out = roundtrip_decompress(&dst, n as usize, src.len());
     assert_eq!(out, src);
 }
@@ -1776,8 +1815,11 @@ fn streaming_lz4mid_non_contiguous_ext_dict() {
     let mut dst1 = vec![0u8; 8192];
     let n1 = unsafe {
         compress_hc_continue(
-            &mut stream, block1.as_ptr(), dst1.as_mut_ptr(),
-            block1.len() as i32, dst1.len() as i32,
+            &mut stream,
+            block1.as_ptr(),
+            dst1.as_mut_ptr(),
+            block1.len() as i32,
+            dst1.len() as i32,
         )
     };
     assert!(n1 > 0);
@@ -1786,8 +1828,11 @@ fn streaming_lz4mid_non_contiguous_ext_dict() {
     let mut dst2 = vec![0u8; 8192];
     let n2 = unsafe {
         compress_hc_continue(
-            &mut stream, block2.as_ptr(), dst2.as_mut_ptr(),
-            block2.len() as i32, dst2.len() as i32,
+            &mut stream,
+            block2.as_ptr(),
+            dst2.as_mut_ptr(),
+            block2.len() as i32,
+            dst2.len() as i32,
         )
     };
     assert!(n2 > 0);
@@ -1805,8 +1850,11 @@ fn streaming_hc_level4_non_contiguous_ext_dict() {
     let mut dst1 = vec![0u8; 8192];
     let n1 = unsafe {
         compress_hc_continue(
-            &mut stream, block1.as_ptr(), dst1.as_mut_ptr(),
-            block1.len() as i32, dst1.len() as i32,
+            &mut stream,
+            block1.as_ptr(),
+            dst1.as_mut_ptr(),
+            block1.len() as i32,
+            dst1.len() as i32,
         )
     };
     assert!(n1 > 0);
@@ -1814,8 +1862,11 @@ fn streaming_hc_level4_non_contiguous_ext_dict() {
     let mut dst2 = vec![0u8; 8192];
     let n2 = unsafe {
         compress_hc_continue(
-            &mut stream, block2.as_ptr(), dst2.as_mut_ptr(),
-            block2.len() as i32, dst2.len() as i32,
+            &mut stream,
+            block2.as_ptr(),
+            dst2.as_mut_ptr(),
+            block2.len() as i32,
+            dst2.len() as i32,
         )
     };
     assert!(n2 > 0);
@@ -1832,8 +1883,12 @@ fn reset_stream_hc_fast_dirty_stream() {
     let mut tiny_dst = vec![0u8; 4]; // way too small, forces failure
     let n = unsafe {
         compress_hc_ext_state(
-            &mut stream, src.as_ptr(), tiny_dst.as_mut_ptr(),
-            src.len() as i32, tiny_dst.len() as i32, 4,
+            &mut stream,
+            src.as_ptr(),
+            tiny_dst.as_mut_ptr(),
+            src.len() as i32,
+            tiny_dst.len() as i32,
+            4,
         )
     };
     // LimitedOutput returns 0 on failure, which marks the stream as dirty
@@ -1846,8 +1901,12 @@ fn reset_stream_hc_fast_dirty_stream() {
     let mut dst = vec![0u8; 1024];
     let n2 = unsafe {
         compress_hc_ext_state_fast_reset(
-            &mut stream, src.as_ptr(), dst.as_mut_ptr(),
-            src.len() as i32, dst.len() as i32, 4,
+            &mut stream,
+            src.as_ptr(),
+            dst.as_mut_ptr(),
+            src.len() as i32,
+            dst.len() as i32,
+            4,
         )
     };
     assert!(n2 > 0, "stream must be usable after dirty reset: {n2}");
@@ -1866,8 +1925,11 @@ fn streaming_save_dict_lz4mid_continue() {
     let mut dst1 = vec![0u8; 16384];
     let n1 = unsafe {
         compress_hc_continue(
-            &mut stream, block1.as_ptr(), dst1.as_mut_ptr(),
-            block1.len() as i32, dst1.len() as i32,
+            &mut stream,
+            block1.as_ptr(),
+            dst1.as_mut_ptr(),
+            block1.len() as i32,
+            dst1.len() as i32,
         )
     };
     assert!(n1 > 0);
@@ -1878,8 +1940,11 @@ fn streaming_save_dict_lz4mid_continue() {
     let mut dst2 = vec![0u8; 16384];
     let n2 = unsafe {
         compress_hc_continue(
-            &mut stream, block2.as_ptr(), dst2.as_mut_ptr(),
-            block2.len() as i32, dst2.len() as i32,
+            &mut stream,
+            block2.as_ptr(),
+            dst2.as_mut_ptr(),
+            block2.len() as i32,
+            dst2.len() as i32,
         )
     };
     assert!(n2 > 0);
@@ -1904,11 +1969,17 @@ fn compress_hc_continue_dest_size_fill_output_levels() {
         let mut src_size = src.len() as i32;
         let n = unsafe {
             compress_hc_continue_dest_size(
-                &mut stream, src.as_ptr(), dst.as_mut_ptr(),
-                &mut src_size, target as i32,
+                &mut stream,
+                src.as_ptr(),
+                dst.as_mut_ptr(),
+                &mut src_size,
+                target as i32,
             )
         };
-        assert!(n >= 0, "FillOutput continue_dest_size at level {level} should not crash");
+        assert!(
+            n >= 0,
+            "FillOutput continue_dest_size at level {level} should not crash"
+        );
     }
 }
 
@@ -1937,8 +2008,12 @@ fn compress_hash_chain_three_match_overlap() {
     let mut stream = Lz4StreamHc::create().unwrap();
     let n = unsafe {
         compress_hc_ext_state_fast_reset(
-            &mut stream, src.as_ptr(), dst.as_mut_ptr(),
-            src.len() as i32, dst.len() as i32, 4,
+            &mut stream,
+            src.as_ptr(),
+            dst.as_mut_ptr(),
+            src.len() as i32,
+            dst.len() as i32,
+            4,
         )
     };
     assert!(n > 0);
@@ -1960,8 +2035,11 @@ fn repeating_pattern_across_dict_prefix_boundary() {
     let mut dst = vec![0u8; 8192];
     let n = unsafe {
         compress_hc_continue(
-            &mut stream, src.as_ptr(), dst.as_mut_ptr(),
-            src.len() as i32, dst.len() as i32,
+            &mut stream,
+            src.as_ptr(),
+            dst.as_mut_ptr(),
+            src.len() as i32,
+            dst.len() as i32,
         )
     };
     assert!(n > 0);
@@ -1986,8 +2064,11 @@ fn ext_dict_repeating_pattern_exercises_search() {
     let mut dst1 = vec![0u8; 8192];
     let n1 = unsafe {
         compress_hc_continue(
-            &mut stream, block1.as_ptr(), dst1.as_mut_ptr(),
-            block1.len() as i32, dst1.len() as i32,
+            &mut stream,
+            block1.as_ptr(),
+            dst1.as_mut_ptr(),
+            block1.len() as i32,
+            dst1.len() as i32,
         )
     };
     assert!(n1 > 0);
@@ -1996,8 +2077,11 @@ fn ext_dict_repeating_pattern_exercises_search() {
     let mut dst2 = vec![0u8; 8192];
     let n2 = unsafe {
         compress_hc_continue(
-            &mut stream, block2.as_ptr(), dst2.as_mut_ptr(),
-            block2.len() as i32, dst2.len() as i32,
+            &mut stream,
+            block2.as_ptr(),
+            dst2.as_mut_ptr(),
+            block2.len() as i32,
+            dst2.len() as i32,
         )
     };
     assert!(n2 > 0);
@@ -2016,12 +2100,16 @@ fn streaming_optimal_save_dict_multi_block() {
         let mut dst = vec![0u8; 8192];
         let n = unsafe {
             compress_hc_continue(
-                &mut stream, block_data.as_ptr(), dst.as_mut_ptr(),
-                block_data.len() as i32, dst.len() as i32,
+                &mut stream,
+                block_data.as_ptr(),
+                dst.as_mut_ptr(),
+                block_data.len() as i32,
+                dst.len() as i32,
             )
         };
         assert!(n > 0);
-        let saved = unsafe { save_dict_hc(&mut stream, save_buf.as_mut_ptr(), save_buf.len() as i32) };
+        let saved =
+            unsafe { save_dict_hc(&mut stream, save_buf.as_mut_ptr(), save_buf.len() as i32) };
         assert!(saved > 0);
     }
 }
@@ -2034,8 +2122,12 @@ fn compress_hc_limited_output_too_small_returns_zero() {
     let mut stream = Lz4StreamHc::create().unwrap();
     let n = unsafe {
         compress_hc_ext_state(
-            &mut stream, src.as_ptr(), dst.as_mut_ptr(),
-            src.len() as i32, dst.len() as i32, 4,
+            &mut stream,
+            src.as_ptr(),
+            dst.as_mut_ptr(),
+            src.len() as i32,
+            dst.len() as i32,
+            4,
         )
     };
     assert_eq!(n, 0, "LimitedOutput should return 0 when buffer too small");
@@ -2049,8 +2141,11 @@ fn compress_hc_all_levels_roundtrip() {
         let mut dst = vec![0u8; 8192];
         let n = unsafe {
             compress_hc(
-                src.as_ptr(), dst.as_mut_ptr(),
-                src.len() as i32, dst.len() as i32, level,
+                src.as_ptr(),
+                dst.as_mut_ptr(),
+                src.len() as i32,
+                dst.len() as i32,
+                level,
             )
         };
         assert!(n > 0, "compress_hc at level {level} must succeed: {n}");
@@ -2073,15 +2168,24 @@ fn compress_hc_levels_3_8_highly_repetitive_data() {
         let mut dst = vec![0u8; 32768];
         let n = unsafe {
             compress_hc(
-                src.as_ptr(), dst.as_mut_ptr(),
-                src.len() as i32, dst.len() as i32, level,
+                src.as_ptr(),
+                dst.as_mut_ptr(),
+                src.len() as i32,
+                dst.len() as i32,
+                level,
             )
         };
-        assert!(n > 0, "compress_hc at level {level} with repetitive data must succeed");
+        assert!(
+            n > 0,
+            "compress_hc at level {level} with repetitive data must succeed"
+        );
         let dec = roundtrip_decompress(&dst, n as usize, src.len());
         assert_eq!(dec, src, "roundtrip failed at level {level}");
         // Highly repetitive data should compress very well
-        assert!(n < 100, "16KB of 0xAA should compress to <100 bytes, got {n}");
+        assert!(
+            n < 100,
+            "16KB of 0xAA should compress to <100 bytes, got {n}"
+        );
     }
 }
 
@@ -2093,11 +2197,17 @@ fn compress_hc_opt_levels_repetitive_data() {
         let mut dst = vec![0u8; 16384];
         let n = unsafe {
             compress_hc(
-                src.as_ptr(), dst.as_mut_ptr(),
-                src.len() as i32, dst.len() as i32, level,
+                src.as_ptr(),
+                dst.as_mut_ptr(),
+                src.len() as i32,
+                dst.len() as i32,
+                level,
             )
         };
-        assert!(n > 0, "compress_hc at level {level} with repetitive data must succeed");
+        assert!(
+            n > 0,
+            "compress_hc at level {level} with repetitive data must succeed"
+        );
         let dec = roundtrip_decompress(&dst, n as usize, src.len());
         assert_eq!(dec, src);
     }
@@ -2124,8 +2234,11 @@ fn compress_hc_continue_multiblock_overlapping_matches() {
         let mut dst = vec![0u8; 4096];
         let n = unsafe {
             compress_hc_continue(
-                &mut stream, chunk.as_ptr(), dst.as_mut_ptr(),
-                chunk.len() as i32, dst.len() as i32,
+                &mut stream,
+                chunk.as_ptr(),
+                dst.as_mut_ptr(),
+                chunk.len() as i32,
+                dst.len() as i32,
             )
         };
         assert!(n > 0, "compress_hc_continue block must succeed");
@@ -2147,15 +2260,20 @@ fn compress_hc_continue_with_attached_dict() {
 
     let mut stream = Lz4StreamHc::create().unwrap();
     reset_stream_hc(&mut stream, 4);
-    unsafe { attach_hc_dictionary(&mut stream, Some(&*dict_stream as *const Lz4StreamHc)); }
+    unsafe {
+        attach_hc_dictionary(&mut stream, Some(&*dict_stream as *const Lz4StreamHc));
+    }
 
     // Compress data that shares patterns with the dict.
     let src: Vec<u8> = (0..2048).map(|i| (i % 251) as u8).collect();
     let mut dst = vec![0u8; 4096];
     let n = unsafe {
         compress_hc_continue(
-            &mut stream, src.as_ptr(), dst.as_mut_ptr(),
-            src.len() as i32, dst.len() as i32,
+            &mut stream,
+            src.as_ptr(),
+            dst.as_mut_ptr(),
+            src.len() as i32,
+            dst.len() as i32,
         )
     };
     assert!(n > 0, "continue with attached dict must succeed: {n}");
@@ -2165,25 +2283,36 @@ fn compress_hc_continue_with_attached_dict() {
     let mut dst2 = vec![0u8; 4096];
     let n2 = unsafe {
         compress_hc_continue(
-            &mut no_dict_stream, src.as_ptr(), dst2.as_mut_ptr(),
-            src.len() as i32, dst2.len() as i32,
+            &mut no_dict_stream,
+            src.as_ptr(),
+            dst2.as_mut_ptr(),
+            src.len() as i32,
+            dst2.len() as i32,
         )
     };
     assert!(n2 > 0);
-    assert!(n <= n2, "with dict should compress at least as well: {n} vs {n2}");
+    assert!(
+        n <= n2,
+        "with dict should compress at least as well: {n} vs {n2}"
+    );
 }
 
 /// Repetitive 2-byte pattern at HC level to trigger rotate_pattern in search.rs.
 #[test]
 fn compress_hc_two_byte_repeating_pattern() {
     // Two-byte pattern: ABABAB...
-    let src: Vec<u8> = (0..8192).map(|i| if i % 2 == 0 { 0xAB } else { 0xCD }).collect();
+    let src: Vec<u8> = (0..8192)
+        .map(|i| if i % 2 == 0 { 0xAB } else { 0xCD })
+        .collect();
     for level in [3, 6, 9] {
         let mut dst = vec![0u8; 16384];
         let n = unsafe {
             compress_hc(
-                src.as_ptr(), dst.as_mut_ptr(),
-                src.len() as i32, dst.len() as i32, level,
+                src.as_ptr(),
+                dst.as_mut_ptr(),
+                src.len() as i32,
+                dst.len() as i32,
+                level,
             )
         };
         assert!(n > 0, "two-byte pattern at level {level} must compress");
@@ -2202,8 +2331,12 @@ fn compress_hc_dest_size_fill_output_repetitive() {
     let mut dst = vec![0u8; target_size];
     let n = unsafe {
         compress_hc_dest_size(
-            &mut stream, src.as_ptr(), dst.as_mut_ptr(),
-            &mut src_consumed, target_size as i32, 4,
+            &mut stream,
+            src.as_ptr(),
+            dst.as_mut_ptr(),
+            &mut src_consumed,
+            target_size as i32,
+            4,
         )
     };
     assert!(n > 0, "FillOutput repetitive must produce output: {n}");
@@ -2227,8 +2360,11 @@ fn compress_hc_continue_multiblock_with_external_dict() {
         let mut dst = vec![0u8; 8192];
         let n = unsafe {
             compress_hc_continue(
-                &mut stream, chunk.as_ptr(), dst.as_mut_ptr(),
-                chunk.len() as i32, dst.len() as i32,
+                &mut stream,
+                chunk.as_ptr(),
+                dst.as_mut_ptr(),
+                chunk.len() as i32,
+                dst.len() as i32,
             )
         };
         assert!(n > 0, "multiblock with ext-dict must succeed");
@@ -2403,11 +2539,9 @@ fn compress_hc_continue_save_dict_cycle() {
         all_compressed.push(dst[..n as usize].to_vec());
 
         // Save dict — this exercises save_dict_hc paths
-        let saved = unsafe {
-            save_dict_hc(&mut stream, dict_buf.as_mut_ptr(), dict_buf.len() as i32)
-        };
+        let saved =
+            unsafe { save_dict_hc(&mut stream, dict_buf.as_mut_ptr(), dict_buf.len() as i32) };
         assert!(saved >= 0, "save_dict must succeed");
     }
     assert_eq!(all_compressed.len(), 8);
 }
-

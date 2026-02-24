@@ -2417,9 +2417,7 @@ fn get_frame_info_fresh_context_normal_path() {
 /// Incompressible data forces uncompressed blocks (CopyDirect path).
 #[test]
 fn decompress_incompressible_data_exercises_copy_direct() {
-    let data: Vec<u8> = (0..1024).map(|i| {
-        ((i * 137 + 59) % 256) as u8
-    }).collect();
+    let data: Vec<u8> = (0..1024).map(|i| ((i * 137 + 59) % 256) as u8).collect();
 
     let prefs = Preferences {
         frame_info: FrameInfo {
@@ -2439,9 +2437,7 @@ fn decompress_incompressible_data_exercises_copy_direct() {
 /// Incompressible data with linked blocks exercises CopyDirect + dict update.
 #[test]
 fn decompress_incompressible_linked_exercises_copy_direct_dict() {
-    let data: Vec<u8> = (0..2048).map(|i| {
-        ((i * 137 + 59) % 256) as u8
-    }).collect();
+    let data: Vec<u8> = (0..2048).map(|i| ((i * 137 + 59) % 256) as u8).collect();
 
     let prefs = Preferences {
         frame_info: FrameInfo {
@@ -2480,12 +2476,16 @@ fn store_suffix_split_1_plus_3() {
     // Feed part 1: everything except last 3 bytes
     loop {
         let remaining = &frame[src_pos..split_point];
-        if remaining.is_empty() { break; }
+        if remaining.is_empty() {
+            break;
+        }
         let mut dst = vec![0u8; 4096];
         match lz4f_decompress(&mut dctx, Some(&mut dst), remaining, None) {
             Ok((sc, dw, _hint)) => {
                 output.extend_from_slice(&dst[..dw]);
-                if sc == 0 { break; } // needs more data
+                if sc == 0 {
+                    break;
+                } // needs more data
                 src_pos += sc;
             }
             Err(e) => panic!("first part failed at pos {src_pos}: {e:?}"),
@@ -2526,12 +2526,16 @@ fn store_suffix_split_3_plus_1() {
     // Feed part 1: everything except last byte
     loop {
         let remaining = &frame[src_pos..split_point];
-        if remaining.is_empty() { break; }
+        if remaining.is_empty() {
+            break;
+        }
         let mut dst = vec![0u8; 4096];
         match lz4f_decompress(&mut dctx, Some(&mut dst), remaining, None) {
             Ok((sc, dw, _hint)) => {
                 output.extend_from_slice(&dst[..dw]);
-                if sc == 0 { break; } // needs more data
+                if sc == 0 {
+                    break;
+                } // needs more data
                 src_pos += sc;
             }
             Err(e) => panic!("first part failed at pos {src_pos}: {e:?}"),
@@ -2575,9 +2579,13 @@ fn flush_out_with_none_dst() {
             Ok((sc, dw, hint)) => {
                 output.extend_from_slice(&tiny_dst[..dw]);
                 src_pos += sc;
-                if hint == 0 { break; }
+                if hint == 0 {
+                    break;
+                }
                 // Try a None dst call - exercises the no-output path
-                if let Ok((sc2, _dw2, _)) = lz4f_decompress(&mut dctx, None, &frame[src_pos..], None) {
+                if let Ok((sc2, _dw2, _)) =
+                    lz4f_decompress(&mut dctx, None, &frame[src_pos..], None)
+                {
                     src_pos += sc2;
                 }
             }
@@ -2600,7 +2608,13 @@ fn decompress_using_dict_mid_stream_does_not_reload() {
     let _ = lz4f_decompress_using_dict(&mut dctx, Some(&mut dst1), header_chunk, &dict, None);
 
     let mut dst2 = vec![0u8; 4096];
-    let _ = lz4f_decompress_using_dict(&mut dctx, Some(&mut dst2), &frame[header_chunk.len()..], &dict, None);
+    let _ = lz4f_decompress_using_dict(
+        &mut dctx,
+        Some(&mut dst2),
+        &frame[header_chunk.len()..],
+        &dict,
+        None,
+    );
 }
 
 /// Skippable frame fed byte-by-byte exercises GetSFrameSize staging.
@@ -2620,9 +2634,13 @@ fn skippable_frame_size_split_across_calls() {
         match lz4f_decompress(&mut dctx, Some(&mut dst), &frame[src_pos..end], None) {
             Ok((sc, _dw, hint)) => {
                 src_pos += sc.max(1);
-                if hint == 0 && src_pos >= frame.len() { break; }
+                if hint == 0 && src_pos >= frame.len() {
+                    break;
+                }
             }
-            Err(_) => { src_pos += 1; }
+            Err(_) => {
+                src_pos += 1;
+            }
         }
     }
 }
@@ -2649,13 +2667,17 @@ fn block_checksum_partial_buffering() {
     let mut src_pos = 0usize;
     while src_pos < frame.len() {
         fed_up_to = (fed_up_to + chunk_size).min(frame.len());
-        if fed_up_to <= src_pos { fed_up_to = frame.len(); }
+        if fed_up_to <= src_pos {
+            fed_up_to = frame.len();
+        }
         let mut dst = vec![0u8; 4096];
         match lz4f_decompress(&mut dctx, Some(&mut dst), &frame[src_pos..fed_up_to], None) {
             Ok((sc, dw, hint)) => {
                 output.extend_from_slice(&dst[..dw]);
                 src_pos += sc;
-                if hint == 0 { break; }
+                if hint == 0 {
+                    break;
+                }
             }
             Err(e) => panic!("chunk decompress failed at pos {src_pos}: {e:?}"),
         }
@@ -2684,13 +2706,17 @@ fn get_cblock_boundary_straddle() {
     let mut src_pos = 0usize;
     while src_pos < frame.len() {
         fed_up_to = (fed_up_to + chunk_size).min(frame.len());
-        if fed_up_to <= src_pos { fed_up_to = frame.len(); }
+        if fed_up_to <= src_pos {
+            fed_up_to = frame.len();
+        }
         let mut dst = vec![0u8; 4096];
         match lz4f_decompress(&mut dctx, Some(&mut dst), &frame[src_pos..fed_up_to], None) {
             Ok((sc, dw, hint)) => {
                 output.extend_from_slice(&dst[..dw]);
                 src_pos += sc;
-                if hint == 0 { break; }
+                if hint == 0 {
+                    break;
+                }
             }
             Err(e) => panic!("5-byte chunk decompression failed at pos {src_pos}: {e:?}"),
         }
@@ -2755,13 +2781,17 @@ fn linked_blocks_7byte_chunks() {
     let mut src_pos = 0usize;
     while src_pos < frame.len() {
         fed_up_to = (fed_up_to + chunk_size).min(frame.len());
-        if fed_up_to <= src_pos { fed_up_to = frame.len(); }
+        if fed_up_to <= src_pos {
+            fed_up_to = frame.len();
+        }
         let mut dst = vec![0u8; 4096];
         match lz4f_decompress(&mut dctx, Some(&mut dst), &frame[src_pos..fed_up_to], None) {
             Ok((sc, dw, hint)) => {
                 output.extend_from_slice(&dst[..dw]);
                 src_pos += sc;
-                if hint == 0 { break; }
+                if hint == 0 {
+                    break;
+                }
             }
             Err(e) => panic!("7-byte chunk failed at pos {src_pos}: {e:?}"),
         }
@@ -2782,11 +2812,18 @@ fn decompress_using_dict_large_dict_exercises_truncation() {
     while src_pos < frame.len() {
         let mut dst = vec![0u8; 4096];
         let (sc, dw, hint) = lz4f_decompress_using_dict(
-            &mut dctx, Some(&mut dst), &frame[src_pos..], &large_dict, None,
-        ).unwrap();
+            &mut dctx,
+            Some(&mut dst),
+            &frame[src_pos..],
+            &large_dict,
+            None,
+        )
+        .unwrap();
         output.extend_from_slice(&dst[..dw]);
         src_pos += sc;
-        if hint == 0 { break; }
+        if hint == 0 {
+            break;
+        }
     }
     assert_eq!(output, data);
 }
@@ -2810,7 +2847,9 @@ fn decompress_one_byte_at_a_time(frame: &[u8]) -> Vec<u8> {
                 output.extend_from_slice(&dst[..dw]);
                 src_pos += sc;
                 if hint == 0 && sc == 0 && dw == 0 {
-                    if src_pos >= frame.len() { break; }
+                    if src_pos >= frame.len() {
+                        break;
+                    }
                     // Stuck — feed all remaining
                     let mut dst2 = vec![0u8; 65536];
                     match lz4f_decompress(&mut dctx, Some(&mut dst2), &frame[src_pos..], None) {
@@ -2823,7 +2862,9 @@ fn decompress_one_byte_at_a_time(frame: &[u8]) -> Vec<u8> {
                     break;
                 }
                 // hint==0 means frame complete; continue if more data remains (multi-frame)
-                if hint == 0 && src_pos >= frame.len() { break; }
+                if hint == 0 && src_pos >= frame.len() {
+                    break;
+                }
             }
             Err(e) => panic!("1-byte-at-a-time failed at pos {src_pos}: {e:?}"),
         }
@@ -2917,7 +2958,9 @@ fn frame_header_incomplete_tiny_initial_chunk() {
             lz4f_decompress(&mut dctx, Some(&mut dst2), &frame[pos..], None).unwrap();
         output.extend_from_slice(&dst2[..dw2]);
         pos += sc2;
-        if hint2 == 0 { break; }
+        if hint2 == 0 {
+            break;
+        }
     }
     assert_eq!(output, data);
 }
@@ -2955,7 +2998,9 @@ fn frame_header_with_content_size_split() {
             lz4f_decompress(&mut dctx, Some(&mut dst2), &frame[pos..], None).unwrap();
         output.extend_from_slice(&dst2[..dw2]);
         pos += sc2;
-        if hint2 == 0 { break; }
+        if hint2 == 0 {
+            break;
+        }
     }
     assert_eq!(output, data);
 }
@@ -2998,7 +3043,9 @@ fn content_checksum_split_exercises_store_suffix() {
             Ok((sc, dw, hint)) => {
                 output.extend_from_slice(&dst[..dw]);
                 pos += sc;
-                if hint == 0 { break; }
+                if hint == 0 {
+                    break;
+                }
             }
             Err(e) => panic!("StoreSuffix test failed at pos {pos}: {e:?}"),
         }
@@ -3032,7 +3079,9 @@ fn block_checksum_split_exercises_store_cblock() {
             Ok((sc, dw, hint)) => {
                 output.extend_from_slice(&dst[..dw]);
                 pos += sc;
-                if hint == 0 { break; }
+                if hint == 0 {
+                    break;
+                }
             }
             Err(e) => panic!("block checksum split at pos {pos}: {e:?}"),
         }
@@ -3067,7 +3116,9 @@ fn multiblock_block_checksum_2byte_chunks() {
             Ok((sc, dw, hint)) => {
                 output.extend_from_slice(&dst[..dw]);
                 pos += sc;
-                if hint == 0 { break; }
+                if hint == 0 {
+                    break;
+                }
             }
             Err(e) => panic!("multiblock block checksum 2-byte at pos {pos}: {e:?}"),
         }
@@ -3092,7 +3143,9 @@ fn skippable_frame_only_1byte_chunks() {
         match lz4f_decompress(&mut dctx, Some(&mut dst), &frame[pos..end], None) {
             Ok((sc, _dw, hint)) => {
                 pos += sc;
-                if hint == 0 { break; }
+                if hint == 0 {
+                    break;
+                }
             }
             Err(e) => panic!("skippable 1-byte at pos {pos}: {e:?}"),
         }
@@ -3168,7 +3221,9 @@ fn decode_header_invalid_checksum_error() {
 /// Unknown magic number → FrameTypeUnknown error.
 #[test]
 fn decode_header_unknown_magic_error() {
-    let frame = vec![0x12u8, 0x34, 0x56, 0x78, 0x60, 0x40, 0x82, 0x00, 0x00, 0x00, 0x00, 0x00];
+    let frame = vec![
+        0x12u8, 0x34, 0x56, 0x78, 0x60, 0x40, 0x82, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
     let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
     let mut dst = vec![0u8; 256];
     let result = lz4f_decompress(&mut dctx, Some(&mut dst), &frame, None);
@@ -3189,7 +3244,9 @@ fn corrupt_block_checksum_error() {
     let mut frame = compress_frame_with_prefs(&data, &prefs);
     // Corrupt a byte right after the header (in the block data/checksum area)
     let len = frame.len();
-    if len > 20 { frame[15] ^= 0xFF; }
+    if len > 20 {
+        frame[15] ^= 0xFF;
+    }
     let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
     let mut dst = vec![0u8; 4096];
     let result = lz4f_decompress(&mut dctx, Some(&mut dst), &frame, None);
@@ -3232,12 +3289,20 @@ fn frame_with_dict_id_decompresses() {
         ..Default::default()
     };
     let mut cctx = Lz4FCCtx::new(LZ4F_VERSION);
-    let clen = lz4f_compress_frame_using_cdict(&mut cctx, &mut compressed, &data, &*cdict as *const Lz4FCDict, Some(&prefs))
-        .expect("compress with cdict");
+    let clen = lz4f_compress_frame_using_cdict(
+        &mut cctx,
+        &mut compressed,
+        &data,
+        &*cdict as *const Lz4FCDict,
+        Some(&prefs),
+    )
+    .expect("compress with cdict");
     compressed.truncate(clen);
     let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
     let mut dst = vec![0u8; 4096];
-    let (_, dw, _) = lz4f_decompress_using_dict(&mut dctx, Some(&mut dst), &compressed, &dict_data, None).unwrap();
+    let (_, dw, _) =
+        lz4f_decompress_using_dict(&mut dctx, Some(&mut dst), &compressed, &dict_data, None)
+            .unwrap();
     assert_eq!(&dst[..dw], &data[..]);
 }
 
@@ -3266,7 +3331,9 @@ fn three_byte_chunks_all_features() {
             Ok((sc, dw, hint)) => {
                 output.extend_from_slice(&dst[..dw]);
                 src_pos += sc.max(1);
-                if hint == 0 && src_pos >= frame.len() { break; }
+                if hint == 0 && src_pos >= frame.len() {
+                    break;
+                }
             }
             Err(e) => panic!("3-byte chunk at pos {src_pos}: {e:?}"),
         }
@@ -3315,10 +3382,13 @@ fn store_suffix_one_byte_at_a_time() {
     let mut cpos = split;
     while cpos < frame.len() {
         let mut dst2 = vec![0u8; 256];
-        let (sc2, dw2, hint2) = lz4f_decompress(&mut dctx, Some(&mut dst2), &frame[cpos..cpos+1], None).unwrap();
+        let (sc2, dw2, hint2) =
+            lz4f_decompress(&mut dctx, Some(&mut dst2), &frame[cpos..cpos + 1], None).unwrap();
         output.extend_from_slice(&dst2[..dw2]);
         cpos += sc2.max(1);
-        if hint2 == 0 { break; }
+        if hint2 == 0 {
+            break;
+        }
     }
     assert_eq!(output, data);
 }
@@ -3333,14 +3403,18 @@ fn store_sframe_size_partial_feeding() {
     skip_frame.extend_from_slice(&payload);
     let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
     let mut dst = vec![0u8; 256];
-    let (sc1, _, hint1) = lz4f_decompress(&mut dctx, Some(&mut dst), &skip_frame[..4], None).unwrap();
+    let (sc1, _, hint1) =
+        lz4f_decompress(&mut dctx, Some(&mut dst), &skip_frame[..4], None).unwrap();
     assert!(hint1 > 0);
     let mut pos = sc1;
     while pos < skip_frame.len() {
         let end = (pos + 1).min(skip_frame.len());
-        let (sc, _, hint) = lz4f_decompress(&mut dctx, Some(&mut dst), &skip_frame[pos..end], None).unwrap();
+        let (sc, _, hint) =
+            lz4f_decompress(&mut dctx, Some(&mut dst), &skip_frame[pos..end], None).unwrap();
         pos += sc.max(1);
-        if hint == 0 { break; }
+        if hint == 0 {
+            break;
+        }
     }
     assert_eq!(pos, skip_frame.len());
 }
@@ -3390,9 +3464,7 @@ fn large_skippable_frame_then_real_frame() {
 /// then verifies decompression through the CopyDirect path.
 #[test]
 fn decompress_uncompressed_block_frame() {
-    use lz4::frame::compress::{
-        lz4f_compress_begin, lz4f_compress_end, lz4f_uncompressed_update,
-    };
+    use lz4::frame::compress::{lz4f_compress_begin, lz4f_compress_end, lz4f_uncompressed_update};
     let data = repetitive_bytes(2000);
     let mut cctx = Lz4FCCtx::new(LZ4F_VERSION);
     let bound = lz4f_compress_frame_bound(data.len(), None);
@@ -3422,9 +3494,7 @@ fn decompress_uncompressed_block_frame() {
 /// partial CopyDirect buffering and block size decrement.
 #[test]
 fn decompress_uncompressed_block_one_byte_at_a_time() {
-    use lz4::frame::compress::{
-        lz4f_compress_begin, lz4f_compress_end, lz4f_uncompressed_update,
-    };
+    use lz4::frame::compress::{lz4f_compress_begin, lz4f_compress_end, lz4f_uncompressed_update};
     let data = repetitive_bytes(500);
     let mut cctx = Lz4FCCtx::new(LZ4F_VERSION);
     let bound = lz4f_compress_frame_bound(data.len(), None);
@@ -3443,9 +3513,7 @@ fn decompress_uncompressed_block_one_byte_at_a_time() {
 /// Exercises CopyDirect + GetBlockChecksum in sequence.
 #[test]
 fn decompress_uncompressed_block_with_block_checksum() {
-    use lz4::frame::compress::{
-        lz4f_compress_begin, lz4f_compress_end, lz4f_uncompressed_update,
-    };
+    use lz4::frame::compress::{lz4f_compress_begin, lz4f_compress_end, lz4f_uncompressed_update};
     let prefs = Preferences {
         frame_info: FrameInfo {
             block_checksum_flag: BlockChecksum::Enabled,
@@ -3471,9 +3539,7 @@ fn decompress_uncompressed_block_with_block_checksum() {
 /// Decompress uncompressed blocks with content checksum and linked mode.
 #[test]
 fn decompress_uncompressed_block_content_checksum_linked() {
-    use lz4::frame::compress::{
-        lz4f_compress_begin, lz4f_compress_end, lz4f_uncompressed_update,
-    };
+    use lz4::frame::compress::{lz4f_compress_begin, lz4f_compress_end, lz4f_uncompressed_update};
     let prefs = Preferences {
         frame_info: FrameInfo {
             block_mode: BlockMode::Linked,
@@ -3682,10 +3748,10 @@ fn decode_header_reserved_flag_set() {
     // Build a minimal fake header: magic(4) + FLG(1) + BD(1) + HC(1) = 7 bytes
     let mut hdr = Vec::new();
     hdr.extend_from_slice(&0x184D2204u32.to_le_bytes()); // magic
-    // FLG: version=01, block_mode=1, no checksums, reserved bit 1 SET
+                                                         // FLG: version=01, block_mode=1, no checksums, reserved bit 1 SET
     hdr.push(0b01_1_0_0_0_1_0); // bit1 = reserved, set to 1
-    hdr.push(0b0_111_0000);     // BD: block_size_id=7, no reserved bits
-    // Header checksum will be wrong, but the reserved flag check comes first
+    hdr.push(0b0_111_0000); // BD: block_size_id=7, no reserved bits
+                            // Header checksum will be wrong, but the reserved flag check comes first
     hdr.push(0x00); // placeholder HC
     let result = lz4f_decompress(&mut dctx, Some(&mut dst), &hdr, None);
     assert!(result.is_err());
@@ -3710,15 +3776,18 @@ fn fragmented_content_checksum_suffix() {
     let mut output = Vec::new();
     let split1 = frame.len() - 2;
     let mut dst = vec![0u8; 65536];
-    let (sc1, dw1, hint1) = lz4f_decompress(&mut dctx, Some(&mut dst), &frame[..split1], None).unwrap();
+    let (sc1, dw1, hint1) =
+        lz4f_decompress(&mut dctx, Some(&mut dst), &frame[..split1], None).unwrap();
     output.extend_from_slice(&dst[..dw1]);
     let mut pos = sc1;
     if hint1 > 0 {
-        let (sc2, dw2, hint2) = lz4f_decompress(&mut dctx, Some(&mut dst), &frame[pos..pos+1], None).unwrap();
+        let (sc2, dw2, hint2) =
+            lz4f_decompress(&mut dctx, Some(&mut dst), &frame[pos..pos + 1], None).unwrap();
         output.extend_from_slice(&dst[..dw2]);
         pos += sc2;
         if hint2 > 0 {
-            let (sc3, dw3, _) = lz4f_decompress(&mut dctx, Some(&mut dst), &frame[pos..], None).unwrap();
+            let (sc3, dw3, _) =
+                lz4f_decompress(&mut dctx, Some(&mut dst), &frame[pos..], None).unwrap();
             output.extend_from_slice(&dst[..dw3]);
             pos += sc3;
         }
@@ -3754,7 +3823,9 @@ fn decompress_small_dst_triggers_flush_out() {
             Ok((sc, dw, hint)) => {
                 output.extend_from_slice(&dst[..dw]);
                 pos += sc;
-                if hint == 0 { break; }
+                if hint == 0 {
+                    break;
+                }
             }
             Err(e) => panic!("FlushOut test failed: {e:?}"),
         }
@@ -3816,7 +3887,9 @@ fn one_byte_at_a_time_skippable_frame_staging() {
                 output.extend_from_slice(&dst[..dw]);
                 pos += sc;
                 if hint == 0 && sc == 0 && dw == 0 {
-                    if pos >= combined.len() { break; }
+                    if pos >= combined.len() {
+                        break;
+                    }
                     let mut dst2 = vec![0u8; 65536];
                     match lz4f_decompress(&mut dctx, Some(&mut dst2), &combined[pos..], None) {
                         Ok((sc2, dw2, _)) => {
@@ -3827,7 +3900,9 @@ fn one_byte_at_a_time_skippable_frame_staging() {
                     }
                     break;
                 }
-                if hint == 0 && pos >= combined.len() { break; }
+                if hint == 0 && pos >= combined.len() {
+                    break;
+                }
             }
             Err(e) => panic!("1-byte skippable test at pos {pos}: {e:?}"),
         }
@@ -3864,10 +3939,13 @@ fn decode_header_with_content_size_and_dict_id() {
     // Feed remaining
     while pos < frame.len() {
         let chunk_end = (pos + 64).min(frame.len());
-        let (sc, dw, hint) = lz4f_decompress(&mut dctx, Some(&mut dst), &frame[pos..chunk_end], None).unwrap();
+        let (sc, dw, hint) =
+            lz4f_decompress(&mut dctx, Some(&mut dst), &frame[pos..chunk_end], None).unwrap();
         output.extend_from_slice(&dst[..dw]);
         pos += sc;
-        if hint == 0 { break; }
+        if hint == 0 {
+            break;
+        }
     }
     assert_eq!(output, data);
 }

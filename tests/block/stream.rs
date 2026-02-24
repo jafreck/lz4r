@@ -754,7 +754,10 @@ fn multi_block_non_contiguous_exercises_ext_dict() {
 
     let mut dst2 = make_dst(block2.len());
     let n2 = stream.compress_fast_continue(&block2, &mut dst2, 1);
-    assert!(n2 > 0, "second non-contiguous block (ext-dict) must succeed: {n2}");
+    assert!(
+        n2 > 0,
+        "second non-contiguous block (ext-dict) must succeed: {n2}"
+    );
 }
 
 #[test]

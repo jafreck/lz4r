@@ -901,7 +901,10 @@ fn display_info_skippable_then_lz4_frame() {
     let path = tmp.path().to_str().expect("path");
 
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "skippable + lz4 frame must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "skippable + lz4 frame must succeed: {result:?}"
+    );
 }
 
 /// Multiple skippable frames: exercises the skippable-frame loop.
@@ -919,7 +922,10 @@ fn display_info_multiple_skippable_frames() {
     let path = tmp.path().to_str().expect("path");
 
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "multiple skippable frames must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "multiple skippable frames must succeed: {result:?}"
+    );
 }
 
 /// Legacy frame only, with verbose display level.
@@ -938,7 +944,10 @@ fn display_info_legacy_only_verbose() {
     let path = tmp.path().to_str().expect("path");
 
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "legacy-only verbose must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "legacy-only verbose must succeed: {result:?}"
+    );
 }
 
 /// LZ4 frame with content checksum, displayed at verbose level
@@ -952,14 +961,17 @@ fn display_info_lz4_with_content_checksum_verbose() {
     DISPLAY_LEVEL.store(3, Ordering::SeqCst);
 
     let frame = build_lz4f_frame_with_content_checksum(
-        b"checksummed frame for verbose display, lots of text here for good measure"
+        b"checksummed frame for verbose display, lots of text here for good measure",
     );
     let mut tmp = NamedTempFile::new().expect("tempfile");
     tmp.write_all(&frame).expect("write");
     let path = tmp.path().to_str().expect("path");
 
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "checksum frame verbose must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "checksum frame verbose must succeed: {result:?}"
+    );
 }
 
 /// Multiple paths: exercises the multi-file loop in display_compressed_files_info.
@@ -983,19 +995,43 @@ fn display_info_multiple_files() {
 /// block_type_id with linked blocks
 #[test]
 fn block_type_id_linked_variants() {
-    assert_eq!(block_type_id(&BlockSizeId::Max64Kb, &BlockMode::Linked), "B4D");
-    assert_eq!(block_type_id(&BlockSizeId::Max256Kb, &BlockMode::Linked), "B5D");
-    assert_eq!(block_type_id(&BlockSizeId::Max1Mb, &BlockMode::Linked), "B6D");
-    assert_eq!(block_type_id(&BlockSizeId::Max4Mb, &BlockMode::Linked), "B7D");
+    assert_eq!(
+        block_type_id(&BlockSizeId::Max64Kb, &BlockMode::Linked),
+        "B4D"
+    );
+    assert_eq!(
+        block_type_id(&BlockSizeId::Max256Kb, &BlockMode::Linked),
+        "B5D"
+    );
+    assert_eq!(
+        block_type_id(&BlockSizeId::Max1Mb, &BlockMode::Linked),
+        "B6D"
+    );
+    assert_eq!(
+        block_type_id(&BlockSizeId::Max4Mb, &BlockMode::Linked),
+        "B7D"
+    );
 }
 
 /// block_type_id with independent blocks
 #[test]
 fn block_type_id_independent_variants() {
-    assert_eq!(block_type_id(&BlockSizeId::Max64Kb, &BlockMode::Independent), "B4I");
-    assert_eq!(block_type_id(&BlockSizeId::Max256Kb, &BlockMode::Independent), "B5I");
-    assert_eq!(block_type_id(&BlockSizeId::Max1Mb, &BlockMode::Independent), "B6I");
-    assert_eq!(block_type_id(&BlockSizeId::Max4Mb, &BlockMode::Independent), "B7I");
+    assert_eq!(
+        block_type_id(&BlockSizeId::Max64Kb, &BlockMode::Independent),
+        "B4I"
+    );
+    assert_eq!(
+        block_type_id(&BlockSizeId::Max256Kb, &BlockMode::Independent),
+        "B5I"
+    );
+    assert_eq!(
+        block_type_id(&BlockSizeId::Max1Mb, &BlockMode::Independent),
+        "B6I"
+    );
+    assert_eq!(
+        block_type_id(&BlockSizeId::Max4Mb, &BlockMode::Independent),
+        "B7I"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1029,8 +1065,8 @@ fn build_lz4f_frame_with_content_size(src: &[u8]) -> Vec<u8> {
 fn build_lz4f_frame_with_block_checksum(src: &[u8]) -> Vec<u8> {
     use lz4::frame::compress::lz4f_compress_frame;
     use lz4::frame::types::{
-        BlockChecksum as FrameBlockChecksum, BlockSizeId as FrameBlockSizeId,
-        ContentChecksum, FrameInfo, Preferences,
+        BlockChecksum as FrameBlockChecksum, BlockSizeId as FrameBlockSizeId, ContentChecksum,
+        FrameInfo, Preferences,
     };
     let prefs = Preferences {
         frame_info: FrameInfo {
@@ -1061,7 +1097,10 @@ fn display_info_frame_with_content_size_shows_ratio() {
     let path = tmp.path().to_str().expect("path");
 
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "frame with content_size must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "frame with content_size must succeed: {result:?}"
+    );
 }
 
 /// Frame with block checksum exercises skip_blocks_data with block_checksum=true (L197-209).
@@ -1074,7 +1113,10 @@ fn display_info_frame_with_block_checksum() {
     let path = tmp.path().to_str().expect("path");
 
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "frame with block checksum must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "frame with block checksum must succeed: {result:?}"
+    );
 }
 
 /// Verbose display (level 3) with content_size exercises verbose per-frame ratio output.
@@ -1094,7 +1136,10 @@ fn display_info_verbose_with_content_size_and_ratio() {
     let path = tmp.path().to_str().expect("path");
 
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "verbose with content_size must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "verbose with content_size must succeed: {result:?}"
+    );
 }
 
 /// Verbose display with block checksum enabled.
@@ -1114,7 +1159,10 @@ fn display_info_verbose_with_block_checksum() {
     let path = tmp.path().to_str().expect("path");
 
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "verbose block checksum must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "verbose block checksum must succeed: {result:?}"
+    );
 }
 
 /// Multi-frame file (two standard LZ4F frames concatenated) exercises
@@ -1154,7 +1202,10 @@ fn display_info_verbose_multi_frame() {
     let path = tmp.path().to_str().expect("path");
 
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "verbose multi-frame must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "verbose multi-frame must succeed: {result:?}"
+    );
 }
 
 /// Verbose skippable + LZ4 frame.
@@ -1177,7 +1228,10 @@ fn display_info_verbose_skippable_then_lz4() {
     let path = tmp.path().to_str().expect("path");
 
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "verbose skippable+lz4 must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "verbose skippable+lz4 must succeed: {result:?}"
+    );
 }
 
 /// Verbose legacy frame.
@@ -1191,25 +1245,27 @@ fn display_info_verbose_legacy_frame() {
     DISPLAY_LEVEL.store(3, Ordering::SeqCst);
 
     let legacy = build_legacy_frame(
-        b"legacy frame for verbose path exercises skip_legacy_blocks_data and display"
+        b"legacy frame for verbose path exercises skip_legacy_blocks_data and display",
     );
     let mut tmp = NamedTempFile::new().expect("tempfile");
     tmp.write_all(&legacy).expect("write");
     let path = tmp.path().to_str().expect("path");
 
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "verbose legacy frame must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "verbose legacy frame must succeed: {result:?}"
+    );
 }
 
 /// Non-verbose multiple files exercises the display summary loop with ratio.
 #[test]
 fn display_info_non_verbose_multiple_with_ratio() {
     let frame1 = build_lz4f_frame_with_content_size(
-        b"first file with content size for ratio display calculation"
+        b"first file with content size for ratio display calculation",
     );
-    let frame2 = build_lz4f_frame_with_content_size(
-        b"second file also with content size for ratio display"
-    );
+    let frame2 =
+        build_lz4f_frame_with_content_size(b"second file also with content size for ratio display");
 
     let mut tmp1 = NamedTempFile::new().expect("tempfile1");
     tmp1.write_all(&frame1).expect("write");
@@ -1220,7 +1276,10 @@ fn display_info_non_verbose_multiple_with_ratio() {
     let p2 = tmp2.path().to_str().expect("path2");
 
     let result = display_compressed_files_info(&[p1, p2]);
-    assert!(result.is_ok(), "non-verbose multi-file with ratio must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "non-verbose multi-file with ratio must succeed: {result:?}"
+    );
 }
 
 /// Frame without content_size exercises the "-" display branch for ratio.
@@ -1233,7 +1292,10 @@ fn display_info_frame_without_content_size() {
     let path = tmp.path().to_str().expect("path");
 
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "frame without content_size must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "frame without content_size must succeed: {result:?}"
+    );
 }
 
 /// LZ4F frame followed by legacy frame exercises eq_frame_types = false.
@@ -1274,7 +1336,10 @@ fn display_info_verbose_mixed_all_types() {
     let path = tmp.path().to_str().expect("path");
 
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "verbose mixed all types must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "verbose mixed all types must succeed: {result:?}"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1298,7 +1363,10 @@ fn display_info_real_compressed_file() {
 
     let path = dst.to_str().unwrap();
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "real compressed file info must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "real compressed file info must succeed: {result:?}"
+    );
 }
 
 /// display_compressed_files_info on a real file with verbose mode.
@@ -1322,7 +1390,10 @@ fn display_info_real_compressed_file_verbose() {
 
     let path = dst.to_str().unwrap();
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "verbose real file info must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "verbose real file info must succeed: {result:?}"
+    );
 }
 
 /// display_compressed_files_info with block_checksum enabled.
@@ -1342,7 +1413,10 @@ fn display_info_real_file_with_block_checksum() {
 
     let path = dst.to_str().unwrap();
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "block checksum file info must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "block checksum file info must succeed: {result:?}"
+    );
 }
 
 /// display_compressed_files_info with content_size_flag.
@@ -1362,7 +1436,10 @@ fn display_info_real_file_with_content_size() {
 
     let path = dst.to_str().unwrap();
     let result = display_compressed_files_info(&[path]);
-    assert!(result.is_ok(), "content size file info must succeed: {result:?}");
+    assert!(
+        result.is_ok(),
+        "content size file info must succeed: {result:?}"
+    );
 }
 
 /// display_compressed_files_info with content_size_flag in verbose mode.
@@ -1606,9 +1683,9 @@ fn display_info_multiple_files_p6() {
 /// ratio calculation in summary table, to_human/base_name via summary display.
 #[test]
 fn display_info_content_size_and_checksum() {
-    use lz4::frame::types::{ContentChecksum, Preferences, FrameInfo};
     use lz4::frame::compress::lz4f_compress_frame;
     use lz4::frame::header::lz4f_compress_frame_bound;
+    use lz4::frame::types::{ContentChecksum, FrameInfo, Preferences};
     use lz4::io::prefs::DISPLAY_LEVEL;
     use std::sync::atomic::Ordering;
     let old = DISPLAY_LEVEL.load(Ordering::SeqCst);
@@ -1642,9 +1719,9 @@ fn display_info_content_size_and_checksum() {
 /// block_checksum branch (L198-205).
 #[test]
 fn display_info_block_checksums() {
-    use lz4::frame::types::{BlockChecksum, Preferences, FrameInfo};
     use lz4::frame::compress::lz4f_compress_frame;
     use lz4::frame::header::lz4f_compress_frame_bound;
+    use lz4::frame::types::{BlockChecksum, FrameInfo, Preferences};
     use lz4::io::prefs::DISPLAY_LEVEL;
     use std::sync::atomic::Ordering;
     let old = DISPLAY_LEVEL.load(Ordering::SeqCst);
@@ -1730,4 +1807,3 @@ fn display_info_skippable_then_standard() {
     let result = display_compressed_files_info(&[p]);
     assert!(result.is_ok());
 }
-

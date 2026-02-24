@@ -609,10 +609,12 @@ fn lz4mid_compress_with_dict_ctx_compresses() {
 fn lz4mid_compress_with_long_literal_run() {
     // Create data with no matches to force long literal runs (>= RUN_MASK=15).
     // Random-ish data that won't match.
-    let src: Vec<u8> = (0..256).map(|i| {
-        let x = (i as u64).wrapping_mul(2654435761) >> 16;
-        x as u8
-    }).collect();
+    let src: Vec<u8> = (0..256)
+        .map(|i| {
+            let x = (i as u64).wrapping_mul(2654435761) >> 16;
+            x as u8
+        })
+        .collect();
     let mut dst = vec![0u8; 512];
     let mut src_size = src.len() as i32;
 

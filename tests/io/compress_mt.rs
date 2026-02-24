@@ -539,7 +539,8 @@ fn mt_linked_blocks_roundtrip() {
         dst_path.to_str().unwrap(),
         1,
         &prefs,
-    ).unwrap();
+    )
+    .unwrap();
     assert!(dst_path.exists());
     let compressed = std::fs::read(&dst_path).unwrap();
     assert!(starts_with_lz4_magic(&compressed));
@@ -567,7 +568,8 @@ fn mt_content_checksum_enabled() {
         dst_path.to_str().unwrap(),
         1,
         &prefs,
-    ).unwrap();
+    )
+    .unwrap();
     let c = std::fs::read(&dst_path).unwrap();
     assert!(starts_with_lz4_magic(&c));
     // With content checksum, frame ends with end_mark (4 bytes) + checksum (4 bytes)
@@ -595,7 +597,8 @@ fn mt_content_size_flag() {
         dst_path.to_str().unwrap(),
         1,
         &prefs,
-    ).unwrap();
+    )
+    .unwrap();
     let c = std::fs::read(&dst_path).unwrap();
     assert!(starts_with_lz4_magic(&c));
     // FLG byte at index 4, content_size flag is bit 3
@@ -621,7 +624,8 @@ fn mt_hc_level_roundtrip() {
         dst_path.to_str().unwrap(),
         9, // HC level
         &prefs,
-    ).unwrap();
+    )
+    .unwrap();
     let c = std::fs::read(&dst_path).unwrap();
     assert!(starts_with_lz4_magic(&c));
 }
@@ -645,7 +649,8 @@ fn mt_single_block_fast_path() {
         dst_path.to_str().unwrap(),
         1,
         &prefs,
-    ).unwrap();
+    )
+    .unwrap();
     let c = std::fs::read(&dst_path).unwrap();
     assert!(starts_with_lz4_magic(&c));
     assert_eq!(in_size, 100);

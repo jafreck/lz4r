@@ -426,4 +426,3 @@ fn open_dst_file_sparse_support() {
     let result = open_dst_file(path.to_str().unwrap(), &prefs);
     assert!(result.is_ok(), "open_dst_file with sparse must succeed");
 }
-

@@ -745,11 +745,7 @@ fn streaming_two_contiguous_blocks_prefix_mode() {
     ring[offset..offset + block2.len()].copy_from_slice(&block2);
 
     let mut dst2 = make_dst(block2.len());
-    let n2 = stream.compress_fast_continue(
-        &ring[offset..offset + block2.len()],
-        &mut dst2,
-        1,
-    );
+    let n2 = stream.compress_fast_continue(&ring[offset..offset + block2.len()], &mut dst2, 1);
     assert!(n2 > 0);
     // Second block should be smaller due to prefix matching
     assert!(n2 < n1, "prefix block should compress better: {n2} vs {n1}");
@@ -998,10 +994,15 @@ fn fast_reset_small_input_dictsmall_notlimited() {
     let mut dst1 = vec![0u8; bound1];
     let _ = unsafe {
         compress_fast_ext_state_fast_reset(
-            &mut state, src1.as_ptr(), src1.len() as i32,
-            dst1.as_mut_ptr(), dst1.len() as i32, 1,
+            &mut state,
+            src1.as_ptr(),
+            src1.len() as i32,
+            dst1.as_mut_ptr(),
+            dst1.len() as i32,
+            1,
         )
-    }.unwrap();
+    }
+    .unwrap();
 
     // Second: small input, full dst → NotLimited + DictSmall
     let src2: Vec<u8> = (0..300).map(|i| (i % 199) as u8).collect();
@@ -1009,10 +1010,15 @@ fn fast_reset_small_input_dictsmall_notlimited() {
     let mut dst2 = vec![0u8; bound2];
     let n2 = unsafe {
         compress_fast_ext_state_fast_reset(
-            &mut state, src2.as_ptr(), src2.len() as i32,
-            dst2.as_mut_ptr(), dst2.len() as i32, 1,
+            &mut state,
+            src2.as_ptr(),
+            src2.len() as i32,
+            dst2.as_mut_ptr(),
+            dst2.len() as i32,
+            1,
         )
-    }.unwrap();
+    }
+    .unwrap();
     assert!(n2 > 0);
     let mut dec = vec![0u8; src2.len()];
     let n = lz4::block::decompress_safe(&dst2[..n2], &mut dec).unwrap();
@@ -1028,10 +1034,15 @@ fn fast_reset_small_input_limited_dictsmall() {
     let mut dst1 = vec![0u8; bound1];
     let _ = unsafe {
         compress_fast_ext_state_fast_reset(
-            &mut state, src1.as_ptr(), src1.len() as i32,
-            dst1.as_mut_ptr(), dst1.len() as i32, 1,
+            &mut state,
+            src1.as_ptr(),
+            src1.len() as i32,
+            dst1.as_mut_ptr(),
+            dst1.len() as i32,
+            1,
         )
-    }.unwrap();
+    }
+    .unwrap();
 
     // Second: small input, undersized dst → LimitedOutput + DictSmall
     let src2: Vec<u8> = (0..300).map(|i| (i % 199) as u8).collect();
@@ -1040,8 +1051,12 @@ fn fast_reset_small_input_limited_dictsmall() {
     let mut dst2 = vec![0u8; dst_cap];
     let _ = unsafe {
         compress_fast_ext_state_fast_reset(
-            &mut state, src2.as_ptr(), src2.len() as i32,
-            dst2.as_mut_ptr(), dst2.len() as i32, 1,
+            &mut state,
+            src2.as_ptr(),
+            src2.len() as i32,
+            dst2.as_mut_ptr(),
+            dst2.len() as i32,
+            1,
         )
     };
     // Either succeeds or fails — both exercise the path
@@ -1057,8 +1072,12 @@ fn fast_reset_large_limited() {
     let mut dst = vec![0u8; dst_cap];
     let result = unsafe {
         compress_fast_ext_state_fast_reset(
-            &mut state, src.as_ptr(), src.len() as i32,
-            dst.as_mut_ptr(), dst.len() as i32, 1,
+            &mut state,
+            src.as_ptr(),
+            src.len() as i32,
+            dst.as_mut_ptr(),
+            dst.len() as i32,
+            1,
         )
     };
     assert!(result.is_ok());
