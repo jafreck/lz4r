@@ -1175,10 +1175,10 @@ fn compress_begin_block_size_default_overrides_to_max64kb() {
 /// lz4f_flush_impl when c_stage != 1 returns CompressionStateUninitialized (line 955).
 #[test]
 fn flush_before_begin_returns_compression_state_uninitialized() {
-    let mut cctx = Lz4FCCtx::new(LZ4F_VERSION);
+    let _cctx = Lz4FCCtx::new(LZ4F_VERSION);
     // Manually set tmp_in_size so flush is attempted but c_stage == 0
     // We can't easily set it, so let's just call lz4f_flush without begin
-    let mut dst = vec![0u8; 1024];
+    let dst = vec![0u8; 1024];
     // lz4f_flush calls lz4f_flush_impl internally; c_stage starts at 0
     // With tmp_in_size == 0, flush returns Ok(0) immediately (line 952)
     // To hit line 955 we need tmp_in_size > 0 and c_stage != 1

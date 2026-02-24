@@ -156,7 +156,7 @@ fn large_literal_exactly_runmask() {
     // match_length = 4 (MINMATCH), ml_remaining = 0 → token low nibble = 0
     // Output: token(1) + ext_byte(1) + 15 literals + offset(2) = 19 bytes
     let lit_len = 15usize;
-    let mut input = vec![0xBB_u8; lit_len + 32];
+    let input = vec![0xBB_u8; lit_len + 32];
     let mut output = make_output(128);
 
     unsafe {
@@ -207,7 +207,7 @@ fn large_literal_multi_extension_bytes() {
     // 100 < 255 → write 100
     // So extension bytes: [255, 255, 100], then 625 literal bytes
     let lit_len = 625usize;
-    let mut input = vec![0xCC_u8; lit_len + 64];
+    let input = vec![0xCC_u8; lit_len + 64];
     let mut output = make_output(lit_len + 64);
 
     unsafe {
@@ -258,7 +258,7 @@ fn large_match_exactly_mlmask_plus_minmatch() {
     // token low nibble = 0xF; extension: remaining = 15-15 = 0 → one byte 0x00
     // literal_length = 0
     // Output: token(1) + offset(2) + ext_byte(1) = 4 bytes
-    let mut input = vec![0xDD_u8; 64];
+    let input = vec![0xDD_u8; 64];
     let mut output = make_output(64);
 
     unsafe {
@@ -306,7 +306,7 @@ fn large_match_510_fast_path() {
     // 92 < 255 → write 92
     // Extension bytes: [255, 255, 92]
     let match_len = 4 + 15 + 602; // = 621
-    let mut input = vec![0xEE_u8; match_len + 64];
+    let input = vec![0xEE_u8; match_len + 64];
     let mut output = make_output(64);
 
     unsafe {
@@ -351,7 +351,7 @@ fn large_match_510_fast_path() {
 #[test]
 fn offset_large_little_endian() {
     // offset = 0x1234 = 4660  → LE bytes [0x34, 0x12]
-    let mut input = vec![0xFF_u8; 64];
+    let input = vec![0xFF_u8; 64];
     let mut output = make_output(64);
 
     unsafe {
@@ -385,7 +385,7 @@ fn offset_large_little_endian() {
 #[test]
 fn offset_max_65535() {
     // Maximum offset = 65535 = 0xFFFF → LE bytes [0xFF, 0xFF]
-    let mut input = vec![0x00_u8; 64];
+    let input = vec![0x00_u8; 64];
     let mut output = make_output(64);
 
     unsafe {
@@ -422,7 +422,7 @@ fn offset_max_65535() {
 fn ip_and_anchor_advance_by_match_length() {
     let match_length = 37i32;
     let literal_length = 5usize;
-    let mut input = vec![0x11_u8; literal_length + match_length as usize + 32];
+    let input = vec![0x11_u8; literal_length + match_length as usize + 32];
     let mut output = make_output(128);
 
     unsafe {
@@ -461,7 +461,7 @@ fn ip_and_anchor_advance_by_match_length() {
 fn limited_output_too_small_for_literals() {
     // Use a large literal length (300) so the needed bytes exceed our tiny output buffer.
     let lit_len = 300usize;
-    let mut input = vec![0x22_u8; lit_len + 64];
+    let input = vec![0x22_u8; lit_len + 64];
     // Give just 1 byte of output — definitely not enough
     let mut output = make_output(4);
 
@@ -500,7 +500,7 @@ fn limited_output_too_small_for_match_length() {
     // literal_length = 0, very large match → needs extension bytes for match
     // Give exactly enough for: token(1) + offset(2) but not the extension bytes
     let match_len = 4 + 15 + 600i32; // ml_remaining = 615 after -ML_MASK
-    let mut input = vec![0x33_u8; match_len as usize + 64];
+    let input = vec![0x33_u8; match_len as usize + 64];
     // Output only 3 bytes: token + offset; no room for extensions
     let mut output = make_output(3);
 
@@ -538,7 +538,7 @@ fn not_limited_skips_output_check() {
     // Same params that would fail under LimitedOutput (but we have real space here)
     let lit_len = 3usize;
     let match_len = 4i32;
-    let mut input = vec![0x44_u8; lit_len + 64];
+    let input = vec![0x44_u8; lit_len + 64];
     let mut output = make_output(64);
 
     unsafe {
@@ -576,7 +576,7 @@ fn token_nibbles_combined_correctly() {
     // token = (7 << 4) | 10 = 0x7A
     let lit_len = 7usize;
     let match_len = 14i32;
-    let mut input = vec![0x55_u8; lit_len + 64];
+    let input = vec![0x55_u8; lit_len + 64];
     let mut output = make_output(64);
 
     unsafe {

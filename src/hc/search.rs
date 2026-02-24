@@ -369,7 +369,7 @@ pub unsafe fn insert_and_get_wider_match(
                 const K_TRIGGER: i32 = 4;
                 let mut distance_to_next_match: u32 = 1;
                 let end = longest - MINMATCH as i32 + 1;
-                let mut step: i32 = 1;
+                let mut step: i32;
                 let mut accel: i32 = 1 << K_TRIGGER;
                 let mut pos: i32 = 0;
                 while pos < end {

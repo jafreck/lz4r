@@ -9,7 +9,6 @@
 use lz4::io::decompress_frame::decompress_lz4f;
 use lz4::io::decompress_resources::DecompressResources;
 use lz4::io::prefs::Prefs;
-use std::io::Write;
 
 // ────────────────────────────────────────────────────────────────────────────────
 // Helpers

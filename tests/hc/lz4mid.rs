@@ -251,9 +251,7 @@ fn lz4mid_compress_empty_input_returns_one_byte() {
 
     let mut ctx = make_compress_ctx(src.as_ptr());
     // For empty input, src pointer is never dereferenced, but end must be valid.
-    unsafe {
-        ctx.end = src.as_ptr();
-    }
+    ctx.end = src.as_ptr();
 
     let ret = unsafe {
         lz4mid_compress(
@@ -287,9 +285,7 @@ fn lz4mid_compress_negative_max_output_size_returns_zero() {
     let mut dst = vec![0u8; 32];
     let mut src_size = 1i32;
     let mut ctx = make_compress_ctx(src.as_ptr());
-    unsafe {
-        ctx.end = src.as_ptr();
-    }
+    ctx.end = src.as_ptr();
 
     let ret = unsafe {
         lz4mid_compress(
@@ -312,9 +308,7 @@ fn lz4mid_compress_oversized_src_returns_zero() {
     let mut dst = vec![0u8; 32];
     let mut src_size = 0x7F00_0000i32; // > 0x7E000000
     let mut ctx = make_compress_ctx(src.as_ptr());
-    unsafe {
-        ctx.end = src.as_ptr();
-    }
+    ctx.end = src.as_ptr();
 
     let ret = unsafe {
         lz4mid_compress(
@@ -338,9 +332,7 @@ fn lz4mid_compress_incompressible_small_input() {
     let mut src_size = src.len() as i32;
 
     let mut ctx = make_compress_ctx(src.as_ptr());
-    unsafe {
-        ctx.end = src.as_ptr();
-    }
+    ctx.end = src.as_ptr();
 
     let ret = unsafe {
         lz4mid_compress(
@@ -371,9 +363,7 @@ fn lz4mid_compress_compressible_data_smaller_than_input() {
     let mut src_size = src.len() as i32;
 
     let mut ctx = make_compress_ctx(src.as_ptr());
-    unsafe {
-        ctx.end = src.as_ptr();
-    }
+    ctx.end = src.as_ptr();
 
     let ret = unsafe {
         lz4mid_compress(
@@ -403,9 +393,7 @@ fn lz4mid_compress_limited_output_tiny_buffer_returns_zero() {
     let mut src_size = src.len() as i32;
 
     let mut ctx = make_compress_ctx(src.as_ptr());
-    unsafe {
-        ctx.end = src.as_ptr();
-    }
+    ctx.end = src.as_ptr();
 
     let ret = unsafe {
         lz4mid_compress(
@@ -431,9 +419,7 @@ fn lz4mid_compress_src_size_ptr_updated() {
     let mut src_size = original_size;
 
     let mut ctx = make_compress_ctx(src.as_ptr());
-    unsafe {
-        ctx.end = src.as_ptr();
-    }
+    ctx.end = src.as_ptr();
 
     let ret = unsafe {
         lz4mid_compress(
@@ -465,9 +451,7 @@ fn lz4mid_compress_not_limited_produces_valid_output() {
     let mut src_size = src.len() as i32;
 
     let mut ctx = make_compress_ctx(src.as_ptr());
-    unsafe {
-        ctx.end = src.as_ptr();
-    }
+    ctx.end = src.as_ptr();
 
     let ret = unsafe {
         lz4mid_compress(
@@ -500,9 +484,7 @@ fn lz4mid_compress_fill_output_partial_compression() {
     let mut src_size = src.len() as i32;
 
     let mut ctx = make_compress_ctx(src.as_ptr());
-    unsafe {
-        ctx.end = src.as_ptr();
-    }
+    ctx.end = src.as_ptr();
 
     let ret = unsafe {
         lz4mid_compress(
@@ -531,9 +513,7 @@ fn lz4mid_compress_fill_output_with_compressible_data() {
     let mut src_size = src.len() as i32;
 
     let mut ctx = make_compress_ctx(src.as_ptr());
-    unsafe {
-        ctx.end = src.as_ptr();
-    }
+    ctx.end = src.as_ptr();
 
     let ret = unsafe {
         lz4mid_compress(
@@ -619,9 +599,7 @@ fn lz4mid_compress_with_long_literal_run() {
     let mut src_size = src.len() as i32;
 
     let mut ctx = make_compress_ctx(src.as_ptr());
-    unsafe {
-        ctx.end = src.as_ptr();
-    }
+    ctx.end = src.as_ptr();
 
     let ret = unsafe {
         lz4mid_compress(
@@ -652,9 +630,7 @@ fn lz4mid_compress_limited_output_returns_zero() {
     let mut src_size = src.len() as i32;
 
     let mut ctx = make_compress_ctx(src.as_ptr());
-    unsafe {
-        ctx.end = src.as_ptr();
-    }
+    ctx.end = src.as_ptr();
 
     let ret = unsafe {
         lz4mid_compress(
@@ -692,10 +668,8 @@ fn lz4mid_compress_ext_dict_search() {
     let mut src_size = src.len() as i32;
 
     let mut ctx = make_compress_ctx(src.as_ptr());
-    unsafe {
-        ctx.end = src.as_ptr();
-        ctx.dict_ctx = &mut dict_ctx as *mut HcCCtxInternal;
-    }
+    ctx.end = src.as_ptr();
+    ctx.dict_ctx = &mut dict_ctx as *mut HcCCtxInternal;
 
     let ret = unsafe {
         lz4mid_compress(

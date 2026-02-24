@@ -443,6 +443,7 @@ unsafe fn dispatch_dict_search(
 /// - `src` must be readable for `*src_size_ptr` bytes.
 /// - `dst` must be writable for `max_output_size` bytes.
 /// - All pointer fields inside `ctx` must be valid for the duration of this call.
+#[allow(unused_assignments)]
 pub unsafe fn lz4mid_compress(
     ctx: &mut HcCCtxInternal,
     src: *const u8,

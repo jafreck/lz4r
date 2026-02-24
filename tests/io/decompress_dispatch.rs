@@ -15,7 +15,6 @@ use lz4::io::decompress_dispatch::{
 };
 use lz4::io::prefs::{Prefs, LEGACY_BLOCKSIZE};
 use std::fs;
-use std::io::Write;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers

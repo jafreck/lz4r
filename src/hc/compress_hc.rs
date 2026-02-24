@@ -82,6 +82,7 @@ enum SearchState {
 /// - `dest` must be valid for writes of `max_output_size` bytes.
 /// - `ctx` must have been initialised with `init_internal`.
 #[allow(clippy::too_many_arguments)]
+#[allow(unused_assignments)]
 pub unsafe fn compress_hash_chain(
     ctx: &mut HcCCtxInternal,
     source: *const u8,
@@ -599,7 +600,7 @@ pub struct Lz4HcOptimal {
 /// - `source` must be valid for reads of `*src_size_ptr` bytes.
 /// - `dst` must be valid for writes of `dst_capacity` bytes.
 /// - `ctx` must have been initialised with `init_internal`.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, unused_assignments)]
 pub unsafe fn compress_optimal(
     ctx: &mut HcCCtxInternal,
     source: *const u8,
