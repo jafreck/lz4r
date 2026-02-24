@@ -623,3 +623,20 @@ fn get_error_name_out_of_range_error_returns_unspecified() {
     let code = 50usize.wrapping_neg();
     assert_eq!(lz4f_get_error_name(code), "Unspecified error code");
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 5: CustomMem Debug — exercises L178–184 in frame/types.rs
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn custom_mem_debug_format() {
+    use lz4::frame::types::CustomMem;
+
+    let cm = CustomMem::default();
+    let s = format!("{:?}", cm);
+    // Should contain the struct name and field information
+    assert!(
+        s.contains("CustomMem"),
+        "Debug output should contain 'CustomMem': {s}"
+    );
+}

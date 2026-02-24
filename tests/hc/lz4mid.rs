@@ -487,3 +487,227 @@ fn lz4mid_compress_not_limited_produces_valid_output() {
     );
     assert!(ret <= dst.len() as i32);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// lz4mid_compress with FillOutput
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn lz4mid_compress_fill_output_partial_compression() {
+    // FillOutput: compresses as much as fits in a small output buffer.
+    let src = vec![0xABu8; 1024];
+    let mut dst = vec![0u8; 32]; // very small
+    let mut src_size = src.len() as i32;
+
+    let mut ctx = make_compress_ctx(src.as_ptr());
+    unsafe {
+        ctx.end = src.as_ptr();
+    }
+
+    let ret = unsafe {
+        lz4mid_compress(
+            &mut ctx,
+            src.as_ptr(),
+            dst.as_mut_ptr(),
+            &mut src_size,
+            dst.len() as i32,
+            LimitedOutputDirective::FillOutput,
+            DictCtxDirective::NoDictCtx,
+        )
+    };
+
+    // FillOutput may produce partial output or 0 depending on buffer size
+    if ret > 0 {
+        assert!(src_size <= 1024, "src_size_ptr must not exceed original");
+        assert!(ret <= dst.len() as i32);
+    }
+}
+
+#[test]
+fn lz4mid_compress_fill_output_with_compressible_data() {
+    // FillOutput with enough room for at least one match.
+    let src = vec![0xCCu8; 512];
+    let mut dst = vec![0u8; 64];
+    let mut src_size = src.len() as i32;
+
+    let mut ctx = make_compress_ctx(src.as_ptr());
+    unsafe {
+        ctx.end = src.as_ptr();
+    }
+
+    let ret = unsafe {
+        lz4mid_compress(
+            &mut ctx,
+            src.as_ptr(),
+            dst.as_mut_ptr(),
+            &mut src_size,
+            dst.len() as i32,
+            LimitedOutputDirective::FillOutput,
+            DictCtxDirective::NoDictCtx,
+        )
+    };
+
+    if ret > 0 {
+        assert!(src_size > 0 && src_size <= 512);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// lz4mid_compress with DictCtxDirective::UsingDictCtxHc
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn lz4mid_compress_with_dict_ctx_compresses() {
+    // Set up a dict context with matching data, then compress source that
+    // shares the same prefix pattern.
+    let dict_data: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+    let src: Vec<u8> = (0..2048).map(|i| (i % 251) as u8).collect();
+    let mut dst = vec![0u8; 4096];
+    let mut src_size = src.len() as i32;
+
+    // Prepare dictionary context
+    let mut dict_ctx = HcCCtxInternal::new();
+    unsafe {
+        init_internal(&mut dict_ctx, dict_data.as_ptr());
+        dict_ctx.end = dict_data.as_ptr().add(dict_data.len());
+        dict_ctx.compression_level = 1; // LZ4Mid strategy
+    }
+    // Fill hash tables for the dict
+    unsafe {
+        fill_htable(&mut dict_ctx, dict_data.as_ptr(), dict_data.len());
+    }
+
+    // Prepare compression context with dict
+    let mut ctx = HcCCtxInternal::new();
+    unsafe {
+        init_internal(&mut ctx, src.as_ptr());
+        ctx.end = src.as_ptr();
+        ctx.compression_level = 1;
+        ctx.dict_ctx = &dict_ctx as *const HcCCtxInternal;
+        // Set dict pointers so dict search can find entries
+        ctx.low_limit = 0;
+        ctx.dict_limit = dict_data.len() as u32;
+        ctx.prefix_start = src.as_ptr();
+    }
+
+    let ret = unsafe {
+        lz4mid_compress(
+            &mut ctx,
+            src.as_ptr(),
+            dst.as_mut_ptr(),
+            &mut src_size,
+            dst.len() as i32,
+            LimitedOutputDirective::NotLimited,
+            DictCtxDirective::UsingDictCtxHc,
+        )
+    };
+
+    assert!(ret > 0, "compression with dict context must succeed: {ret}");
+}
+
+#[test]
+fn lz4mid_compress_with_long_literal_run() {
+    // Create data with no matches to force long literal runs (>= RUN_MASK=15).
+    // Random-ish data that won't match.
+    let src: Vec<u8> = (0..256)
+        .map(|i| {
+            let x = (i as u64).wrapping_mul(2654435761) >> 16;
+            x as u8
+        })
+        .collect();
+    let mut dst = vec![0u8; 512];
+    let mut src_size = src.len() as i32;
+
+    let mut ctx = make_compress_ctx(src.as_ptr());
+    unsafe {
+        ctx.end = src.as_ptr();
+    }
+
+    let ret = unsafe {
+        lz4mid_compress(
+            &mut ctx,
+            src.as_ptr(),
+            dst.as_mut_ptr(),
+            &mut src_size,
+            dst.len() as i32,
+            LimitedOutputDirective::NotLimited,
+            DictCtxDirective::NoDictCtx,
+        )
+    };
+
+    assert!(ret > 0, "long literal run must produce output: {ret}");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Coverage-gap tests: LimitedOutput and ext-dict paths
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// LimitedOutput with insufficient space returns 0.
+/// Covers _lz4mid_last_literals LimitedOutput branch (return 0).
+#[test]
+fn lz4mid_compress_limited_output_returns_zero() {
+    let src: Vec<u8> = (0..1024).map(|i| (i % 251) as u8).collect();
+    let out_size = 16; // Way too small
+    let mut dst = vec![0u8; out_size];
+    let mut src_size = src.len() as i32;
+
+    let mut ctx = make_compress_ctx(src.as_ptr());
+    unsafe {
+        ctx.end = src.as_ptr();
+    }
+
+    let ret = unsafe {
+        lz4mid_compress(
+            &mut ctx,
+            src.as_ptr(),
+            dst.as_mut_ptr(),
+            &mut src_size,
+            out_size as i32,
+            LimitedOutputDirective::LimitedOutput,
+            DictCtxDirective::NoDictCtx,
+        )
+    };
+
+    assert_eq!(ret, 0, "LimitedOutput with tiny buffer should fail");
+}
+
+/// Ext-dict search: compress with a dict context to exercise L258-272 and L620-653.
+#[test]
+fn lz4mid_compress_ext_dict_search() {
+    // First, compress a block into an HC context to create a dict.
+    let dict_data: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+    let mut dict_ctx = make_compress_ctx(dict_data.as_ptr());
+    unsafe {
+        dict_ctx.end = dict_data.as_ptr().add(dict_data.len());
+    }
+
+    // Fill the dict context hash table
+    unsafe {
+        fill_htable(&mut dict_ctx, dict_data.as_ptr(), dict_data.len());
+    }
+
+    // Now compress input that shares patterns with the dict.
+    let src: Vec<u8> = (0..2048).map(|i| (i % 251) as u8).collect();
+    let mut dst = vec![0u8; 4096];
+    let mut src_size = src.len() as i32;
+
+    let mut ctx = make_compress_ctx(src.as_ptr());
+    unsafe {
+        ctx.end = src.as_ptr();
+        ctx.dict_ctx = &mut dict_ctx as *mut HcCCtxInternal;
+    }
+
+    let ret = unsafe {
+        lz4mid_compress(
+            &mut ctx,
+            src.as_ptr(),
+            dst.as_mut_ptr(),
+            &mut src_size,
+            dst.len() as i32,
+            LimitedOutputDirective::NotLimited,
+            DictCtxDirective::UsingDictCtxHc,
+        )
+    };
+
+    assert!(ret > 0, "ext-dict search should produce output: {ret}");
+}

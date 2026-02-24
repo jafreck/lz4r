@@ -734,3 +734,166 @@ fn compress_force_ext_dict_updates_dict_via_save_dict() {
         "save_dict after compress_force_ext_dict must return src.len()"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Multi-block streaming with non-contiguous blocks (ext-dict / WithPrefix64k)
+// Exercises: block/compress.rs DictDirective::UsingExtDict,
+//            block/compress.rs DictDirective::WithPrefix64k paths
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn multi_block_non_contiguous_exercises_ext_dict() {
+    // Two non-contiguous blocks: triggers set_external_dict path
+    let block1: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+    let block2: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+    let mut stream = Lz4Stream::new();
+
+    let mut dst1 = make_dst(block1.len());
+    let n1 = stream.compress_fast_continue(&block1, &mut dst1, 1);
+    assert!(n1 > 0, "first block must succeed");
+
+    let mut dst2 = make_dst(block2.len());
+    let n2 = stream.compress_fast_continue(&block2, &mut dst2, 1);
+    assert!(
+        n2 > 0,
+        "second non-contiguous block (ext-dict) must succeed: {n2}"
+    );
+}
+
+#[test]
+fn three_blocks_non_contiguous_streaming() {
+    let mut stream = Lz4Stream::new();
+
+    for i in 0..3 {
+        let block: Vec<u8> = (0..2048).map(|j| ((j + i * 100) % 251) as u8).collect();
+        let mut dst = make_dst(block.len());
+        let n = stream.compress_fast_continue(&block, &mut dst, 1);
+        assert!(n > 0, "block {i} must succeed: {n}");
+    }
+}
+
+#[test]
+fn streaming_with_load_dict_and_multi_block() {
+    let dict: Vec<u8> = (0..8192).map(|i| (i % 251) as u8).collect();
+    let mut stream = Lz4Stream::new();
+    stream.load_dict(&dict);
+
+    // First block shares prefix with dict - should get good compression
+    let block1: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+    let mut dst1 = make_dst(block1.len());
+    let n1 = stream.compress_fast_continue(&block1, &mut dst1, 1);
+    assert!(n1 > 0, "block1 after load_dict must succeed: {n1}");
+
+    // Second block (non-contiguous)
+    let block2: Vec<u8> = (0..4096).map(|i| ((i * 3 + 7) % 256) as u8).collect();
+    let mut dst2 = make_dst(block2.len());
+    let n2 = stream.compress_fast_continue(&block2, &mut dst2, 1);
+    assert!(n2 > 0, "block2 after load_dict must succeed: {n2}");
+}
+
+#[test]
+fn streaming_with_save_dict_between_blocks() {
+    let mut stream = Lz4Stream::new();
+
+    let block1: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+    let mut dst1 = make_dst(block1.len());
+    let n1 = stream.compress_fast_continue(&block1, &mut dst1, 1);
+    assert!(n1 > 0);
+
+    let mut save_buf = vec![0u8; 65536];
+    let saved = stream.save_dict(&mut save_buf);
+    assert!(saved > 0);
+
+    let block2: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+    let mut dst2 = make_dst(block2.len());
+    let n2 = stream.compress_fast_continue(&block2, &mut dst2, 1);
+    assert!(n2 > 0, "block after save_dict must succeed: {n2}");
+}
+
+#[test]
+fn streaming_with_attached_dictionary() {
+    let dict_data: Vec<u8> = (0..8192).map(|i| (i % 251) as u8).collect();
+
+    let mut dict_stream = Lz4Stream::new();
+    dict_stream.load_dict(&dict_data);
+
+    let mut working = Lz4Stream::new();
+    unsafe {
+        working.attach_dictionary(Some(&*dict_stream as *const Lz4Stream));
+    }
+
+    let src: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+    let mut dst = make_dst(src.len());
+    let n = working.compress_fast_continue(&src, &mut dst, 1);
+    assert!(n > 0, "compression with attached dict must succeed: {n}");
+}
+
+#[test]
+fn streaming_attached_dict_then_detach() {
+    let dict_data: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+
+    let mut dict_stream = Lz4Stream::new();
+    dict_stream.load_dict(&dict_data);
+
+    let mut working = Lz4Stream::new();
+    unsafe {
+        working.attach_dictionary(Some(&*dict_stream as *const Lz4Stream));
+    }
+
+    // Compress one block
+    let src: Vec<u8> = (0..2048).map(|i| (i % 251) as u8).collect();
+    let mut dst = make_dst(src.len());
+    let n1 = working.compress_fast_continue(&src, &mut dst, 1);
+    assert!(n1 > 0);
+
+    // Detach by passing None
+    unsafe {
+        working.attach_dictionary(None);
+    }
+
+    // Compress another block
+    let src2: Vec<u8> = (0..2048).map(|i| ((i * 7) % 256) as u8).collect();
+    let mut dst2 = make_dst(src2.len());
+    let n2 = working.compress_fast_continue(&src2, &mut dst2, 1);
+    assert!(n2 > 0, "compression after detach must succeed: {n2}");
+}
+
+#[test]
+fn compress_force_ext_dict_multi_block() {
+    let mut stream = Lz4Stream::new();
+
+    for i in 0..3 {
+        let block: Vec<u8> = (0..1024).map(|j| ((j + i * 50) % 251) as u8).collect();
+        let mut dst = make_dst(block.len());
+        let n = unsafe {
+            stream.compress_force_ext_dict(
+                block.as_ptr(),
+                dst.as_mut_ptr(),
+                block.len() as i32,
+                dst.len() as i32,
+            )
+        };
+        assert!(n > 0, "compress_force_ext_dict block {i} must succeed: {n}");
+    }
+}
+
+#[test]
+fn compress_fast_continue_with_acceleration() {
+    let src: Vec<u8> = (0..8192).map(|i| (i % 251) as u8).collect();
+    let mut stream = Lz4Stream::new();
+    let mut dst = make_dst(src.len());
+
+    // Higher acceleration values exercise different paths in compress_generic
+    let n = stream.compress_fast_continue(&src, &mut dst, 10);
+    assert!(n > 0, "high acceleration must succeed: {n}");
+}
+
+#[test]
+fn compress_fast_continue_small_incompressible_data() {
+    // Unique bytes - incompressible
+    let src: Vec<u8> = (0u8..200).collect();
+    let mut stream = Lz4Stream::new();
+    let mut dst = make_dst(src.len());
+    let n = stream.compress_fast_continue(&src, &mut dst, 1);
+    assert!(n > 0, "incompressible data must still produce output");
+}

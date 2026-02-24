@@ -672,3 +672,226 @@ fn prepare_table_large_input_forces_reset() {
     assert!(ctx.hash_table.iter().all(|&x| x == 0));
     assert_eq!(ctx.table_type, TableType::ClearedTable as u32);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// memcpy_using_offset — offsets 3, 5, 6, 7 (base fallback) and >= 8
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Helper: build a reference buffer that simulates overlapping byte-by-byte
+/// copy from `src` with stride `offset`, producing `len` output bytes.
+fn make_reference_overlap(src: &[u8], offset: usize, len: usize) -> Vec<u8> {
+    let mut out = src.to_vec();
+    out.resize(src.len() + len, 0);
+    let start = src.len();
+    for i in 0..len {
+        out[start + i] = out[start + i - offset];
+    }
+    out[start..start + len].to_vec()
+}
+
+#[test]
+fn memcpy_using_offset_offset_3() {
+    // Pattern: "abc" repeated with offset 3
+    let mut buf = vec![0u8; 256];
+    buf[0] = b'a';
+    buf[1] = b'b';
+    buf[2] = b'c';
+    let dst_start = 3usize;
+    let copy_len = 64usize;
+    let expected = make_reference_overlap(&buf[..3], 3, copy_len);
+    unsafe {
+        memcpy_using_offset(
+            buf.as_mut_ptr().add(dst_start),
+            buf.as_ptr(),
+            buf.as_mut_ptr().add(dst_start + copy_len),
+            3,
+        );
+    }
+    assert_eq!(&buf[dst_start..dst_start + copy_len], &expected[..copy_len]);
+}
+
+#[test]
+fn memcpy_using_offset_offset_5() {
+    let mut buf = vec![0u8; 256];
+    for i in 0..5 {
+        buf[i] = (i as u8 + 1) * 10;
+    }
+    let dst_start = 5usize;
+    let copy_len = 40usize;
+    let expected = make_reference_overlap(&buf[..5], 5, copy_len);
+    unsafe {
+        memcpy_using_offset(
+            buf.as_mut_ptr().add(dst_start),
+            buf.as_ptr(),
+            buf.as_mut_ptr().add(dst_start + copy_len),
+            5,
+        );
+    }
+    assert_eq!(&buf[dst_start..dst_start + copy_len], &expected[..copy_len]);
+}
+
+#[test]
+fn memcpy_using_offset_offset_6() {
+    let mut buf = vec![0u8; 256];
+    for i in 0..6 {
+        buf[i] = (i as u8 + 1) * 11;
+    }
+    let dst_start = 6usize;
+    let copy_len = 48usize;
+    let expected = make_reference_overlap(&buf[..6], 6, copy_len);
+    unsafe {
+        memcpy_using_offset(
+            buf.as_mut_ptr().add(dst_start),
+            buf.as_ptr(),
+            buf.as_mut_ptr().add(dst_start + copy_len),
+            6,
+        );
+    }
+    assert_eq!(&buf[dst_start..dst_start + copy_len], &expected[..copy_len]);
+}
+
+#[test]
+fn memcpy_using_offset_offset_7() {
+    let mut buf = vec![0u8; 256];
+    for i in 0..7 {
+        buf[i] = (i as u8 + 1) * 13;
+    }
+    let dst_start = 7usize;
+    let copy_len = 56usize;
+    let expected = make_reference_overlap(&buf[..7], 7, copy_len);
+    unsafe {
+        memcpy_using_offset(
+            buf.as_mut_ptr().add(dst_start),
+            buf.as_ptr(),
+            buf.as_mut_ptr().add(dst_start + copy_len),
+            7,
+        );
+    }
+    assert_eq!(&buf[dst_start..dst_start + copy_len], &expected[..copy_len]);
+}
+
+#[test]
+fn memcpy_using_offset_offset_8_fast_path() {
+    // offset >= 8 uses the simple non-overlapping copy path
+    let mut buf = vec![0u8; 256];
+    for i in 0..8 {
+        buf[i] = (i as u8 + 1) * 17;
+    }
+    let dst_start = 8usize;
+    let copy_len = 32usize;
+    let expected = make_reference_overlap(&buf[..8], 8, copy_len);
+    unsafe {
+        memcpy_using_offset(
+            buf.as_mut_ptr().add(dst_start),
+            buf.as_ptr(),
+            buf.as_mut_ptr().add(dst_start + copy_len),
+            8,
+        );
+    }
+    assert_eq!(&buf[dst_start..dst_start + copy_len], &expected[..copy_len]);
+}
+
+#[test]
+fn memcpy_using_offset_offset_16_large() {
+    let mut buf = vec![0u8; 512];
+    for i in 0..16 {
+        buf[i] = (i as u8) * 7;
+    }
+    let dst_start = 16usize;
+    let copy_len = 128usize;
+    let expected = make_reference_overlap(&buf[..16], 16, copy_len);
+    unsafe {
+        memcpy_using_offset(
+            buf.as_mut_ptr().add(dst_start),
+            buf.as_ptr(),
+            buf.as_mut_ptr().add(dst_start + copy_len),
+            16,
+        );
+    }
+    assert_eq!(&buf[dst_start..dst_start + copy_len], &expected[..copy_len]);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// prepare_table — ByU16 overflow and ByU32 > GB paths
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn prepare_table_byu16_overflow_forces_reset() {
+    let mut ctx = StreamStateInternal::new();
+    ctx.table_type = TableType::ByU16 as u32;
+    ctx.current_offset = 0xFFF0;
+    ctx.hash_table[0] = 0xBEEF;
+    // input_size such that current_offset + input_size >= 0xFFFF
+    unsafe {
+        prepare_table(&mut ctx as *mut _, 100, TableType::ByU16);
+    }
+    // Should have been reset
+    assert_eq!(ctx.hash_table[0], 0);
+    assert_eq!(ctx.table_type, TableType::ClearedTable as u32);
+    assert_eq!(ctx.current_offset, 0);
+}
+
+#[test]
+fn prepare_table_byu32_over_gb_forces_reset() {
+    let mut ctx = StreamStateInternal::new();
+    ctx.table_type = TableType::ByU32 as u32;
+    ctx.current_offset = GB as u32 + 1;
+    ctx.hash_table[0] = 0xCAFE;
+    unsafe {
+        prepare_table(&mut ctx as *mut _, 100, TableType::ByU32);
+    }
+    // Should have been reset
+    assert_eq!(ctx.hash_table[0], 0);
+    assert_eq!(ctx.table_type, TableType::ClearedTable as u32);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// count() — tail-byte matching path
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn count_exact_5_matching_bytes() {
+    // 5 matching bytes → triggers 4-byte tail check (matches), then 1-byte
+    let a = [1u8, 2, 3, 4, 5, 99, 99, 99];
+    let b = [1u8, 2, 3, 4, 5, 0, 0, 0];
+    let n = unsafe { count(a.as_ptr(), b.as_ptr(), a.as_ptr().add(8)) };
+    assert_eq!(n, 5);
+}
+
+#[test]
+fn count_exact_6_matching_bytes() {
+    let a = [1u8, 2, 3, 4, 5, 6, 99, 99];
+    let b = [1u8, 2, 3, 4, 5, 6, 0, 0];
+    let n = unsafe { count(a.as_ptr(), b.as_ptr(), a.as_ptr().add(8)) };
+    assert_eq!(n, 6);
+}
+
+#[test]
+fn count_exact_7_matching_bytes() {
+    let a = [1u8, 2, 3, 4, 5, 6, 7, 99];
+    let b = [1u8, 2, 3, 4, 5, 6, 7, 0];
+    let n = unsafe { count(a.as_ptr(), b.as_ptr(), a.as_ptr().add(8)) };
+    assert_eq!(n, 7);
+}
+
+#[test]
+fn count_13_matching_exercises_tail_after_word() {
+    // 13 bytes match = 8 (word) + 4 (u32 tail) + 1 (u8 tail)
+    let mut a = [0xABu8; 20];
+    let mut b = [0xABu8; 20];
+    a[13] = 0xFF;
+    b[13] = 0x00;
+    let n = unsafe { count(a.as_ptr(), b.as_ptr(), a.as_ptr().add(20)) };
+    assert_eq!(n, 13);
+}
+
+#[test]
+fn count_10_matching_exercises_word_plus_u16_tail() {
+    // 10 bytes = 8 (word) + 2 (u16 tail)
+    let mut a = [0xCDu8; 16];
+    let mut b = [0xCDu8; 16];
+    a[10] = 0xFF;
+    b[10] = 0x00;
+    let n = unsafe { count(a.as_ptr(), b.as_ptr(), a.as_ptr().add(16)) };
+    assert_eq!(n, 10);
+}

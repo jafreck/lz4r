@@ -252,3 +252,68 @@ fn all_zeros_round_trip() {
     assert_eq!(n as usize, original.len());
     assert_eq!(output, original);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 6: Dictionary-aware decompression path
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Dict-aware decompression: compress with dict, decompress with same dict.
+/// Exercises lines 148, 182, 184, 192 (feed_to_decompressor_dict) and
+/// lines 289, 298, 309, 314-317 (decompress_lz4f_st_dict).
+#[test]
+fn decompress_with_dictionary() {
+    // Create a dict file
+    let dict_dir = tempfile::tempdir().unwrap();
+    let dict_path = dict_dir.path().join("test.dict");
+    let dict_data: Vec<u8> = (0..8192).map(|i| (i % 251) as u8).collect();
+    std::fs::write(&dict_path, &dict_data).unwrap();
+
+    // Compress with the dict
+    let src_dir = tempfile::tempdir().unwrap();
+    let src_path = src_dir.path().join("dict_input.bin");
+    let dst_path = src_dir.path().join("dict_input.lz4");
+    let original: Vec<u8> = (0..5000).map(|i| (i % 251) as u8).collect();
+    std::fs::write(&src_path, &original).unwrap();
+
+    let mut compress_prefs = Prefs::default();
+    compress_prefs.use_dictionary = true;
+    compress_prefs.dictionary_filename = Some(dict_path.to_str().unwrap().to_string());
+    lz4::io::compress_frame::compress_filename(
+        src_path.to_str().unwrap(),
+        dst_path.to_str().unwrap(),
+        1,
+        &compress_prefs,
+    )
+    .expect("compress with dict must succeed");
+
+    // Decompress with the same dict
+    let frame = std::fs::read(&dst_path).unwrap();
+    let (_, body) = split_magic(&frame);
+    let mut src = body;
+
+    let mut decompress_prefs = Prefs::default();
+    decompress_prefs.use_dictionary = true;
+    decompress_prefs.dictionary_filename = Some(dict_path.to_str().unwrap().to_string());
+    let mut res = DecompressResources::from_prefs(&decompress_prefs).unwrap();
+    let mut output = Vec::new();
+
+    let n = decompress_lz4f(&mut src, &mut output, &decompress_prefs, &mut res).unwrap();
+    assert_eq!(n as usize, original.len());
+    assert_eq!(output, original);
+}
+
+/// Truncated frame → error (line 224).
+#[test]
+fn decompress_truncated_frame() {
+    let original = vec![b'X'; 1000];
+    let frame = compress_frame(&original);
+    let (_, body) = split_magic(&frame);
+    // Truncate: only give first 10 bytes of body
+    let truncated = &body[..10.min(body.len())];
+    let mut src = truncated;
+    let prefs = st_prefs();
+    let mut res = make_resources(&prefs);
+    let mut output = Vec::new();
+    let result = decompress_lz4f(&mut src, &mut output, &prefs, &mut res);
+    assert!(result.is_err(), "truncated frame should return error");
+}

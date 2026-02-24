@@ -14,6 +14,7 @@ use lz4::frame::compress::{
     lz4f_create_compression_context, lz4f_flush, lz4f_free_compression_context,
     lz4f_uncompressed_update, CompressOptions, LZ4F_MAGIC_NUMBER, LZ4F_VERSION,
 };
+use lz4::frame::decompress::{lz4f_decompress, lz4f_reset_decompression_context, Lz4FDCtx};
 use lz4::frame::header::lz4f_compress_frame_bound;
 use lz4::frame::types::{
     BlockChecksum, BlockMode, BlockSizeId, ContentChecksum, FrameInfo, Lz4FCCtx, Preferences,
@@ -1308,4 +1309,136 @@ fn uncompressed_update_dst_too_small_returns_error() {
         matches!(result, Err(Lz4FError::DstMaxSizeTooSmall)),
         "uncompressed update with tiny dst must fail with DstMaxSizeTooSmall: {result:?}"
     );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 5: Context re-init, linked-mode dict save, one-shot frame
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Reuse a compression context across different compression levels
+/// (Fast→HC→Fast) to exercise the context type switching at L558-567.
+#[test]
+fn context_reinit_level_switching() {
+    let mut cctx = Lz4FCCtx::new(LZ4F_VERSION);
+    let data = cycling_bytes(5000);
+    let bound = lz4f_compress_frame_bound(data.len(), None);
+    let mut dst = vec![0u8; bound + 1024];
+
+    // First: compress at level 1 (Fast)
+    let prefs1 = Preferences {
+        compression_level: 1,
+        ..Default::default()
+    };
+    let hdr1 = lz4f_compress_begin(&mut cctx, &mut dst, Some(&prefs1)).unwrap();
+    let blk1 = lz4f_compress_update(&mut cctx, &mut dst[hdr1..], &data, None).unwrap();
+    let end1 = lz4f_compress_end(&mut cctx, &mut dst[hdr1 + blk1..], None).unwrap();
+    let len1 = hdr1 + blk1 + end1;
+
+    // Verify decompresses
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut out = vec![0u8; data.len() + 1024];
+    let (_, dw, _) = lz4f_decompress(&mut dctx, Some(&mut out), &dst[..len1], None).unwrap();
+    assert_eq!(&out[..dw], &data[..]);
+
+    // Second: reuse same context at level 9 (HC)
+    let prefs9 = Preferences {
+        compression_level: 9,
+        ..Default::default()
+    };
+    let hdr2 = lz4f_compress_begin(&mut cctx, &mut dst, Some(&prefs9)).unwrap();
+    let blk2 = lz4f_compress_update(&mut cctx, &mut dst[hdr2..], &data, None).unwrap();
+    let end2 = lz4f_compress_end(&mut cctx, &mut dst[hdr2 + blk2..], None).unwrap();
+    let len2 = hdr2 + blk2 + end2;
+
+    lz4f_reset_decompression_context(&mut dctx);
+    let (_, dw2, _) = lz4f_decompress(&mut dctx, Some(&mut out), &dst[..len2], None).unwrap();
+    assert_eq!(&out[..dw2], &data[..]);
+
+    // Third: back to level 1 (Fast) — exercises re-init from HC back to Fast
+    let hdr3 = lz4f_compress_begin(&mut cctx, &mut dst, Some(&prefs1)).unwrap();
+    let blk3 = lz4f_compress_update(&mut cctx, &mut dst[hdr3..], &data, None).unwrap();
+    let end3 = lz4f_compress_end(&mut cctx, &mut dst[hdr3 + blk3..], None).unwrap();
+    let len3 = hdr3 + blk3 + end3;
+
+    lz4f_reset_decompression_context(&mut dctx);
+    let (_, dw3, _) = lz4f_decompress(&mut dctx, Some(&mut out), &dst[..len3], None).unwrap();
+    assert_eq!(&out[..dw3], &data[..]);
+}
+
+/// Linked-mode multi-block with non-stable-src exercises dict save path (L884-886).
+#[test]
+fn linked_blocks_non_stable_src_dict_save() {
+    let mut cctx = Lz4FCCtx::new(LZ4F_VERSION);
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_mode: BlockMode::Linked,
+            block_size_id: BlockSizeId::Max64Kb,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let bound = lz4f_compress_frame_bound(200_000, Some(&prefs));
+    let mut dst = vec![0u8; bound + 4096];
+
+    let hdr = lz4f_compress_begin(&mut cctx, &mut dst, Some(&prefs)).unwrap();
+    let mut written = hdr;
+
+    // Compress multiple blocks, each with a separate local buffer (non-stable-src)
+    let mut all_data = Vec::new();
+    for i in 0..5 {
+        let block: Vec<u8> = (0..14_000).map(|j| ((i * 1000 + j) % 251) as u8).collect();
+        let opts = CompressOptions {
+            stable_src: false,
+            ..Default::default()
+        };
+        let blk =
+            lz4f_compress_update(&mut cctx, &mut dst[written..], &block, Some(&opts)).unwrap();
+        written += blk;
+        all_data.extend_from_slice(&block);
+    }
+
+    let end = lz4f_compress_end(&mut cctx, &mut dst[written..], None).unwrap();
+    written += end;
+
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut out = vec![0u8; all_data.len() + 1024];
+    let (_, dw, _) = lz4f_decompress(&mut dctx, Some(&mut out), &dst[..written], None).unwrap();
+    assert_eq!(&out[..dw], &all_data[..]);
+}
+
+/// HC-level linked-block multi-block compression exercises HC linked path.
+#[test]
+fn hc_linked_blocks_multiblock() {
+    let mut cctx = Lz4FCCtx::new(LZ4F_VERSION);
+    let prefs = Preferences {
+        frame_info: FrameInfo {
+            block_mode: BlockMode::Linked,
+            block_size_id: BlockSizeId::Max64Kb,
+            ..Default::default()
+        },
+        compression_level: 9,
+        ..Default::default()
+    };
+
+    let bound = lz4f_compress_frame_bound(200_000, Some(&prefs));
+    let mut dst = vec![0u8; bound + 4096];
+
+    let hdr = lz4f_compress_begin(&mut cctx, &mut dst, Some(&prefs)).unwrap();
+    let mut written = hdr;
+
+    let all_data: Vec<u8> = (0..100_000).map(|i| (i % 251) as u8).collect();
+    // Two blocks
+    for chunk in all_data.chunks(50_000) {
+        let blk = lz4f_compress_update(&mut cctx, &mut dst[written..], chunk, None).unwrap();
+        written += blk;
+    }
+
+    let end = lz4f_compress_end(&mut cctx, &mut dst[written..], None).unwrap();
+    written += end;
+
+    let mut dctx = Lz4FDCtx::new(LZ4F_VERSION);
+    let mut out = vec![0u8; all_data.len() + 1024];
+    let (_, dw, _) = lz4f_decompress(&mut dctx, Some(&mut out), &dst[..written], None).unwrap();
+    assert_eq!(&out[..dw], &all_data[..]);
 }

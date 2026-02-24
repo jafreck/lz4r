@@ -6,5 +6,7 @@ mod compress;
 mod decompress;
 #[path = "frame/header.rs"]
 mod header;
+#[path = "frame/oneshot.rs"]
+mod oneshot;
 #[path = "frame/types.rs"]
 mod types;
